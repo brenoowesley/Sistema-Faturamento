@@ -310,7 +310,7 @@ export default function FiscalProcessingPage() {
 
         setIsDispatching(true);
         try {
-            const response = await fetch("/api/documentos/disparar-pubsub", {
+            const response = await fetch("/api/documentos/disparar-legado", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ loteId })
@@ -521,7 +521,7 @@ export default function FiscalProcessingPage() {
                                     <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
                                 ) : (
                                     <>
-                                        Disparar Geração (Google Cloud)
+                                        Preencher Planilha e Disparar Robôs (Legado)
                                         <ArrowRight size={18} />
                                     </>
                                 )}
