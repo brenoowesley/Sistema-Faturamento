@@ -1,0 +1,448 @@
+"use client";
+
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { useParams, useRouter } from "next/navigation";
+import {
+    ChevronLeft,
+    Search,
+    Info,
+    CheckCircle2,
+    XCircle,
+    ArrowRight,
+    Building2,
+    DollarSign,
+    Calculator,
+    AlertCircle,
+    FileText,
+    Receipt
+} from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+
+/* ================================================================
+   TYPES
+   ================================================================ */
+
+interface Lote {
+    id: string;
+    data_competencia: string;
+    data_inicio_ciclo: string;
+    data_fim_ciclo: string;
+    status: string;
+}
+
+interface AjusteItem {
+    id: string;
+    tipo: "ACRESCIMO" | "DESCONTO" | "IRRF";
+    valor: number;
+    motivo: string;
+    cliente_id: string;
+}
+
+interface LojaConsolidada {
+    id: string;
+    razao_social: string;
+    nome_fantasia: string | null;
+    nome_conta_azul: string | null;
+    cnpj: string;
+    valorBase: number;
+    acrescimos: number;
+    descontos: number;
+    ajustesDetalhes: AjusteItem[];
+    active: boolean;
+}
+
+/* ================================================================
+   UTILS
+   ================================================================ */
+
+const fmtCurrency = (val: number) =>
+    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(val);
+
+const fmtDate = (dateStr: string) => {
+    if (!dateStr) return "-";
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("pt-BR");
+};
+
+/* ================================================================
+   PAGE COMPONENT
+   ================================================================ */
+
+export default function LoteFechamentoPage() {
+    const params = useParams();
+    const router = useRouter();
+    const loteId = params.id as string;
+    const supabase = createClient();
+
+    // State
+    const [lote, setLote] = useState<Lote | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [lojas, setLojas] = useState<LojaConsolidada[]>([]);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [isClosing, setIsClosing] = useState(false);
+
+    // Initial Data Fetch
+    const fetchData = useCallback(async () => {
+        setLoading(true);
+        try {
+            // 1. Lote Details
+            const { data: loteData, error: loteErr } = await supabase
+                .from("faturamentos_lote")
+                .select("*")
+                .eq("id", loteId)
+                .single();
+
+            if (loteErr) throw loteErr;
+            setLote(loteData);
+
+            // 2. Fetch Validated Appointments
+            const { data: agendamentos, error: agendErr } = await supabase
+                .from("agendamentos_brutos")
+                .select("loja_id, valor_iwof, clientes(*)")
+                .eq("lote_id", loteId)
+                .eq("status_validacao", "VALIDADO");
+
+            if (agendErr) throw agendErr;
+
+            // 3. Get unique store IDs involved
+            const storeIds = Array.from(new Set(agendamentos.map(a => a.loja_id)));
+
+            // 4. Fetch Pending Adjustments for these stores
+            const { data: ajustes, error: ajErr } = await supabase
+                .from("ajustes_faturamento")
+                .select("*")
+                .in("cliente_id", storeIds)
+                .eq("status_aplicacao", false);
+
+            if (ajErr) throw ajErr;
+
+            // 5. Group and Consolidate
+            const consolidatedMap = new Map<string, LojaConsolidada>();
+
+            agendamentos.forEach(a => {
+                const client = a.clientes as any;
+                if (!consolidatedMap.has(a.loja_id)) {
+                    consolidatedMap.set(a.loja_id, {
+                        id: a.loja_id,
+                        razao_social: client.razao_social,
+                        nome_fantasia: client.nome_fantasia,
+                        nome_conta_azul: client.nome_conta_azul,
+                        cnpj: client.cnpj,
+                        valorBase: 0,
+                        acrescimos: 0,
+                        descontos: 0,
+                        ajustesDetalhes: [],
+                        active: true
+                    });
+                }
+                const store = consolidatedMap.get(a.loja_id)!;
+                store.valorBase += Number(a.valor_iwof);
+            });
+
+            ajustes.forEach(aj => {
+                const store = consolidatedMap.get(aj.cliente_id);
+                if (store) {
+                    if (aj.tipo === "ACRESCIMO") store.acrescimos += Number(aj.valor);
+                    if (aj.tipo === "DESCONTO") store.descontos += Number(aj.valor);
+                    store.ajustesDetalhes.push({
+                        id: aj.id,
+                        tipo: aj.tipo,
+                        valor: aj.valor,
+                        motivo: aj.motivo,
+                        cliente_id: aj.cliente_id
+                    });
+                }
+            });
+
+            setLojas(Array.from(consolidatedMap.values()));
+
+        } catch (err) {
+            console.error("Error fetching data:", err);
+            alert("Erro ao carregar dados do lote.");
+        } finally {
+            setLoading(false);
+        }
+    }, [loteId, supabase]);
+
+    useEffect(() => {
+        fetchData();
+    }, [fetchData]);
+
+    // Financial calculations
+    const filteredLojas = useMemo(() => {
+        return lojas.filter(l =>
+            l.razao_social.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            l.nome_fantasia?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            l.cnpj.includes(searchTerm)
+        );
+    }, [lojas, searchTerm]);
+
+    const totals = useMemo(() => {
+        const activeLojas = lojas.filter(l => l.active);
+        const boleto = activeLojas.reduce((acc, curr) => acc + (curr.valorBase + curr.acrescimos) - curr.descontos, 0);
+        return {
+            boleto,
+            nf: boleto * 0.115,
+            nc: boleto * 0.885
+        };
+    }, [lojas]);
+
+    // Actions
+    const handleToggleLoja = (id: string) => {
+        setLojas(prev => prev.map(l => l.id === id ? { ...l, active: !l.active } : l));
+    };
+
+    const handleFecharLote = async () => {
+        if (!confirm("Deseja realmente fechar este lote? Esta ação marcará os ajustes como aplicados e avançará para o fiscal.")) return;
+
+        setIsClosing(true);
+        try {
+            // 1. Get all adjustments ids from active stores
+            const activeLojas = lojas.filter(l => l.active);
+            const adjustmentIds = activeLojas.flatMap(l => l.ajustesDetalhes.map(aj => aj.id));
+
+            // 2. Mark adjustments as applied
+            if (adjustmentIds.length > 0) {
+                const { error: ajErr } = await supabase
+                    .from("ajustes_faturamento")
+                    .update({
+                        status_aplicacao: true,
+                        data_aplicacao: new Date().toISOString().split("T")[0],
+                        lote_aplicado_id: loteId
+                    })
+                    .in("id", adjustmentIds);
+
+                if (ajErr) throw ajErr;
+            }
+
+            // 3. Update Lote status
+            const { error: loteErr } = await supabase
+                .from("faturamentos_lote")
+                .update({ status: "AGUARDANDO_XML" })
+                .eq("id", loteId);
+
+            if (loteErr) throw loteErr;
+
+            alert("Lote fechado com sucesso!");
+            router.push(`/faturamento/lote/fiscal/${loteId}`); // Assume this is the next step
+
+        } catch (err) {
+            console.error("Error closing batch:", err);
+            alert("Erro ao fechar lote.");
+        } finally {
+            setIsClosing(false);
+        }
+    };
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-[var(--bg-main)] flex items-center justify-center">
+                <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-[var(--primary)]"></div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="min-h-screen bg-[var(--bg-main)] pb-32">
+            {/* Header Toolbar */}
+            <div className="sticky top-0 z-30 bg-[var(--bg-main)]/80 backdrop-blur-md border-b border-[var(--border)] p-4 shadow-xl">
+                <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+                    <div className="flex items-center gap-4">
+                        <button onClick={() => router.back()} className="p-2 hover:bg-[var(--bg-card)] rounded-full transition-colors text-[var(--fg-dim)]">
+                            <ChevronLeft size={24} />
+                        </button>
+                        <div>
+                            <h1 className="text-xl font-black text-white uppercase tracking-tighter flex items-center gap-2">
+                                <Calculator className="text-[var(--primary)]" size={24} />
+                                Fechamento Financeiro
+                            </h1>
+                            <p className="text-[var(--fg-dim)] text-xs flex items-center gap-2">
+                                Lote: <span className="text-white font-mono">{loteId.slice(0, 8)}...</span>
+                                <span className="mx-1 opacity-20">|</span>
+                                Competência: <span className="text-white font-bold">{lote ? fmtDate(lote.data_competencia) : "-"}</span>
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="relative w-full md:w-96">
+                        <Search className="absolute left-3 top-2.5 text-[var(--fg-dim)]" size={18} />
+                        <input
+                            type="text"
+                            placeholder="Buscar loja ou CNPJ..."
+                            className="w-full bg-[var(--bg-card)] border border-[var(--border)] text-white pl-10 pr-4 py-2 rounded-xl text-sm focus:border-[var(--primary)] outline-none transition-all shadow-inner"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                </div>
+            </div>
+
+            <main className="max-w-7xl mx-auto p-6 space-y-6">
+
+                {/* Main calculation Table */}
+                <div className="bg-[var(--bg-card)] rounded-3xl border border-[var(--border)] shadow-2xl overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                            <thead>
+                                <tr className="bg-[var(--bg-main)]/50 text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest border-b border-[var(--border)]">
+                                    <th className="p-4 w-16 text-center">Ativo</th>
+                                    <th className="p-4">Cliente / Loja</th>
+                                    <th className="p-4 text-right">Valor Base</th>
+                                    <th className="p-4 text-right">Acréscimos</th>
+                                    <th className="p-4 text-right">Descontos</th>
+                                    <th className="p-4 text-right text-white">Boleto Final</th>
+                                    <th className="p-4 text-right text-[var(--primary)]">NF (11,5%)</th>
+                                    <th className="p-4 text-right text-emerald-500">NC (88,5%)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filteredLojas.map(loja => {
+                                    const boletoLoja = (loja.valorBase + loja.acrescimos) - loja.descontos;
+                                    return (
+                                        <tr
+                                            key={loja.id}
+                                            className={`border-b border-[var(--border)]/50 transition-all duration-300 ${!loja.active ? 'opacity-40 grayscale pointer-events-none select-none bg-black/20' : 'hover:bg-white/[0.02]'}`}
+                                        >
+                                            <td className="p-4 text-center">
+                                                <div
+                                                    onClick={(e) => { e.stopPropagation(); handleToggleLoja(loja.id); }}
+                                                    className={`w-12 h-6 rounded-full p-1 cursor-pointer transition-all duration-300 relative pointer-events-auto ${loja.active ? 'bg-[var(--primary)]' : 'bg-zinc-700'}`}
+                                                >
+                                                    <div className={`w-4 h-4 bg-white rounded-full transition-all duration-300 ${loja.active ? 'translate-x-6' : 'translate-x-0'}`}></div>
+                                                </div>
+                                            </td>
+                                            <td className="p-4">
+                                                <div className="flex flex-col">
+                                                    <span className="text-white font-bold text-sm tracking-tight">{loja.nome_conta_azul || loja.nome_fantasia || loja.razao_social}</span>
+                                                    <span className="text-[10px] text-[var(--fg-dim)] font-mono">{loja.cnpj}</span>
+                                                </div>
+                                            </td>
+                                            <td className="p-4 text-right text-sm font-medium text-white/70">{fmtCurrency(loja.valorBase)}</td>
+
+                                            {/* ACRESCIMOS WITH TOOLTIP */}
+                                            <td className="p-4 text-right text-sm font-bold text-[var(--primary)] group relative">
+                                                <div className="flex items-center justify-end gap-1">
+                                                    {loja.acrescimos > 0 && <Info size={12} className="opacity-40 group-hover:opacity-100 transition-opacity" />}
+                                                    {fmtCurrency(loja.acrescimos)}
+                                                </div>
+                                                {loja.ajustesDetalhes.filter(aj => aj.tipo === "ACRESCIMO").length > 0 && (
+                                                    <div className="invisible group-hover:visible absolute z-50 bottom-full right-0 mb-2 w-64 p-3 bg-zinc-900 border border-[var(--border)] rounded-xl shadow-2xl animate-in fade-in slide-in-from-bottom-2">
+                                                        <p className="text-[8px] uppercase font-black text-[var(--primary)] mb-2 tracking-tighter">Detalhes dos Acréscimos</p>
+                                                        <div className="space-y-2 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
+                                                            {loja.ajustesDetalhes.filter(aj => aj.tipo === "ACRESCIMO").map(aj => (
+                                                                <div key={aj.id} className="border-b border-white/5 pb-1 last:border-0">
+                                                                    <div className="flex justify-between items-start">
+                                                                        <span className="text-[10px] text-white leading-tight">{aj.motivo}</span>
+                                                                        <span className="text-[10px] font-bold text-[var(--primary)] ml-2">{fmtCurrency(aj.valor)}</span>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </td>
+
+                                            {/* DESCONTOS WITH TOOLTIP */}
+                                            <td className="p-4 text-right text-sm font-bold text-amber-500 group relative">
+                                                <div className="flex items-center justify-end gap-1">
+                                                    {loja.descontos > 0 && <Info size={12} className="opacity-40 group-hover:opacity-100 transition-opacity" />}
+                                                    {fmtCurrency(loja.descontos)}
+                                                </div>
+                                                {loja.ajustesDetalhes.filter(aj => aj.tipo === "DESCONTO").length > 0 && (
+                                                    <div className="invisible group-hover:visible absolute z-50 bottom-full right-0 mb-2 w-64 p-3 bg-zinc-900 border border-[var(--border)] rounded-xl shadow-2xl animate-in fade-in slide-in-from-bottom-2">
+                                                        <p className="text-[8px] uppercase font-black text-amber-500 mb-2 tracking-tighter">Detalhes dos Descontos</p>
+                                                        <div className="space-y-2 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
+                                                            {loja.ajustesDetalhes.filter(aj => aj.tipo === "DESCONTO").map(aj => (
+                                                                <div key={aj.id} className="border-b border-white/5 pb-1 last:border-0">
+                                                                    <div className="flex justify-between items-start">
+                                                                        <span className="text-[10px] text-white leading-tight">{aj.motivo}</span>
+                                                                        <span className="text-[10px] font-bold text-amber-500 ml-2">{fmtCurrency(aj.valor)}</span>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </td>
+
+                                            <td className="p-4 text-right text-lg font-black text-white">{fmtCurrency(boletoLoja)}</td>
+                                            <td className="p-4 text-right text-sm font-bold text-[var(--primary)]">{fmtCurrency(boletoLoja * 0.115)}</td>
+                                            <td className="p-4 text-right text-sm font-bold text-emerald-500">{fmtCurrency(boletoLoja * 0.885)}</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                    {filteredLojas.length === 0 && (
+                        <div className="flex flex-col items-center justify-center py-20 bg-white/5">
+                            <AlertCircle size={48} className="text-[var(--fg-dim)] opacity-20 mb-4" />
+                            <p className="text-[var(--fg-dim)] font-medium">Nenhuma loja encontrada neste lote ou filtro.</p>
+                        </div>
+                    )}
+                </div>
+            </main>
+
+            {/* FIXED FOOTER TOTALS */}
+            <footer className="fixed bottom-0 left-0 right-0 bg-[#0a0a0b]/90 backdrop-blur-2xl border-t border-[var(--border)] p-6 z-40 shadow-[0_-20px_50px_rgba(0,0,0,0.5)]">
+                <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
+
+                    {/* Totals Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 w-full md:w-auto">
+                        <div className="flex flex-col">
+                            <span className="text-[10px] uppercase font-black text-[var(--fg-dim)] tracking-widest flex items-center gap-2">
+                                <Receipt size={12} className="text-white" /> Total Boletos
+                            </span>
+                            <span className="text-2xl font-black text-white">{fmtCurrency(totals.boleto)}</span>
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-[10px] uppercase font-black text-[var(--fg-dim)] tracking-widest flex items-center gap-2">
+                                <FileText size={12} className="text-[var(--primary)]" /> Total NF (11,5%)
+                            </span>
+                            <span className="text-2xl font-black text-[var(--primary)]">{fmtCurrency(totals.nf)}</span>
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-[10px] uppercase font-black text-[var(--fg-dim)] tracking-widest flex items-center gap-2">
+                                <FileText size={12} className="text-emerald-500" /> Total NC (88,5%)
+                            </span>
+                            <span className="text-2xl font-black text-emerald-500">{fmtCurrency(totals.nc)}</span>
+                        </div>
+                    </div>
+
+                    {/* Action Button */}
+                    <button
+                        disabled={isClosing || totals.boleto === 0}
+                        onClick={handleFecharLote}
+                        className="group relative w-full md:w-auto overflow-hidden bg-[var(--primary)] text-black px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center justify-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed hover:shadow-[0_0_30px_rgba(37,99,235,0.4)]"
+                    >
+                        {isClosing ? (
+                            <div className="w-5 h-5 border-2 border-black/20 border-t-black rounded-full animate-spin"></div>
+                        ) : (
+                            <>
+                                Fechar Lote e Avançar para Fiscal
+                                <ArrowRight className="transition-transform group-hover:translate-x-1" size={18} />
+                            </>
+                        )}
+                        <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-12"></div>
+                    </button>
+                </div>
+            </footer>
+
+            <style jsx>{`
+                .custom-scrollbar::-webkit-scrollbar {
+                    width: 4px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-track {
+                    background: transparent;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb {
+                    background: rgba(255, 255, 255, 0.1);
+                    border-radius: 10px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                    background: rgba(255, 255, 255, 0.2);
+                }
+            `}</style>
+        </div>
+    );
+}

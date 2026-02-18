@@ -99,9 +99,46 @@ CREATE TABLE IF NOT EXISTS ajustes_faturamento (
   tipo              VARCHAR(30) NOT NULL CHECK (tipo IN ('ACRESCIMO', 'DESCONTO', 'IRRF')),
   valor             NUMERIC(12,2) NOT NULL,
   motivo            TEXT,
+  nome_profissional VARCHAR(255),
   data_ocorrencia   DATE NOT NULL DEFAULT CURRENT_DATE,
+  status_aplicacao  BOOLEAN DEFAULT false,
+  data_aplicacao    DATE,
   lote_aplicado_id  UUID REFERENCES faturamentos_lote(id) ON DELETE SET NULL,
+  
+  -- Colunas extras para Acréscimos
+  inicio            TIMESTAMP WITH TIME ZONE,
+  termino           TIMESTAMP WITH TIME ZONE,
+  fracao_hora       NUMERIC(10, 2),
+  
+  detalhes_extras   JSONB DEFAULT '{}'::jsonb,
+  observacao_interna TEXT,
+  repasse_profissional BOOLEAN DEFAULT false,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- --------------------------------------------------------
+-- 6. Tabela de Consolidação Final (Fiscal)
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS faturamento_consolidados (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  lote_id             UUID NOT NULL REFERENCES faturamentos_lote(id) ON DELETE CASCADE,
+  cliente_id          UUID NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+  
+  -- Valores Base
+  valor_bruto         NUMERIC(12,2) NOT NULL DEFAULT 0,
+  acrescimos          NUMERIC(12,2) NOT NULL DEFAULT 0,
+  descontos           NUMERIC(12,2) NOT NULL DEFAULT 0,
+  
+  -- Fiscal (Lido do XML)
+  valor_irrf          NUMERIC(12,2) NOT NULL DEFAULT 0,
+  numero_nf           VARCHAR(50),
+  valor_nf_emitida    NUMERIC(12,2) NOT NULL DEFAULT 0,
+  
+  -- Resultados Finais
+  valor_nc_final      NUMERIC(12,2) NOT NULL DEFAULT 0,
+  valor_boleto_final  NUMERIC(12,2) NOT NULL DEFAULT 0,
+  
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- ============================================================
@@ -113,6 +150,7 @@ ALTER TABLE clientes              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE faturamentos_lote     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agendamentos_brutos   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ajustes_faturamento   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE faturamento_consolidados ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Authenticated full access on ciclos_faturamento"
   ON ciclos_faturamento FOR ALL
@@ -139,6 +177,11 @@ CREATE POLICY "Authenticated full access on ajustes_faturamento"
   USING (auth.role() = 'authenticated')
   WITH CHECK (auth.role() = 'authenticated');
 
+CREATE POLICY "Authenticated full access on faturamento_consolidados"
+  ON faturamento_consolidados FOR ALL
+  USING (auth.role() = 'authenticated')
+  WITH CHECK (auth.role() = 'authenticated');
+
 -- ============================================================
 -- ÍNDICES
 -- ============================================================
@@ -148,3 +191,5 @@ CREATE INDEX IF NOT EXISTS idx_agendamentos_lote ON agendamentos_brutos(lote_id)
 CREATE INDEX IF NOT EXISTS idx_agendamentos_loja ON agendamentos_brutos(loja_id);
 CREATE INDEX IF NOT EXISTS idx_ajustes_cliente ON ajustes_faturamento(cliente_id);
 CREATE INDEX IF NOT EXISTS idx_ajustes_lote ON ajustes_faturamento(lote_aplicado_id);
+CREATE INDEX IF NOT EXISTS idx_consolidados_lote ON faturamento_consolidados(lote_id);
+CREATE INDEX IF NOT EXISTS idx_consolidados_cliente ON faturamento_consolidados(cliente_id);

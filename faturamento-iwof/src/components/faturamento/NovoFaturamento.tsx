@@ -212,6 +212,7 @@ export default function NovoFaturamento() {
     const [selectedRefs, setSelectedRefs] = useState<Set<string>>(new Set());
     const [isMinimized, setIsMinimized] = useState(false);
     const [duplicates, setDuplicates] = useState<{ identical: Agendamento[][], suspicious: Agendamento[][] }>({ identical: [], suspicious: [] });
+    const [removedCount, setRemovedCount] = useState<number | null>(null);
 
     /* --- Save state --- */
     const [saving, setSaving] = useState(false);
@@ -360,16 +361,15 @@ export default function NovoFaturamento() {
             /* --- Duplicate Detection --- */
             const identicalGroups: Map<string, Agendamento[]> = new Map();
             const suspiciousList: Agendamento[][] = [];
-            const seenInGroups = new Set<string>();
+            const seenInGroups = new Set<number>(); // Use index instead of refAgendamento for exclusion
 
             for (let i = 0; i < parsed.length; i++) {
                 const a = parsed[i];
-                if (seenInGroups.has(a.refAgendamento)) continue;
+                if (seenInGroups.has(i)) continue;
 
-                // Identical key: Nome + Loja + Inicio + Termino + Valor
-                const key = `${a.nome}|${a.loja}|${a.inicio?.getTime()}|${a.termino?.getTime()}|${a.valorIwof}`;
-                const sameKey = parsed.filter(x =>
-                    x.refAgendamento !== a.refAgendamento &&
+                const sameKey = parsed.filter((x, idx) =>
+                    idx !== i &&
+                    !seenInGroups.has(idx) &&
                     x.nome === a.nome &&
                     x.loja === a.loja &&
                     x.inicio?.getTime() === a.inicio?.getTime() &&
@@ -379,33 +379,39 @@ export default function NovoFaturamento() {
 
                 if (sameKey.length > 0) {
                     const group = [a, ...sameKey];
-                    group.forEach(x => seenInGroups.add(x.refAgendamento));
-                    identicalGroups.set(key, group);
+                    // Also include logic where even if refAgendamento is identical but other fields are identical
+                    // Marking as identical if all core fields match (even if it's the same system ID)
+                    seenInGroups.add(i);
+                    parsed.forEach((x, idx) => {
+                        if (sameKey.includes(x)) seenInGroups.add(idx);
+                    });
+                    const groupKey = `${a.nome}|${a.loja}|${a.inicio?.getTime()}|${a.termino?.getTime()}|${a.valorIwof}`;
+                    identicalGroups.set(groupKey, group);
                 }
             }
 
             // Suspicious: >99% similarity in name + same exact inicio + same exact termino
             for (let i = 0; i < parsed.length; i++) {
                 const a = parsed[i];
-                if (seenInGroups.has(a.refAgendamento)) continue;
+                if (seenInGroups.has(i)) continue;
 
-                const suspicious = parsed.filter(b => {
-                    if (a.refAgendamento === b.refAgendamento || seenInGroups.has(b.refAgendamento)) return false;
+                const suspicious = parsed.filter((b, idx) => {
+                    if (idx === i || seenInGroups.has(idx)) return false;
 
-                    // Same exact timestamps (important for "spaces generating more than one" issue)
                     const sameInicio = a.inicio?.getTime() === b.inicio?.getTime();
                     const sameTermino = a.termino?.getTime() === b.termino?.getTime();
                     if (!sameInicio || !sameTermino) return false;
 
-                    // Similarity > 99%
                     const nameSim = getSimilarity(a.nome, b.nome);
-
                     return nameSim >= 0.99;
                 });
 
                 if (suspicious.length > 0) {
                     const group = [a, ...suspicious];
-                    group.forEach(x => seenInGroups.add(x.refAgendamento));
+                    seenInGroups.add(i);
+                    parsed.forEach((x, idx) => {
+                        if (suspicious.includes(x)) seenInGroups.add(idx);
+                    });
                     suspiciousList.push(group);
                 }
             }
@@ -564,14 +570,11 @@ export default function NovoFaturamento() {
     const autoClearDuplicates = () => {
         const refsToRemove = new Set<string>();
 
-        // Identical groups
+        // ONLY Identical groups for auto cleanup
         duplicates.identical.forEach(group => {
-            group.slice(1).forEach(a => refsToRemove.add(a.refAgendamento));
-        });
-
-        // Suspicious groups (since they are >99% and same timestamps, they are likely system artifacts)
-        duplicates.suspicious.forEach(group => {
-            group.slice(1).forEach(a => refsToRemove.add(a.refAgendamento));
+            group.slice(1).forEach(a => {
+                if (!a.isRemoved) refsToRemove.add(a.refAgendamento);
+            });
         });
 
         if (refsToRemove.size === 0) return;
@@ -582,6 +585,9 @@ export default function NovoFaturamento() {
             }
             return a;
         }));
+
+        setRemovedCount(refsToRemove.size);
+        setTimeout(() => setRemovedCount(null), 5000);
     };
 
     const applyCorrection = (ref: string, newValue: number) => {
@@ -1195,15 +1201,20 @@ export default function NovoFaturamento() {
                         <div className="space-y-8">
                             <div className="flex justify-between items-center bg-[var(--bg-card-hover)] p-4 rounded-xl border border-[var(--border)] mb-4">
                                 <div>
-                                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Limpeza Automática</h3>
-                                    <p className="text-xs text-[var(--fg-dim)]">Remove duplicatas idênticas e suspeitas (&gt;99% match) automaticamente.</p>
+                                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Limpeza Automática (100% Idênticos)</h3>
+                                    <p className="text-xs text-[var(--fg-dim)]">Remove duplicatas idênticas automaticamente. Itens suspeitos requerem revisão manual.</p>
+                                    {removedCount !== null && (
+                                        <p className="text-xs text-[var(--success)] mt-1 font-bold">
+                                            ✨ {removedCount} agendamentos duplicados foram removidos!
+                                        </p>
+                                    )}
                                 </div>
                                 <button
                                     className="btn btn-primary btn-sm flex items-center gap-2"
                                     onClick={autoClearDuplicates}
-                                    disabled={duplicates.identical.length === 0 && duplicates.suspicious.length === 0}
+                                    disabled={duplicates.identical.length === 0}
                                 >
-                                    <CheckCircle2 size={16} /> Limpar Duplicatas
+                                    <CheckCircle2 size={16} /> Limpar 100% Idênticos
                                 </button>
                             </div>
 
@@ -1255,7 +1266,7 @@ export default function NovoFaturamento() {
                                             <div className="flex items-center gap-2 mb-4">
                                                 <div className="w-2 h-2 rounded-full bg-[#f59e0b]" />
                                                 <h4 className="text-sm font-semibold text-white uppercase tracking-wider">
-                                                    Suspeitas de Duplicidade (95%+)
+                                                    Suspeitas de Duplicidade ({"99%+"})
                                                 </h4>
                                             </div>
                                             <div className="space-y-4">
@@ -1263,7 +1274,7 @@ export default function NovoFaturamento() {
                                                     <div key={idx} className="bg-[var(--bg-card-hover)] rounded-lg p-4 border border-[#f59e0b22]">
                                                         <div className="flex justify-between items-center mb-3">
                                                             <div className="text-xs text-[#f59e0b]">
-                                                                Match Crítico (&gt;99%): Mesmos horários de início/fim
+                                                                Match Suspeito ({" > 99%"}): Requer Revisão Manual
                                                             </div>
                                                             <div className="flex gap-2">
                                                                 <button
