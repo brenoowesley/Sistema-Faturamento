@@ -491,9 +491,10 @@ body {
   background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(4px);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   padding: 24px;
+  overflow-y: auto;
   animation: fadeIn 0.2s ease;
 }
 
@@ -503,6 +504,7 @@ body {
   padding: 0;
   overflow: hidden;
   animation: slideUp 0.25s ease;
+  margin: auto 0;
 }
 
 .modal-header {
@@ -536,6 +538,8 @@ body {
 
 .modal-body {
   padding: 24px;
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
 }
 
 .modal-form {

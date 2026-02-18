@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Search, ChevronLeft, ChevronRight, Pencil, Trash2 } from "lucide-react";
+import { Plus, Search, ChevronLeft, ChevronRight, Pencil, Trash2, Users, UserCheck, UserX, Clock, Download } from "lucide-react";
 import Modal from "@/components/Modal";
 import { createClient } from "@/lib/supabase/client";
+import * as XLSX from "xlsx";
 
 /* ---------- types ---------- */
 interface Ciclo {
@@ -108,7 +109,7 @@ const EMPTY_FORM: ClienteForm = {
     status: true,
 };
 
-const PAGE_SIZE = 12;
+const PAGE_SIZES = [25, 50, 100] as const;
 
 export default function ClientesList() {
     const supabase = createClient();
@@ -119,6 +120,7 @@ export default function ClientesList() {
     const [search, setSearch] = useState("");
     const [page, setPage] = useState(0);
     const [total, setTotal] = useState(0);
+    const [pageSize, setPageSize] = useState<number>(25);
 
     /* modal state */
     const [modalOpen, setModalOpen] = useState(false);
@@ -129,6 +131,11 @@ export default function ClientesList() {
     /* delete confirmation */
     const [deleteTarget, setDeleteTarget] = useState<Cliente | null>(null);
     const [deleting, setDeleting] = useState(false);
+
+    /* filter */
+    type StatusFilter = "todos" | "ativos" | "inativos" | "pendentes";
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>("todos");
+    const [counts, setCounts] = useState({ todos: 0, ativos: 0, inativos: 0, pendentes: 0 });
 
     /* fetch ciclos */
     useEffect(() => {
@@ -142,6 +149,31 @@ export default function ClientesList() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    /* fetch counts */
+    const fetchCounts = useCallback(async () => {
+        const { count: total } = await supabase
+            .from("clientes").select("*", { count: "exact", head: true });
+        const { count: ativos } = await supabase
+            .from("clientes").select("*", { count: "exact", head: true })
+            .eq("status", true)
+            .not("nome_conta_azul", "is", null)
+            .neq("nome_conta_azul", "")
+            .not("ciclo_faturamento_id", "is", null)
+            .not("email_contato", "is", null)
+            .neq("email_contato", "");
+        const { count: inativos } = await supabase
+            .from("clientes").select("*", { count: "exact", head: true })
+            .eq("status", false);
+        const pendentes = (total ?? 0) - (ativos ?? 0) - (inativos ?? 0);
+        setCounts({
+            todos: total ?? 0,
+            ativos: ativos ?? 0,
+            inativos: inativos ?? 0,
+            pendentes,
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     /* fetch clientes */
     const fetchClientes = useCallback(async () => {
         setLoading(true);
@@ -149,11 +181,31 @@ export default function ClientesList() {
             .from("clientes")
             .select("*, ciclos_faturamento(nome)", { count: "exact" })
             .order("razao_social")
-            .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+            .range(page * pageSize, (page + 1) * pageSize - 1);
 
         if (search.trim()) {
             query = query.or(
                 `razao_social.ilike.%${search}%,cnpj.ilike.%${search}%,nome_fantasia.ilike.%${search}%,nome.ilike.%${search}%`
+            );
+        }
+
+        /* apply status filter */
+        if (statusFilter === "ativos") {
+            query = query
+                .eq("status", true)
+                .not("nome_conta_azul", "is", null)
+                .neq("nome_conta_azul", "")
+                .not("ciclo_faturamento_id", "is", null)
+                .not("email_contato", "is", null)
+                .neq("email_contato", "");
+        } else if (statusFilter === "inativos") {
+            query = query.eq("status", false);
+        } else if (statusFilter === "pendentes") {
+            query = query.eq("status", true);
+            // pendentes = ativos but missing some operational data
+            // We use or() to catch rows missing any operational field
+            query = query.or(
+                "nome_conta_azul.is.null,nome_conta_azul.eq.,ciclo_faturamento_id.is.null,email_contato.is.null,email_contato.eq."
             );
         }
 
@@ -162,11 +214,15 @@ export default function ClientesList() {
         setTotal(count ?? 0);
         setLoading(false);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [page, search]);
+    }, [page, search, statusFilter, pageSize]);
 
     useEffect(() => {
         fetchClientes();
     }, [fetchClientes]);
+
+    useEffect(() => {
+        fetchCounts();
+    }, [fetchCounts]);
 
     /* --- open modal for NEW client --- */
     const openCreateModal = () => {
@@ -204,6 +260,12 @@ export default function ClientesList() {
             status: c.status ?? true,
         });
         setModalOpen(true);
+    };
+
+    /* refresh counts after mutation */
+    const refreshAll = () => {
+        fetchClientes();
+        fetchCounts();
     };
 
     /* --- save (create or update) --- */
@@ -248,7 +310,7 @@ export default function ClientesList() {
         setModalOpen(false);
         setEditingId(null);
         setForm(EMPTY_FORM);
-        fetchClientes();
+        refreshAll();
     };
 
     /* --- delete --- */
@@ -262,14 +324,103 @@ export default function ClientesList() {
         if (error) console.error("Delete error:", error);
         setDeleting(false);
         setDeleteTarget(null);
-        fetchClientes();
+        refreshAll();
     };
 
-    const totalPages = Math.ceil(total / PAGE_SIZE);
+    const totalPages = Math.ceil(total / pageSize);
     const isEditing = editingId !== null;
+
+    /* --- XLSX export --- */
+    const handleExport = async () => {
+        // Fetch ALL matching clients (no pagination)
+        let query = supabase
+            .from("clientes")
+            .select("*, ciclos_faturamento(nome)")
+            .order("razao_social");
+
+        if (search.trim()) {
+            query = query.or(
+                `razao_social.ilike.%${search}%,cnpj.ilike.%${search}%,nome_fantasia.ilike.%${search}%,nome.ilike.%${search}%`
+            );
+        }
+        if (statusFilter === "ativos") {
+            query = query.eq("status", true)
+                .not("nome_conta_azul", "is", null).neq("nome_conta_azul", "")
+                .not("ciclo_faturamento_id", "is", null)
+                .not("email_contato", "is", null).neq("email_contato", "");
+        } else if (statusFilter === "inativos") {
+            query = query.eq("status", false);
+        } else if (statusFilter === "pendentes") {
+            query = query.eq("status", true).or(
+                "nome_conta_azul.is.null,nome_conta_azul.eq.,ciclo_faturamento_id.is.null,email_contato.is.null,email_contato.eq."
+            );
+        }
+
+        const { data } = await query;
+        if (!data || data.length === 0) return;
+
+        const rows = data.map((c: Cliente) => ({
+            "Razão Social": c.razao_social,
+            "Nome Fantasia": c.nome_fantasia ?? "",
+            "Nome": c.nome ?? "",
+            "CNPJ": c.cnpj,
+            "CPF": c.cpf ?? "",
+            "Inscrição Estadual": c.inscricao_estadual ?? "",
+            "Email Principal": c.email_principal ?? "",
+            "Email Contato": c.email_contato ?? "",
+            "Telefone": c.telefone_principal ?? "",
+            "Cidade": c.cidade ?? "",
+            "Estado": c.estado ?? "",
+            "Nome Conta Azul": c.nome_conta_azul ?? "",
+            "Ciclo": c.ciclos_faturamento?.nome ?? "",
+            "Tempo Pgto (dias)": c.tempo_pagamento_dias,
+            "Boleto Unificado": c.boleto_unificado ? "Sim" : "Não",
+            "Status": c.status ? "Ativo" : "Inativo",
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Clientes");
+        XLSX.writeFile(wb, `clientes_${new Date().toISOString().split("T")[0]}.xlsx`);
+    };
 
     return (
         <div>
+            {/* ======== KPI Filter Cards ======== */}
+            <div className="grid grid-cols-4 gap-4 mb-6">
+                {([
+                    { key: "todos" as StatusFilter, label: "Total", count: counts.todos, icon: Users, color: "var(--fg-muted)", bg: "var(--bg-card)" },
+                    { key: "ativos" as StatusFilter, label: "Ativos", count: counts.ativos, icon: UserCheck, color: "#22c55e", bg: "rgba(34,197,94,0.08)" },
+                    { key: "pendentes" as StatusFilter, label: "Pendentes", count: counts.pendentes, icon: Clock, color: "#f59e0b", bg: "rgba(245,158,11,0.08)" },
+                    { key: "inativos" as StatusFilter, label: "Inativos", count: counts.inativos, icon: UserX, color: "#ef4444", bg: "rgba(239,68,68,0.08)" },
+                ]).map((card) => (
+                    <button
+                        key={card.key}
+                        onClick={() => { setStatusFilter(card.key); setPage(0); }}
+                        className="card text-left transition-all"
+                        style={{
+                            border: statusFilter === card.key
+                                ? `2px solid ${card.color}`
+                                : '2px solid transparent',
+                            background: statusFilter === card.key ? card.bg : undefined,
+                            cursor: 'pointer',
+                        }}
+                    >
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-xs font-medium uppercase tracking-wider" style={{ color: card.color }}>
+                                    {card.label}
+                                </p>
+                                <p className="text-2xl font-bold mt-1" style={{ color: card.color }}>
+                                    {card.count}
+                                </p>
+                            </div>
+                            <card.icon size={28} style={{ color: card.color, opacity: 0.5 }} />
+                        </div>
+                    </button>
+                ))}
+            </div>
+
             {/* Toolbar */}
             <div className="table-toolbar">
                 <div className="input-wrapper" style={{ maxWidth: 360 }}>
@@ -284,10 +435,26 @@ export default function ClientesList() {
                         }}
                     />
                 </div>
-                <button className="btn btn-primary" onClick={openCreateModal}>
-                    <Plus size={18} />
-                    Novo Cliente
-                </button>
+                <div className="flex items-center gap-2">
+                    <select
+                        className="input text-sm"
+                        style={{ width: 80, paddingLeft: 10 }}
+                        value={pageSize}
+                        onChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}
+                    >
+                        {PAGE_SIZES.map((s) => (
+                            <option key={s} value={s}>{s} / pág</option>
+                        ))}
+                    </select>
+                    <button className="btn btn-ghost" onClick={handleExport} title="Exportar XLSX">
+                        <Download size={18} />
+                        Exportar
+                    </button>
+                    <button className="btn btn-primary" onClick={openCreateModal}>
+                        <Plus size={18} />
+                        Novo Cliente
+                    </button>
+                </div>
             </div>
 
             {/* Table */}
@@ -393,7 +560,7 @@ export default function ClientesList() {
                 {totalPages > 1 && (
                     <div className="table-pagination">
                         <span className="table-pagination-info">
-                            {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} de{" "}
+                            {page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} de{" "}
                             {total}
                         </span>
                         <div className="table-pagination-controls">

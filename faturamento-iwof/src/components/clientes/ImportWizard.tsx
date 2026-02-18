@@ -252,6 +252,20 @@ export default function ImportWizard() {
                 if (key === "tempo_pagamento_dias") {
                     const n = parseInt(String(value));
                     row.tempo_pagamento_dias = isNaN(n) ? "" : n;
+                } else if (key === "data_criacao" || key === "data_fundacao") {
+                    // Excel stores dates as serial numbers (days since 1899-12-30)
+                    const raw = String(value ?? "").trim();
+                    const serial = Number(raw);
+                    if (!isNaN(serial) && serial > 10000 && serial < 100000) {
+                        // Convert Excel serial to JS Date
+                        const epoch = new Date(Date.UTC(1899, 11, 30));
+                        epoch.setUTCDate(epoch.getUTCDate() + serial);
+                        row[key] = epoch.toISOString().split("T")[0]; // YYYY-MM-DD
+                    } else if (raw && raw.includes("-")) {
+                        row[key] = raw; // already ISO-ish
+                    } else {
+                        row[key] = ""; // unparseable → skip
+                    }
                 } else if (key === "status") {
                     const s = String(value).toLowerCase().trim();
                     row.status = !(s === "false" || s === "0" || s === "inativo");
