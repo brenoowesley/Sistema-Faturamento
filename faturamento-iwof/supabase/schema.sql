@@ -26,14 +26,38 @@ ON CONFLICT (nome) DO NOTHING;
 -- --------------------------------------------------------
 CREATE TABLE IF NOT EXISTS clientes (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- Identificação
   razao_social          VARCHAR(255) NOT NULL,
   nome_fantasia         VARCHAR(255),
+  nome                  VARCHAR(255),
   cnpj                  VARCHAR(18) NOT NULL UNIQUE,
+  cpf                   VARCHAR(14),
+  id_estrangeiro        VARCHAR(50),
   inscricao_estadual    VARCHAR(20),
-  endereco_completo     JSONB,
+  codigo                VARCHAR(50),
+  -- Contato
+  email_principal       VARCHAR(255),
+  telefone_principal    VARCHAR(30),
+  emails_faturamento    TEXT,
+  nome_contato          VARCHAR(255),
+  email_contato         VARCHAR(255),
+  -- Endereço
+  cep                   VARCHAR(10),
+  estado                VARCHAR(2),
+  cidade                VARCHAR(150),
+  endereco              VARCHAR(255),
+  numero                VARCHAR(20),
+  bairro                VARCHAR(150),
+  complemento           VARCHAR(255),
+  -- Operacional
   ciclo_faturamento_id  UUID REFERENCES ciclos_faturamento(id) ON DELETE SET NULL,
   tempo_pagamento_dias  INT DEFAULT 30,
-  emails_faturamento    TEXT,
+  nome_conta_azul       VARCHAR(255),
+  boleto_unificado      BOOLEAN DEFAULT false,
+  -- Datas e Meta
+  data_criacao          DATE,
+  data_fundacao         DATE,
+  observacoes           TEXT,
   status                BOOLEAN NOT NULL DEFAULT true,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -84,14 +108,12 @@ CREATE TABLE IF NOT EXISTS ajustes_faturamento (
 -- ROW LEVEL SECURITY (RLS)
 -- ============================================================
 
--- Habilitar RLS em todas as tabelas
 ALTER TABLE ciclos_faturamento    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE clientes              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE faturamentos_lote     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agendamentos_brutos   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ajustes_faturamento   ENABLE ROW LEVEL SECURITY;
 
--- Políticas: acesso total para usuários autenticados
 CREATE POLICY "Authenticated full access on ciclos_faturamento"
   ON ciclos_faturamento FOR ALL
   USING (auth.role() = 'authenticated')
