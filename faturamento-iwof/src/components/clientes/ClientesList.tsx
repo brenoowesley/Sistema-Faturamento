@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Search, ChevronLeft, ChevronRight, Pencil, Trash2 } from "lucide-react";
 import Modal from "@/components/Modal";
 import { createClient } from "@/lib/supabase/client";
 
@@ -22,12 +22,19 @@ interface Cliente {
     email_principal: string | null;
     email_contato: string | null;
     telefone_principal: string | null;
-    cidade: string | null;
+    nome_contato: string | null;
+    cep: string | null;
     estado: string | null;
+    cidade: string | null;
+    endereco: string | null;
+    numero: string | null;
+    bairro: string | null;
+    complemento: string | null;
     ciclo_faturamento_id: string | null;
     tempo_pagamento_dias: number;
     nome_conta_azul: string | null;
     boleto_unificado: boolean;
+    emails_faturamento: string | null;
     status: boolean;
     ciclos_faturamento?: { nome: string } | null;
 }
@@ -48,7 +55,34 @@ function EmailBadges({ value }: { value: string | null }) {
     );
 }
 
-const EMPTY_FORM = {
+/* ---------- form type ---------- */
+interface ClienteForm {
+    razao_social: string;
+    nome_fantasia: string;
+    nome: string;
+    cnpj: string;
+    cpf: string;
+    inscricao_estadual: string;
+    email_principal: string;
+    telefone_principal: string;
+    cep: string;
+    estado: string;
+    cidade: string;
+    endereco: string;
+    numero: string;
+    bairro: string;
+    complemento: string;
+    nome_contato: string;
+    email_contato: string;
+    nome_conta_azul: string;
+    ciclo_faturamento_id: string;
+    tempo_pagamento_dias: number;
+    boleto_unificado: boolean;
+    emails_faturamento: string;
+    status: boolean;
+}
+
+const EMPTY_FORM: ClienteForm = {
     razao_social: "",
     nome_fantasia: "",
     nome: "",
@@ -86,10 +120,15 @@ export default function ClientesList() {
     const [page, setPage] = useState(0);
     const [total, setTotal] = useState(0);
 
-    /* modal */
+    /* modal state */
     const [modalOpen, setModalOpen] = useState(false);
-    const [form, setForm] = useState(EMPTY_FORM);
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [form, setForm] = useState<ClienteForm>(EMPTY_FORM);
     const [saving, setSaving] = useState(false);
+
+    /* delete confirmation */
+    const [deleteTarget, setDeleteTarget] = useState<Cliente | null>(null);
+    const [deleting, setDeleting] = useState(false);
 
     /* fetch ciclos */
     useEffect(() => {
@@ -129,21 +168,105 @@ export default function ClientesList() {
         fetchClientes();
     }, [fetchClientes]);
 
-    /* save */
+    /* --- open modal for NEW client --- */
+    const openCreateModal = () => {
+        setEditingId(null);
+        setForm(EMPTY_FORM);
+        setModalOpen(true);
+    };
+
+    /* --- open modal for EDIT --- */
+    const openEditModal = (c: Cliente) => {
+        setEditingId(c.id);
+        setForm({
+            razao_social: c.razao_social ?? "",
+            nome_fantasia: c.nome_fantasia ?? "",
+            nome: c.nome ?? "",
+            cnpj: c.cnpj ?? "",
+            cpf: c.cpf ?? "",
+            inscricao_estadual: c.inscricao_estadual ?? "",
+            email_principal: c.email_principal ?? "",
+            telefone_principal: c.telefone_principal ?? "",
+            cep: c.cep ?? "",
+            estado: c.estado ?? "",
+            cidade: c.cidade ?? "",
+            endereco: c.endereco ?? "",
+            numero: c.numero ?? "",
+            bairro: c.bairro ?? "",
+            complemento: c.complemento ?? "",
+            nome_contato: c.nome_contato ?? "",
+            email_contato: c.email_contato ?? "",
+            nome_conta_azul: c.nome_conta_azul ?? "",
+            ciclo_faturamento_id: c.ciclo_faturamento_id ?? "",
+            tempo_pagamento_dias: c.tempo_pagamento_dias ?? 30,
+            boleto_unificado: c.boleto_unificado ?? false,
+            emails_faturamento: c.emails_faturamento ?? "",
+            status: c.status ?? true,
+        });
+        setModalOpen(true);
+    };
+
+    /* --- save (create or update) --- */
     const handleSave = async () => {
         setSaving(true);
         const payload = {
             ...form,
             ciclo_faturamento_id: form.ciclo_faturamento_id || null,
+            nome_fantasia: form.nome_fantasia || null,
+            nome: form.nome || null,
+            cpf: form.cpf || null,
+            inscricao_estadual: form.inscricao_estadual || null,
+            email_principal: form.email_principal || null,
+            telefone_principal: form.telefone_principal || null,
+            cep: form.cep || null,
+            estado: form.estado || null,
+            cidade: form.cidade || null,
+            endereco: form.endereco || null,
+            numero: form.numero || null,
+            bairro: form.bairro || null,
+            complemento: form.complemento || null,
+            nome_contato: form.nome_contato || null,
+            email_contato: form.email_contato || null,
+            nome_conta_azul: form.nome_conta_azul || null,
+            emails_faturamento: form.emails_faturamento || null,
         };
-        await supabase.from("clientes").insert(payload);
+
+        if (editingId) {
+            const { error } = await supabase
+                .from("clientes")
+                .update(payload)
+                .eq("id", editingId);
+            if (error) console.error("Update error:", error);
+        } else {
+            const { error } = await supabase
+                .from("clientes")
+                .insert(payload);
+            if (error) console.error("Insert error:", error);
+        }
+
         setSaving(false);
         setModalOpen(false);
+        setEditingId(null);
         setForm(EMPTY_FORM);
         fetchClientes();
     };
 
+    /* --- delete --- */
+    const handleDelete = async () => {
+        if (!deleteTarget) return;
+        setDeleting(true);
+        const { error } = await supabase
+            .from("clientes")
+            .delete()
+            .eq("id", deleteTarget.id);
+        if (error) console.error("Delete error:", error);
+        setDeleting(false);
+        setDeleteTarget(null);
+        fetchClientes();
+    };
+
     const totalPages = Math.ceil(total / PAGE_SIZE);
+    const isEditing = editingId !== null;
 
     return (
         <div>
@@ -161,7 +284,7 @@ export default function ClientesList() {
                         }}
                     />
                 </div>
-                <button className="btn btn-primary" onClick={() => setModalOpen(true)}>
+                <button className="btn btn-primary" onClick={openCreateModal}>
                     <Plus size={18} />
                     Novo Cliente
                 </button>
@@ -180,24 +303,29 @@ export default function ClientesList() {
                             <th>Ciclo</th>
                             <th>Tempo Pgto</th>
                             <th>Status</th>
+                            <th style={{ width: 80 }}>Ações</th>
                         </tr>
                     </thead>
                     <tbody>
                         {loading ? (
                             <tr>
-                                <td colSpan={8} className="table-empty">
+                                <td colSpan={9} className="table-empty">
                                     Carregando...
                                 </td>
                             </tr>
                         ) : clientes.length === 0 ? (
                             <tr>
-                                <td colSpan={8} className="table-empty">
+                                <td colSpan={9} className="table-empty">
                                     Nenhum cliente encontrado
                                 </td>
                             </tr>
                         ) : (
                             clientes.map((c) => (
-                                <tr key={c.id}>
+                                <tr
+                                    key={c.id}
+                                    className="cursor-pointer hover:bg-[var(--bg-hover)]"
+                                    onClick={() => openEditModal(c)}
+                                >
                                     <td>
                                         <span className="table-primary">
                                             {c.nome || c.razao_social}
@@ -237,6 +365,24 @@ export default function ClientesList() {
                                             {c.status ? "Ativo" : "Inativo"}
                                         </span>
                                     </td>
+                                    <td>
+                                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                            <button
+                                                className="btn btn-ghost btn-sm"
+                                                title="Editar"
+                                                onClick={() => openEditModal(c)}
+                                            >
+                                                <Pencil size={14} />
+                                            </button>
+                                            <button
+                                                className="btn btn-ghost btn-sm text-[var(--danger)]"
+                                                title="Excluir"
+                                                onClick={() => setDeleteTarget(c)}
+                                            >
+                                                <Trash2 size={14} />
+                                            </button>
+                                        </div>
+                                    </td>
                                 </tr>
                             ))
                         )}
@@ -270,8 +416,13 @@ export default function ClientesList() {
                 )}
             </div>
 
-            {/* Modal: Novo Cliente */}
-            <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="Novo Cliente" width="720px">
+            {/* ======== Modal: Create / Edit Cliente ======== */}
+            <Modal
+                isOpen={modalOpen}
+                onClose={() => { setModalOpen(false); setEditingId(null); setForm(EMPTY_FORM); }}
+                title={isEditing ? "Editar Cliente" : "Novo Cliente"}
+                width="720px"
+            >
                 <form
                     className="modal-form"
                     onSubmit={(e) => {
@@ -363,6 +514,14 @@ export default function ClientesList() {
                                 onChange={(e) => setForm({ ...form, email_contato: e.target.value })}
                             />
                         </div>
+                        <div className="input-group" style={{ gridColumn: "span 2" }}>
+                            <label className="input-label">Emails Faturamento</label>
+                            <input className="input" style={{ paddingLeft: 14 }}
+                                placeholder="fat1@ex.com; fat2@ex.com"
+                                value={form.emails_faturamento}
+                                onChange={(e) => setForm({ ...form, emails_faturamento: e.target.value })}
+                            />
+                        </div>
                     </div>
 
                     {/* Address */}
@@ -412,6 +571,13 @@ export default function ClientesList() {
                                 onChange={(e) => setForm({ ...form, bairro: e.target.value })}
                             />
                         </div>
+                        <div className="input-group" style={{ gridColumn: "span 2" }}>
+                            <label className="input-label">Complemento</label>
+                            <input className="input" style={{ paddingLeft: 14 }}
+                                value={form.complemento}
+                                onChange={(e) => setForm({ ...form, complemento: e.target.value })}
+                            />
+                        </div>
                     </div>
 
                     {/* Operational */}
@@ -445,7 +611,7 @@ export default function ClientesList() {
                                 onChange={(e) => setForm({ ...form, nome_conta_azul: e.target.value })}
                             />
                         </div>
-                        <div className="input-group">
+                        <div className="input-group flex items-end gap-3">
                             <label className="input-label flex items-center gap-3 cursor-pointer">
                                 <input
                                     type="checkbox"
@@ -456,17 +622,62 @@ export default function ClientesList() {
                                 Boleto Unificado
                             </label>
                         </div>
+                        <div className="input-group">
+                            <label className="input-label flex items-center gap-3 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    className="w-4 h-4 rounded accent-[var(--accent)]"
+                                    checked={form.status}
+                                    onChange={(e) => setForm({ ...form, status: e.target.checked })}
+                                />
+                                Cliente Ativo
+                            </label>
+                        </div>
                     </div>
 
                     <div className="modal-actions">
-                        <button type="button" className="btn btn-ghost" onClick={() => setModalOpen(false)}>
+                        <button type="button" className="btn btn-ghost" onClick={() => { setModalOpen(false); setEditingId(null); setForm(EMPTY_FORM); }}>
                             Cancelar
                         </button>
                         <button type="submit" className="btn btn-primary" disabled={saving}>
-                            {saving ? "Salvando..." : "Salvar Cliente"}
+                            {saving ? "Salvando..." : isEditing ? "Atualizar Cliente" : "Salvar Cliente"}
                         </button>
                     </div>
                 </form>
+            </Modal>
+
+            {/* ======== Modal: Confirm Delete ======== */}
+            <Modal
+                isOpen={deleteTarget !== null}
+                onClose={() => setDeleteTarget(null)}
+                title="Confirmar Exclusão"
+                width="480px"
+            >
+                <div className="p-1">
+                    <p className="text-sm text-[var(--fg-muted)] mb-4">
+                        Tem certeza que deseja excluir o cliente{" "}
+                        <strong className="text-white">
+                            {deleteTarget?.nome || deleteTarget?.razao_social}
+                        </strong>
+                        {" "}(CNPJ: <span className="font-mono">{deleteTarget?.cnpj}</span>)?
+                    </p>
+                    <p className="text-xs text-[var(--danger)] mb-5">
+                        Esta ação não pode ser desfeita.
+                    </p>
+                    <div className="modal-actions">
+                        <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)}>
+                            Cancelar
+                        </button>
+                        <button
+                            className="btn"
+                            style={{ background: 'var(--danger)', color: 'white' }}
+                            disabled={deleting}
+                            onClick={handleDelete}
+                        >
+                            {deleting ? "Excluindo..." : "Excluir Cliente"}
+                        </button>
+                    </div>
+                </div>
             </Modal>
         </div>
     );

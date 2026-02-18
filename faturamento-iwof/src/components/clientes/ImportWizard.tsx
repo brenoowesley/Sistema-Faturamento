@@ -197,13 +197,15 @@ export default function ImportWizard() {
         [ciclos]
     );
 
-    /* ---- check if row needs operational completion ---- */
+    /* ---- check if row needs operational completion ----
+       Only rows WITH nome_conta_azul filled but missing other
+       operational fields are considered "pending".
+       Rows WITHOUT nome_conta_azul are auto-inactive, not pending. */
     const checkNeedsCompletion = (r: ImportRow): boolean => {
+        if (!r.nome_conta_azul?.trim()) return false; // inactive, not pending
         return (
-            !r.nome_conta_azul?.trim() ||
             !r.email_contato?.trim() ||
             r.tempo_pagamento_dias === "" ||
-            r.tempo_pagamento_dias === 0 ||
             !r.ciclo_faturamento_id
         );
     };
@@ -262,6 +264,11 @@ export default function ImportWizard() {
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     (row as any)[key] = String(value ?? "").trim();
                 }
+            }
+
+            /* Auto-set inactive if Nome Conta Azul is empty */
+            if (!row.nome_conta_azul?.trim()) {
+                row.status = false;
             }
 
             row._needsCompletion = checkNeedsCompletion(row);
@@ -368,7 +375,8 @@ export default function ImportWizard() {
     const incompleteRows = allRows
         .map((r, i) => ({ row: r, originalIndex: i }))
         .filter((item) => item.row._needsCompletion);
-    const allComplete = allRows.length > 0 && incompleteRows.length === 0;
+    const inactiveRows = allRows.filter((r) => !r.nome_conta_azul?.trim());
+    const canSave = allRows.length > 0;
     const totalRows = allRows.length;
 
     /* ---- upsert ---- */
@@ -412,8 +420,12 @@ export default function ImportWizard() {
                 .from("clientes")
                 .upsert(payload, { onConflict: "cnpj" });
 
-            if (error) err++;
-            else ok++;
+            if (error) {
+                console.error("Upsert error for CNPJ", row.cnpj, error);
+                err++;
+            } else {
+                ok++;
+            }
         }
 
         setResult({ ok, err });
@@ -505,6 +517,15 @@ export default function ImportWizard() {
                                 </span>
                             </>
                         )}
+                        {inactiveRows.length > 0 && (
+                            <>
+                                {" "}
+                                ·{" "}
+                                <span className="text-[var(--fg-dim)] font-medium">
+                                    {inactiveRows.length} inativo(s)
+                                </span>
+                            </>
+                        )}
                     </p>
                 </div>
             </div>
@@ -532,7 +553,7 @@ export default function ImportWizard() {
                         </h4>
                     </div>
                     <p className="px-4 pb-3 text-xs text-[var(--fg-dim)]">
-                        Preencha os campos abaixo para completar a importação.
+                        Estes clientes possuem Nome Conta Azul mas faltam dados operacionais. Preencha ou salve assim mesmo.
                     </p>
 
                     <div className="overflow-x-auto">
@@ -540,7 +561,6 @@ export default function ImportWizard() {
                             <thead>
                                 <tr>
                                     <th>Cliente</th>
-                                    <th>NOME CONTA AZUL</th>
                                     <th>E-mail Contato</th>
                                     <th>Tempo Pgto (dias)</th>
                                     <th>Boleto Unificado</th>
@@ -557,20 +577,6 @@ export default function ImportWizard() {
                                             <span className="table-secondary">
                                                 {row.cnpj}
                                             </span>
-                                        </td>
-                                        <td>
-                                            <input
-                                                className="input input-inline w-full"
-                                                placeholder="Nome Conta Azul"
-                                                value={row.nome_conta_azul}
-                                                onChange={(e) =>
-                                                    updateRow(
-                                                        originalIndex,
-                                                        "nome_conta_azul",
-                                                        e.target.value
-                                                    )
-                                                }
-                                            />
                                         </td>
                                         <td>
                                             <input
@@ -703,8 +709,8 @@ export default function ImportWizard() {
                                         <td>
                                             <span className="text-sm text-[var(--fg-muted)]">
                                                 {row.nome_conta_azul || (
-                                                    <span className="text-[var(--warning)]">
-                                                        Pendente
+                                                    <span className="text-[var(--fg-dim)]">
+                                                        Inativo
                                                     </span>
                                                 )}
                                             </span>
@@ -740,7 +746,7 @@ export default function ImportWizard() {
                 </button>
                 <button
                     className="btn btn-primary"
-                    disabled={!allComplete || saving}
+                    disabled={!canSave || saving}
                     onClick={handleSave}
                 >
                     {saving ? (
