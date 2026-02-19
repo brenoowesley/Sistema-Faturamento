@@ -224,32 +224,58 @@ export default function FiscalProcessingPage() {
                     const xmlText = await contents.files[filename].async("text");
                     const jsonObj = parser.parse(xmlText);
 
-                    // Simple logic to find tags (deep search might be needed)
-                    // We look for CNPJ of Tomador and ValorIR
-                    const searchRef = (obj: any, target: string): any => {
-                        for (let k in obj) {
-                            if (k.toLowerCase() === target.toLowerCase()) return obj[k];
-                            if (typeof obj[k] === 'object') {
-                                let res = searchRef(obj[k], target);
-                                if (res !== undefined) return res;
-                            }
+                    // Helper robusto para buscar uma tag específica recursivamente
+                    const findTagInJSON = (obj: any, tag: string): any => {
+                        if (!obj || typeof obj !== 'object' || obj === null) return undefined;
+                        // Busca no nível atual
+                        for (const k in obj) {
+                            if (k.toLowerCase() === tag.toLowerCase()) return obj[k];
                         }
+                        // Busca recursiva profunda
+                        for (const k in obj) {
+                            const res = findTagInJSON(obj[k], tag);
+                            if (res !== undefined) return res;
+                        }
+                        return undefined;
                     };
 
-                    const cnpjRaw = searchRef(jsonObj, "Cnpj") || searchRef(jsonObj, "CPFCNPJ");
-                    const numeroNF = searchRef(jsonObj, "Numero") || searchRef(jsonObj, "IdentificacaoNfse");
-                    const valorIR = searchRef(jsonObj, "ValorIr") || 0;
+                    // Pega o bloco principal da nota para evitar pegar dados de cancelamento ou do cabeçalho do arquivo
+                    const infNfse = findTagInJSON(jsonObj, "InfNfse");
+                    const targetContext = infNfse || jsonObj;
+
+                    // 1. CNPJ do TOMADOR: Busca primeiro o bloco Tomador para evitar pegar o do Prestador
+                    const tomador = findTagInJSON(targetContext, "TomadorServico") ||
+                        findTagInJSON(targetContext, "Tomador") ||
+                        findTagInJSON(targetContext, "IdentificacaoTomador");
+
+                    const cnpjRaw = tomador ? (
+                        findTagInJSON(tomador, "Cnpj") ||
+                        findTagInJSON(tomador, "Cpf") ||
+                        findTagInJSON(tomador, "CPFCNPJ")
+                    ) : undefined;
+
+                    // 2. Número da Nota: Numero
+                    const numeroNF = findTagInJSON(targetContext, "Numero");
+
+                    // 3. Valor IRRF: Valores > ValorIr
+                    const valorIRRaw = findTagInJSON(targetContext, "ValorIr") || 0;
 
                     if (cnpjRaw) {
+                        const cleanCNPJ = String(cnpjRaw).replace(/\D/g, "");
+                        const safeValorIR = Number(parseFloat(String(valorIRRaw)).toFixed(2)) || 0;
+
                         parsedXMLs.push({
-                            cnpj: String(cnpjRaw).replace(/\D/g, ""),
-                            numeroNF: String(numeroNF),
-                            valorIR: Number(valorIR),
+                            cnpj: cleanCNPJ,
+                            numeroNF: String(numeroNF || "S/N"),
+                            valorIR: safeValorIR,
                             filename
                         });
                     }
                 }
             }
+
+            console.log(`[FISCAL AUDIT] ZIP Processado. Encontrados ${parsedXMLs.length} XMLs válidos.`);
+            parsedXMLs.forEach(p => console.log(`[FISCAL AUDIT] XML: ${p.filename} -> CNPJ: ${p.cnpj}, Nota: ${p.numeroNF}, IR: ${p.valorIR}`));
 
             // 3. Reconciliation
             const res: ConciliacaoItem[] = lojas.map(loja => {
@@ -564,7 +590,7 @@ export default function FiscalProcessingPage() {
                         </div>
 
                         {lote?.status === "CONSOLIDADO" ? (
-                            <div className="flex gap-2">
+                            <div className="flex flex-col md:flex-row gap-3">
                                 <button
                                     onClick={handleExportarNFE}
                                     className="btn btn-outline btn-success flex items-center gap-2 px-6 py-4 rounded-2xl font-bold uppercase tracking-tight transition-all hover:scale-105 active:scale-95"
@@ -572,18 +598,12 @@ export default function FiscalProcessingPage() {
                                     <FileSearch size={18} /> Exportar Planilha NFE.io (.xlsx)
                                 </button>
                                 <button
-                                    disabled={isDispatching}
-                                    onClick={handleDisparar}
-                                    className="group relative overflow-hidden bg-[var(--primary)] text-white px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
+                                    onClick={() => router.push(`/faturamento/lote/${loteId}/conta-azul`)}
+                                    className="group relative overflow-hidden bg-[#3b82f6] text-white px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center justify-center gap-3 transition-all hover:scale-105 active:scale-95 shadow-[0_4px_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_30px_rgba(59,130,246,0.5)]"
                                 >
-                                    {isDispatching ? (
-                                        <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                                    ) : (
-                                        <>
-                                            Preencher Planilha e Disparar Robôs (Legado)
-                                            <ArrowRight size={18} />
-                                        </>
-                                    )}
+                                    Avançar para Conta Azul
+                                    <ArrowRight className="transition-transform group-hover:translate-x-1" size={18} />
+                                    <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-12"></div>
                                 </button>
                             </div>
                         ) : lote?.status === "CONCLUÍDO" ? (
@@ -594,7 +614,7 @@ export default function FiscalProcessingPage() {
                             <button
                                 disabled={isConsolidating}
                                 onClick={handleConsolidar}
-                                className="group relative overflow-hidden bg-emerald-500 text-black px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
+                                className="group relative overflow-hidden bg-emerald-500 text-black px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 shadow-[0_4px_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_30px_rgba(16,185,129,0.5)]"
                             >
                                 {isConsolidating ? (
                                     <div className="w-5 h-5 border-2 border-black/20 border-t-black rounded-full animate-spin"></div>
@@ -604,6 +624,7 @@ export default function FiscalProcessingPage() {
                                         <Save size={18} />
                                     </>
                                 )}
+                                <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-12"></div>
                             </button>
                         )}
                     </div>
@@ -616,6 +637,6 @@ export default function FiscalProcessingPage() {
                     100% { transform: translateX(250%); }
                 }
             `}</style>
-        </div>
+        </div >
     );
 }

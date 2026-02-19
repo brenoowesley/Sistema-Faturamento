@@ -17,8 +17,32 @@ export async function GET(req: NextRequest) {
             process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
         );
 
-        // 1. Fetch data. We try consolidated first, if empty, we simulate from agendamentos
-        let { data: records, error } = await supabase
+        // 1. Fetch ALL store data for this batch (not just validated) to identify exclusions
+        const { data: allInBatchRaw, error: allInBatchErr } = await supabase
+            .from("agendamentos_brutos")
+            .select("loja_id, status_validacao, valor_iwof, clientes(razao_social, cnpj)")
+            .eq("lote_id", loteId);
+
+        if (allInBatchErr) throw allInBatchErr;
+
+        // Group all batch attempts by store to see what they are trying to process
+        const allStoresInBatchMap = new Map<string, { cnpj: string; nome: string; status: Set<string>; totalTentado: number }>();
+        allInBatchRaw?.forEach(a => {
+            if (!allStoresInBatchMap.has(a.loja_id)) {
+                allStoresInBatchMap.set(a.loja_id, {
+                    cnpj: (a.clientes as any)?.cnpj || "S/N",
+                    nome: (a.clientes as any)?.razao_social || "S/N",
+                    status: new Set(),
+                    totalTentado: 0
+                });
+            }
+            const s = allStoresInBatchMap.get(a.loja_id)!;
+            s.status.add(a.status_validacao);
+            s.totalTentado += Number(a.valor_iwof) || 0;
+        });
+
+        // 2. Fetch data to EXPORT (Consolidated or Simulated)
+        let { data: records, error: recordsErr } = await supabase
             .from("faturamento_consolidados")
             .select(`
                 *,
@@ -30,10 +54,12 @@ export async function GET(req: NextRequest) {
             `)
             .eq("lote_id", loteId);
 
-        if (error) throw error;
+        if (recordsErr) throw recordsErr;
 
+        let simulationUsed = false;
         // If no consolidated records, fetch raw data and simulate consolidation
         if (!records || records.length === 0) {
+            simulationUsed = true;
             console.log("Simulando exportação a partir de agendamentos brutos...");
 
             // Fetch lote info
@@ -44,27 +70,22 @@ export async function GET(req: NextRequest) {
                 .single();
             if (loteErr) throw loteErr;
 
-            // Fetch validated agendamentos
-            const { data: agendamentos, error: agendErr } = await supabase
-                .from("agendamentos_brutos")
-                .select("loja_id, valor_iwof, clientes(*)")
-                .eq("lote_id", loteId)
-                .eq("status_validacao", "VALIDADO");
-            if (agendErr) throw agendErr;
-
-            // Fetch adjustments
+            // Fetch ADJUSTMENTS for the simulated batch
             const { data: ajustes, error: ajErr } = await supabase
                 .from("ajustes_faturamento")
                 .select("*")
-                .eq("lote_aplicado_id", loteId);
+                .in("cliente_id", Array.from(allStoresInBatchMap.keys()))
+                .eq("status_aplicacao", false);
             if (ajErr) throw ajErr;
 
             // Consolidate in memory
             const consolidatedMap = new Map<string, any>();
 
-            agendamentos.forEach(a => {
-                if (!consolidatedMap.has(a.loja_id)) {
-                    consolidatedMap.set(a.loja_id, {
+            allInBatchRaw?.filter(a => a.status_validacao === "VALIDADO").forEach(a => {
+                const lojaId = a.loja_id;
+                if (!consolidatedMap.has(lojaId)) {
+                    consolidatedMap.set(lojaId, {
+                        cliente_id: lojaId, // Store ID here for audit comparison
                         valor_bruto: 0,
                         acrescimos: 0,
                         descontos: 0,
@@ -72,7 +93,7 @@ export async function GET(req: NextRequest) {
                         lotes: lote
                     });
                 }
-                const store = consolidatedMap.get(a.loja_id)!;
+                const store = consolidatedMap.get(lojaId)!;
                 store.valor_bruto += Number(a.valor_iwof) || 0;
             });
 
@@ -88,13 +109,54 @@ export async function GET(req: NextRequest) {
                 const base = (r.valor_bruto + r.acrescimos) - r.descontos;
                 return {
                     ...r,
-                    valor_nf_emitida: base * 0.115 // Consistency fix: use full base
+                    valor_nf_emitida: Math.max(0, base * 0.115) // Consistency fix: use full base, floor at 0
                 };
-            }).filter(r => r.valor_nf_emitida > 0);
+            });
         }
 
+        // AUDIT & EXCLUSIONS LOGIC
+        const excludedList: any[] = [];
+
+        console.log(`[EXPORT AUDIT] Lote: ${loteId}`);
+        console.log(`[EXPORT AUDIT] Total de lojas no Lote (Bruto): ${allStoresInBatchMap.size}`);
+        console.log(`[EXPORT AUDIT] Total de lojas exportadas para NFE: ${records?.length || 0}`);
+
+        allStoresInBatchMap.forEach((store, id) => {
+            const isExported = records?.some(r => r.cliente_id === id);
+
+            if (!isExported) {
+                let motivo = "Desconhecido";
+                if (simulationUsed) {
+                    if (!store.status.has("VALIDADO")) {
+                        motivo = `Agendamentos possuem status: ${Array.from(store.status).join(", ")} (Nenhum como 'VALIDADO')`;
+                    } else {
+                        // This case implies that even if VALIDADO, the final calculated value was <= 0
+                        motivo = `Valor líquido final resultou em zero ou negativo após descontos.`;
+                    }
+                } else {
+                    motivo = "Loja não incluída na consolidação final do lote (Fechar Lote).";
+                }
+
+                console.warn(`[EXPORT AUDIT] EXCLUÍDO: ${store.cnpj} - ${store.nome}. Motivo: ${motivo}`);
+                excludedList.push({
+                    "CNPJ": store.cnpj,
+                    "NOME": store.nome,
+                    "VALOR_TENTADO": store.totalTentado,
+                    "STATUS_NO_LOTE": Array.from(store.status).join(", "),
+                    "MOTIVO_EXCLUSAO": motivo
+                });
+            } else {
+                const r = records?.find(rec => rec.cliente_id === id || (rec.clientes as any)?.id === id);
+                console.log(`[EXPORT AUDIT] OK: ${store.cnpj} - ${store.nome} | Valor NF: ${r?.valor_nf_emitida}`);
+            }
+        });
+
         if (!records || records.length === 0) {
-            return NextResponse.json({ error: "No records found (none validated or NF value is zero)" }, { status: 404 });
+            // If no records to export, but there might be exclusions, still generate a file with just exclusions
+            if (excludedList.length === 0) {
+                return NextResponse.json({ error: "No records found (none validated and no exclusions to report)" }, { status: 404 });
+            }
+            // If only exclusions, proceed to generate the file with just the exclusion sheet
         }
 
         const fmtDate = (d: string) => {
@@ -110,14 +172,21 @@ export async function GET(req: NextRequest) {
             }).format(val);
         };
 
-        // 2. Map exactly to 19 columns
-        const dadosMapeados = records.map((rec) => {
+        // 3. Map exactly to 19 columns
+        const colunasNFE = [
+            "CPF_CNPJ", "Nome", "Email", "Valor", "Codigo_Servico", "Endereco_Pais",
+            "Endereco_Cep", "Endereco_Logradouro", "Endereco_Numero", "Endereco_Complemento",
+            "Endereco_Bairro", "Endereco_Cidade_Codigo", "Endereco_Cidade_Nome", "Endereco_Estado",
+            "Descricao", "Data_Competencia", "IBSCBS_Indicador_Operacao", "IBSCBS_Codigo_Classificacao", "NBS"
+        ];
+
+        const dadosMapeados = records?.filter(rec => rec.valor_nf_emitida > 0).map((rec) => {
             const c = rec.clientes as any;
             const l = rec.lotes as any;
 
             return {
                 "CPF_CNPJ": c.cnpj ? c.cnpj.replace(/\D/g, "") : "",
-                "Nome": c.razao_social,
+                "Nome": c.razao_social || "",
                 "Email": c.email_principal || c.emails_faturamento || "",
                 "Valor": Number(rec.valor_nf_emitida.toFixed(2)),
                 "Codigo_Servico": "100202",
@@ -136,15 +205,30 @@ export async function GET(req: NextRequest) {
                 "IBSCBS_Codigo_Classificacao": "000001",
                 "NBS": "109051200"
             };
-        });
+        }) || [];
 
-        // 3. Create XLSX
-        const worksheet = xlsx.utils.json_to_sheet(dadosMapeados);
+        // 4. Create XLSX with two sheets
         const workbook = xlsx.utils.book_new();
-        xlsx.utils.book_append_sheet(workbook, worksheet, "NFE");
+
+        if (dadosMapeados.length > 0) {
+            // Force structure by passing header array
+            const worksheetNFE = xlsx.utils.json_to_sheet(dadosMapeados, { header: colunasNFE });
+            xlsx.utils.book_append_sheet(workbook, worksheetNFE, "LOTE NFE.io");
+        }
+
+        if (excludedList.length > 0) {
+            const worksheetExcluded = xlsx.utils.json_to_sheet(excludedList);
+            xlsx.utils.book_append_sheet(workbook, worksheetExcluded, "Lojas EXCLUÍDAS");
+        }
+
+        // If no sheets were added, return an error
+        if (workbook.SheetNames.length === 0) {
+            return NextResponse.json({ error: "No data to export (no NFE records and no exclusions)" }, { status: 404 });
+        }
+
         const buffer = xlsx.write(workbook, { bookType: "xlsx", type: "buffer" });
 
-        // 4. Return file
+        // 5. Return file
         return new NextResponse(buffer, {
             status: 200,
             headers: {
