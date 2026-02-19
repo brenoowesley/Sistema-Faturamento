@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Plus, Search, ChevronLeft, ChevronRight, Pencil, Trash2, Users, UserCheck, UserX, Clock, Download } from "lucide-react";
+import { useState, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import { Plus, Search, ChevronLeft, ChevronRight, Pencil, Trash2, Users, UserCheck, UserX, Clock, Download, ExternalLink } from "lucide-react";
 import Modal from "@/components/Modal";
 import { createClient } from "@/lib/supabase/client";
 import * as XLSX from "xlsx";
@@ -112,12 +113,22 @@ const EMPTY_FORM: ClienteForm = {
 const PAGE_SIZES = [25, 50, 100] as const;
 
 export default function ClientesList() {
+    return (
+        <Suspense fallback={<div>Carregando...</div>}>
+            <ClientesListContent />
+        </Suspense>
+    );
+}
+
+function ClientesListContent() {
     const supabase = createClient();
+    const searchParams = useSearchParams();
+    const initialSearch = searchParams.get("q") || "";
 
     const [clientes, setClientes] = useState<Cliente[]>([]);
     const [ciclos, setCiclos] = useState<Ciclo[]>([]);
     const [loading, setLoading] = useState(true);
-    const [search, setSearch] = useState("");
+    const [search, setSearch] = useState(initialSearch);
     const [page, setPage] = useState(0);
     const [total, setTotal] = useState(0);
     const [pageSize, setPageSize] = useState<number>(25);

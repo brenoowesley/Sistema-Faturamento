@@ -21,6 +21,7 @@ import {
     Plus,
     ChevronDown,
     ChevronRight,
+    Copy,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -218,6 +219,7 @@ export default function NovoFaturamento() {
     const [fileName, setFileName] = useState("");
     const [newCicloName, setNewCicloName] = useState("");
     const [addingCiclo, setAddingCiclo] = useState(false);
+    const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
     /* --- Results state --- */
     const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
@@ -230,27 +232,35 @@ export default function NovoFaturamento() {
         let totalLiquido = 0;
         let totalExcluido = 0;
         let totalPendenteCorrecao = 0;
+        let totalGeralArquivo = 0;
 
         for (const a of agendamentos) {
             originalBruto += a.originalValorIwof ?? a.valorIwof;
-            if (!a.isRemoved && a.status === "OK") {
-                const val = a.manualValue ?? a.valorIwof;
-                const ciclo = a.cicloNome || "Sem Ciclo";
-                sumByCiclo.set(ciclo, (sumByCiclo.get(ciclo) ?? 0) + val);
-                totalLiquido += val;
-            } else if (!a.isRemoved && a.status === "CORREÇÃO") {
-                // CORREÇÃO items: count their SUGGESTED value in liquid total
-                const val = a.suggestedValorIwof ?? a.valorIwof;
-                const ciclo = a.cicloNome || "Sem Ciclo";
-                sumByCiclo.set(ciclo, (sumByCiclo.get(ciclo) ?? 0) + val);
-                totalLiquido += val;
-                totalPendenteCorrecao += val;
-            } else if (a.isRemoved) {
+
+            if (!a.isRemoved) {
+                const isValuable = a.status === "OK" || a.status === "CORREÇÃO" || a.status === "CICLO_INCORRETO";
+
+                if (isValuable) {
+                    const val = a.status === "CORREÇÃO"
+                        ? (a.suggestedValorIwof ?? a.valorIwof)
+                        : (a.manualValue ?? a.valorIwof);
+
+                    totalGeralArquivo += val;
+
+                    if (a.status !== "CICLO_INCORRETO") {
+                        const ciclo = a.cicloNome || "Sem Ciclo";
+                        sumByCiclo.set(ciclo, (sumByCiclo.get(ciclo) ?? 0) + val);
+                        totalLiquido += val;
+                        if (a.status === "CORREÇÃO") totalPendenteCorrecao += val;
+                    }
+                }
+            } else {
                 totalExcluido += a.originalValorIwof ?? a.valorIwof;
             }
         }
 
         const summaryArr = Array.from(sumByCiclo.entries()).map(([ciclo, total]) => ({ ciclo: ciclo as string, total: total as number }));
+        summaryArr.push({ ciclo: "FATURAMENTO GERAL (ARQUIVO)", total: totalGeralArquivo });
         summaryArr.push({ ciclo: "BRUTO ORIGINAL", total: originalBruto });
         summaryArr.push({ ciclo: "LÍQUIDO P/ LOTE", total: totalLiquido });
         if (totalPendenteCorrecao > 0) {
@@ -398,7 +408,10 @@ export default function NovoFaturamento() {
                 const motivoCancelamento = colMotivo ? String(row[colMotivo] ?? "").trim() : "";
                 const responsavelCancelamento = colRespCanc ? String(row[colRespCanc] ?? "").trim() : "";
 
-                if (!loja && !refAgendamento) continue; // skip empty rows
+                if (!loja && !refAgendamento) {
+                    console.warn("Row skipped: no loja and no refAgendamento", row);
+                    continue;
+                }
 
                 /* --- Match client --- */
                 let matched: ClienteDB | undefined;
@@ -413,21 +426,27 @@ export default function NovoFaturamento() {
 
                 /* --- Validate --- */
                 let status: ValidationStatus = "OK";
-                if (fracaoHora < 0.16 && fracaoHora > 0) {
-                    status = "CANCELAR";
-                } else if (fracaoHora > 6) {
-                    status = "CORREÇÃO";
-                } else if (selectedCicloIds.length > 0) {
-                    // Se houver ciclos selecionados, a validação de ciclo é estrita.
-                    // Bloqueia se não houver cliente, se o cliente não tiver ciclo ou se o ciclo for diferente.
+
+                // 1. Period Validation (Highest Priority)
+                if (inicio && pStart && pEnd) {
+                    if (inicio < pStart || inicio > pEnd) {
+                        status = "FORA_PERIODO";
+                    }
+                }
+
+                // 2. Ciclo Validation (Second Priority)
+                if (status === "OK" && selectedCicloIds.length > 0) {
                     if (!matched || !matched.ciclo_faturamento_id || !selectedCicloIds.includes(matched.ciclo_faturamento_id)) {
                         status = "CICLO_INCORRETO";
                     }
                 }
 
-                if (status === "OK" && inicio && pStart && pEnd) {
-                    if (inicio < pStart || inicio > pEnd) {
-                        status = "FORA_PERIODO";
+                // 3. Technical Validations (Third Priority)
+                if (status === "OK") {
+                    if (fracaoHora < 0.16 && fracaoHora > 0) {
+                        status = "CANCELAR";
+                    } else if (fracaoHora > 6) {
+                        status = "CORREÇÃO";
                     }
                 }
 
@@ -534,6 +553,7 @@ export default function NovoFaturamento() {
                 suspicious: suspiciousListResult
             });
 
+            console.log(`Processing complete. Total input: ${rawRows.length}, Validated: ${parsed.length}, Skipped: ${rawRows.length - parsed.length}`);
             setAgendamentos(parsed);
 
             /* --- Conciliation --- */
@@ -565,14 +585,16 @@ export default function NovoFaturamento() {
 
     const onDrop = useCallback(
         (acceptedFiles: File[]) => {
-            const file = acceptedFiles[0];
-            if (!file) return;
-            setFileName(file.name);
+            setPendingFiles(prev => [...prev, ...acceptedFiles]);
+        },
+        []
+    );
 
+    const parseFile = (file: File): Promise<Record<string, string>[]> => {
+        return new Promise((resolve, reject) => {
             const ext = file.name.split(".").pop()?.toLowerCase();
 
             if (ext === "csv") {
-                // Auto-detect encoding: try UTF-8 first, fallback to ISO-8859-1 if garbled
                 const tryParse = (encoding: string) => {
                     Papa.parse(file, {
                         header: true,
@@ -580,35 +602,66 @@ export default function NovoFaturamento() {
                         skipEmptyLines: true,
                         complete: (result) => {
                             const rows = result.data as Record<string, string>[];
-                            // Check for mojibake patterns in headers + first few rows
+                            if (rows.length === 0) {
+                                resolve([]);
+                                return;
+                            }
                             const sample = [Object.keys(rows[0] || {}).join(" "), ...rows.slice(0, 5).map(r => Object.values(r).join(" "))].join(" ");
                             const hasMojibake = /Ã[£¡ªâ©³µ]|Ã\u0083|Ã\u0082|Ã§Ã|Ã­|Ã³|Ãº|Ã\u00A3/.test(sample);
 
                             if (encoding === "UTF-8" && hasMojibake) {
-                                // Retry with Latin-1
                                 tryParse("ISO-8859-1");
                             } else {
-                                processFile(rows);
+                                resolve(rows);
                             }
                         },
+                        error: (err) => reject(err),
                     });
                 };
                 tryParse("UTF-8");
             } else {
-                // xlsx / xls
                 const reader = new FileReader();
                 reader.onload = (e) => {
-                    const data = new Uint8Array(e.target?.result as ArrayBuffer);
-                    const wb = XLSX.read(data, { type: "array" });
-                    const ws = wb.Sheets[wb.SheetNames[0]];
-                    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" });
-                    processFile(rows);
+                    try {
+                        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+                        const wb = XLSX.read(data, { type: "array" });
+                        const ws = wb.Sheets[wb.SheetNames[0]];
+                        const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" });
+                        resolve(rows);
+                    } catch (err) {
+                        reject(err);
+                    }
                 };
+                reader.onerror = (err) => reject(err);
                 reader.readAsArrayBuffer(file);
             }
-        },
-        [processFile]
-    );
+        });
+    };
+
+    const handleProcessBatch = async () => {
+        if (pendingFiles.length === 0) return;
+        setProcessing(true);
+        console.log("Starting batch processing for", pendingFiles.length, "files");
+        try {
+            let allRows: Record<string, string>[] = [];
+            for (const file of pendingFiles) {
+                const rows = await parseFile(file);
+                console.log(`File "${file.name}": parsed ${rows.length} rows`);
+                allRows = [...allRows, ...rows];
+            }
+            console.log("Total rows collected for processing:", allRows.length);
+            await processFile(allRows);
+        } catch (err) {
+            console.error("Erro ao processar lote de arquivos:", err);
+            alert("Erro ao processar um ou mais arquivos. Verifique o console.");
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    const removePendingFile = (index: number) => {
+        setPendingFiles(prev => prev.filter((_, i) => i !== index));
+    };
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
@@ -617,7 +670,6 @@ export default function NovoFaturamento() {
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
             "application/vnd.ms-excel": [".xls"],
         },
-        maxFiles: 1,
     });
 
     /* --- Interactive Audit Actions --- */
@@ -949,10 +1001,10 @@ export default function NovoFaturamento() {
                         </div>
                     </div>
 
-                    {/* Right column: Dropzone */}
-                    <div className="card" style={{ display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                    {/* Right column: Dropzone + Pending Files */}
+                    <div className="card" style={{ display: "flex", flexDirection: "column" }}>
                         <p className="text-xs font-semibold uppercase tracking-wider text-[var(--fg-dim)] mb-3">
-                            Planilha de Agendamentos
+                            Planilhas de Agendamentos
                         </p>
                         <div
                             {...getRootProps()}
@@ -962,44 +1014,77 @@ export default function NovoFaturamento() {
                                     ? "2px solid var(--accent)"
                                     : "2px dashed var(--border)",
                                 borderRadius: "var(--radius-lg)",
-                                padding: "64px 24px",
+                                padding: pendingFiles.length > 0 ? "32px 24px" : "64px 24px",
                                 textAlign: "center",
                                 cursor: setupReady ? "pointer" : "not-allowed",
                                 opacity: setupReady ? 1 : 0.5,
                                 background: isDragActive ? "rgba(99,102,241,0.06)" : "transparent",
                                 transition: "all 0.2s ease",
-                                flex: 1,
                                 display: "flex",
                                 alignItems: "center",
                                 justifyContent: "center",
+                                marginBottom: pendingFiles.length > 0 ? 16 : 0
                             }}
                         >
                             <input {...getInputProps()} disabled={!setupReady} />
-                            {processing ? (
-                                <div className="flex flex-col items-center gap-3">
-                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--accent)]" />
-                                    <p className="text-sm text-[var(--fg-muted)]">Processando planilha...</p>
-                                </div>
-                            ) : (
-                                <div className="flex flex-col items-center gap-3">
-                                    {fileName ? (
-                                        <FileSpreadsheet size={48} className="text-[var(--accent)]" />
-                                    ) : (
-                                        <Upload size={48} className="text-[var(--fg-dim)]" />
-                                    )}
-                                    <p className="text-sm text-[var(--fg-muted)]">
-                                        {!setupReady
-                                            ? "Preencha o período e selecione ao menos um ciclo"
-                                            : fileName
-                                                ? `Arquivo carregado: ${fileName}`
-                                                : "Arraste a planilha aqui ou clique para selecionar"}
-                                    </p>
-                                    <p className="text-xs text-[var(--fg-dim)]">
-                                        Formatos aceitos: .xlsx, .xls, .csv
-                                    </p>
-                                </div>
-                            )}
+                            <div className="flex flex-col items-center gap-2">
+                                <Upload size={32} className="text-[var(--fg-dim)]" />
+                                <p className="text-sm text-[var(--fg-muted)]">
+                                    {!setupReady
+                                        ? "Preencha o período e selecione ao menos um ciclo"
+                                        : "Arraste as planilhas aqui ou clique para selecionar"}
+                                </p>
+                                <p className="text-[10px] text-[var(--fg-dim)]">
+                                    CSV, XLSX ou XLS
+                                </p>
+                            </div>
                         </div>
+
+                        {/* Pending Files List */}
+                        {pendingFiles.length > 0 && (
+                            <div className="flex-1 flex flex-col">
+                                <div className="space-y-2 mb-4 max-h-[200px] overflow-y-auto pr-2">
+                                    {pendingFiles.map((file, idx) => (
+                                        <div key={idx} className="flex items-center justify-between p-3 rounded-lg bg-[var(--bg-card-hover)] border border-[var(--border)]">
+                                            <div className="flex items-center gap-3 overflow-hidden">
+                                                <FileSpreadsheet size={18} className="text-[var(--accent)] flex-shrink-0" />
+                                                <span className="text-xs text-white truncate font-medium">{file.name}</span>
+                                                <span className="text-[10px] text-[var(--fg-dim)] flex-shrink-0">
+                                                    {(file.size / 1024).toFixed(1)} KB
+                                                </span>
+                                            </div>
+                                            <button
+                                                className="text-[var(--fg-dim)] hover:text-[var(--danger)] transition-colors p-1"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    removePendingFile(idx);
+                                                }}
+                                            >
+                                                <XCircle size={16} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <button
+                                    className="btn btn-primary w-full py-4 flex items-center justify-center gap-3 font-bold group"
+                                    onClick={handleProcessBatch}
+                                    disabled={processing || !setupReady}
+                                >
+                                    {processing ? (
+                                        <>
+                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                                            Processando...
+                                        </>
+                                    ) : (
+                                        <>
+                                            Processar {pendingFiles.length} {pendingFiles.length === 1 ? 'Planilha' : 'Planilhas'}
+                                            <CheckCircle2 size={18} className="group-hover:scale-110 transition-transform" />
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
@@ -1040,6 +1125,7 @@ export default function NovoFaturamento() {
                         setAgendamentos([]);
                         setSaveResult(null);
                         setFileName("");
+                        setPendingFiles([]);
                     }}
                 >
                     <ArrowLeft size={16} /> Voltar ao Setup
@@ -1063,11 +1149,13 @@ export default function NovoFaturamento() {
                             borderLeft:
                                 fs.ciclo === "BRUTO ORIGINAL"
                                     ? "3px solid var(--accent)"
-                                    : fs.ciclo === "EXCLUÍDOS"
-                                        ? "3px solid var(--danger)"
-                                        : fs.ciclo === "PENDENTES CORREÇÃO"
-                                            ? "3px solid #f59e0b"
-                                            : "3px solid #22c55e",
+                                    : fs.ciclo === "FATURAMENTO GERAL (ARQUIVO)"
+                                        ? "3px solid var(--accent)"
+                                        : fs.ciclo === "EXCLUÍDOS"
+                                            ? "3px solid var(--danger)"
+                                            : fs.ciclo === "PENDENTES CORREÇÃO"
+                                                ? "3px solid #f59e0b"
+                                                : "3px solid #22c55e",
                         }}
                     >
                         <div className="flex items-center justify-between">
@@ -1655,10 +1743,16 @@ export default function NovoFaturamento() {
 
                         // Lojas faturadas: have at least one active OK or CORREÇÃO appointment
                         const faturadoMap = new Map<string, { count: number; total: number; ciclo: string }>();
-                        const allLojasInSheet = new Set<string>();
+                        const allLojasInSheet = new Map<string, { name: string; ciclo: string; id: string | null }>();
 
                         for (const a of filtered) {
-                            allLojasInSheet.add(a.loja);
+                            if (!allLojasInSheet.has(a.loja)) {
+                                allLojasInSheet.set(a.loja, {
+                                    name: a.loja,
+                                    ciclo: a.cicloNome || "—",
+                                    id: a.clienteId
+                                });
+                            }
                             if (!a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO")) {
                                 const val = a.manualValue ?? (a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : a.valorIwof);
                                 const entry = faturadoMap.get(a.loja) ?? { count: 0, total: 0, ciclo: a.cicloNome || "—" };
@@ -1669,7 +1763,9 @@ export default function NovoFaturamento() {
                         }
 
                         const lojasFaturadas = Array.from(faturadoMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-                        const lojasSemFaturamento = Array.from(allLojasInSheet).filter(l => !faturadoMap.has(l)).sort();
+                        const lojasSemFaturamento = Array.from(allLojasInSheet.values())
+                            .filter(l => !faturadoMap.has(l.name))
+                            .sort((a, b) => a.name.localeCompare(b.name));
 
                         // Ausentes filtrados por ciclo
                         const ausentesFiltrados = conciliacaoCicloFilter
@@ -1760,15 +1856,43 @@ export default function NovoFaturamento() {
                                                 Lojas Sem Faturamento ({lojasSemFaturamento.length})
                                             </h4>
                                         </div>
-                                        <p className="text-xs text-[var(--fg-dim)] mb-2">
+                                        <p className="text-xs text-[var(--fg-dim)] mb-4">
                                             Lojas presentes na planilha, mas sem agendamentos válidos (cancelados, excluídos, ou sem match).
                                         </p>
-                                        <div className="flex flex-wrap gap-2">
-                                            {lojasSemFaturamento.map(loja => (
-                                                <span key={loja} className="badge" style={{ background: "rgba(245,158,11,0.12)", color: "#f59e0b", fontSize: 11 }}>
-                                                    {loja}
-                                                </span>
-                                            ))}
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-[11px]">
+                                                <thead>
+                                                    <tr className="text-[var(--fg-dim)] uppercase tracking-wider text-[10px]">
+                                                        <th className="text-left py-2 px-3">Loja</th>
+                                                        <th className="text-center py-2 px-3">Ciclo</th>
+                                                        <th className="text-right py-2 px-3">Ação</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {lojasSemFaturamento.map(item => (
+                                                        <tr key={item.name} className="border-t border-[var(--border)] hover:bg-[var(--bg-card-hover)]">
+                                                            <td className="py-2 px-3">
+                                                                <span className="font-medium" style={{ color: "#f59e0b" }}>{item.name}</span>
+                                                            </td>
+                                                            <td className="py-2 px-3 text-center">
+                                                                <span className="badge" style={{ background: "rgba(245,158,11,0.12)", color: "#f59e0b", fontSize: 10 }}>
+                                                                    {item.ciclo}
+                                                                </span>
+                                                            </td>
+                                                            <td className="py-2 px-3 text-right">
+                                                                <Link
+                                                                    href={`/clientes?q=${encodeURIComponent(item.name)}`}
+                                                                    className="btn btn-ghost btn-xs gap-1 py-1 h-auto"
+                                                                    style={{ color: "#f59e0b" }}
+                                                                >
+                                                                    <ExternalLink size={12} />
+                                                                    Editar Loja
+                                                                </Link>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
                                         </div>
                                     </div>
                                 )}

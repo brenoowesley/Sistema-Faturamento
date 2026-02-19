@@ -17,8 +17,12 @@ import {
     ChevronDown,
     X,
     Eye,
-    Pencil
+    Pencil,
+    Upload,
+    AlertTriangle
 } from "lucide-react";
+import { useDropzone } from "react-dropzone";
+import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
 import Modal from "@/components/Modal";
 
@@ -93,6 +97,22 @@ const formatBRL = (val: number) => {
 const parseBRL = (val: string) => {
     if (!val) return 0;
     return parseFloat(val.replace(/\./g, "").replace(",", ".")) || 0;
+};
+
+const parseDinheiroBrasil = (val: any): number => {
+    if (typeof val === 'number') return val;
+    if (!val) return 0;
+    const clean = String(val)
+        .replace("R$", "")
+        .replace(/\s/g, "")
+        .replace(/\./g, "")
+        .replace(",", ".");
+    return parseFloat(clean) || 0;
+};
+
+const limparCNPJ = (cnpj: any): string => {
+    if (!cnpj) return "";
+    return String(cnpj).replace(/\D/g, "");
 };
 
 /* ================================================================
@@ -181,6 +201,43 @@ function SearchableSelect({ options, value, onChange, placeholder }: SearchableS
     );
 }
 
+interface BatchUploadActionProps {
+    onUpload: (files: File[]) => void;
+    isLoading: boolean;
+    type: "ACRESCIMO" | "DESCONTO";
+}
+
+function BatchUploadAction({ onUpload, isLoading, type }: BatchUploadActionProps) {
+    const { getRootProps, getInputProps, isDragActive } = useDropzone({
+        onDrop: onUpload,
+        accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"], "text/csv": [".csv"] },
+        multiple: false
+    });
+
+    return (
+        <div
+            {...getRootProps()}
+            className={`flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-xl transition-all cursor-pointer space-y-2
+                ${isDragActive ? 'border-[var(--primary)] bg-[var(--primary)]/10' : 'border-[var(--border)] hover:border-[var(--primary)]/50 hover:bg-[var(--bg-card)]'}`}
+        >
+            <input {...getInputProps()} />
+            <div className={`p-3 rounded-full ${type === 'DESCONTO' ? 'bg-amber-500/10 text-amber-500' : 'bg-[var(--primary)]/10 text-[var(--primary)]'}`}>
+                <Upload size={24} />
+            </div>
+            <div className="text-center">
+                <p className="text-sm font-bold text-white">Importar Lote ({type === 'DESCONTO' ? 'Descontos' : 'Acréscimos'})</p>
+                <p className="text-[10px] text-[var(--fg-dim)] uppercase tracking-widest mt-1">Excel (.xlsx) ou CSV</p>
+            </div>
+            {isLoading && (
+                <div className="flex items-center gap-2 text-[var(--primary)] animate-pulse">
+                    <div className="w-2 h-2 rounded-full bg-current animate-bounce"></div>
+                    <span className="text-[10px] font-bold">Processando...</span>
+                </div>
+            )}
+        </div>
+    );
+}
+
 /* ================================================================
    COMPONENT
    ================================================================ */
@@ -201,6 +258,11 @@ export default function AjustesPage() {
     const [selectedAjuste, setSelectedAjuste] = useState<Ajuste | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [isSaving, setIsSaving] = useState(false);
+
+    // Batch Upload states
+    const [pendingAdjustments, setPendingAdjustments] = useState<any[]>([]);
+    const [showPreview, setShowPreview] = useState(false);
+    const [isProcessingFile, setIsProcessingFile] = useState(false);
 
     // Form states
     const [formData, setFormData] = useState({
@@ -341,6 +403,129 @@ export default function AjustesPage() {
         else setShowModalAcrescimo(true);
     };
 
+    const handleFileUpload = useCallback(async (acceptedFiles: File[], type: AjusteTipo) => {
+        if (acceptedFiles.length === 0) return;
+        setIsProcessingFile(true);
+        const file = acceptedFiles[0];
+
+        try {
+            const data = await file.arrayBuffer();
+            const workbook = XLSX.read(data);
+            const sheetName = workbook.SheetNames[0];
+            const sheet = workbook.Sheets[sheetName];
+            const json = XLSX.utils.sheet_to_json<any>(sheet);
+
+            const processed: any[] = [];
+
+            for (const row of json) {
+                let clienteMatch: ClienteDB | undefined;
+                let valor = 0;
+                let motivo = "";
+                let status = "OK";
+                let warning = "";
+
+                if (type === "ACRESCIMO") {
+                    // Acréscimos: Nome, Loja, Vaga, Valor IWOF, ...
+                    const lojaNome = row["Loja"];
+                    const profissional = row["Nome"];
+                    const vaga = row["Vaga"];
+                    valor = parseDinheiroBrasil(row["Valor IWOF"]);
+                    motivo = `${vaga || "Vaga"} - ${profissional || "Profissional"}`;
+
+                    clienteMatch = clientes.find(c =>
+                        (c.razao_social || "").toLowerCase().trim() === (lojaNome || "").toLowerCase().trim() ||
+                        (c.nome_fantasia || "").toLowerCase().trim() === (lojaNome || "").toLowerCase().trim()
+                    );
+                } else {
+                    // Descontos: Empresa, CNPJ, Valor, Motivo, Usuário, Aplicado, ...
+                    const cnpj = limparCNPJ(row["CNPJ"]);
+                    const empresa = row["Empresa"];
+                    const motivoRaw = row["Motivo"];
+                    const usuario = row["Usuário"];
+                    const jaAplicado = String(row["Aplicado"]).toUpperCase() === "TRUE" || row["Aplicado"] === true;
+
+                    if (jaAplicado) continue; // Skip already applied
+
+                    valor = parseDinheiroBrasil(row["Valor"]);
+                    motivo = motivoRaw || "Desconto em Lote";
+                    const obsInterna = usuario ? `Usuário Importação: ${usuario}` : "";
+
+                    if (cnpj) {
+                        clienteMatch = clientes.find(c => limparCNPJ(c.cnpj) === cnpj);
+                    }
+                    if (!clienteMatch && empresa) {
+                        clienteMatch = clientes.find(c =>
+                            (c.razao_social || "").toLowerCase().trim() === (empresa || "").toLowerCase().trim() ||
+                            (c.nome_fantasia || "").toLowerCase().trim() === (empresa || "").toLowerCase().trim()
+                        );
+                    }
+                }
+
+                if (!clienteMatch) {
+                    status = "ERROR";
+                    warning = "Cliente não encontrado no banco.";
+                }
+
+                processed.push({
+                    id: crypto.randomUUID(),
+                    cliente_id: clienteMatch?.id || null,
+                    cliente_nome: clienteMatch ? (clienteMatch.nome_fantasia || clienteMatch.razao_social) : (row["Loja"] || row["Empresa"] || "N/A"),
+                    tipo: type,
+                    valor,
+                    motivo,
+                    observacao_interna: type === "DESCONTO" ? (row["Usuário"] ? `Usuário Importação: ${row["Usuário"]}` : "") : "",
+                    nome_profissional: row["Nome"] || "N/A",
+                    data_ocorrencia: new Date().toISOString().split("T")[0],
+                    status,
+                    warning
+                });
+            }
+
+            setPendingAdjustments(processed);
+            setShowPreview(true);
+        } catch (err) {
+            console.error("Error processing file:", err);
+            alert("Erro ao processar planilha.");
+        } finally {
+            setIsProcessingFile(false);
+        }
+    }, [clientes]);
+
+    const handleSaveBatch = async () => {
+        const toSave = pendingAdjustments.filter(p => p.status === "OK" && p.cliente_id);
+        if (toSave.length === 0) {
+            alert("Nenhum item válido para salvar.");
+            return;
+        }
+
+        setIsSaving(true);
+        try {
+            const payload = toSave.map(p => ({
+                cliente_id: p.cliente_id,
+                tipo: p.tipo,
+                valor: p.valor,
+                motivo: p.motivo,
+                nome_profissional: p.nome_profissional,
+                data_ocorrencia: p.data_ocorrencia,
+                observacao_interna: p.observacao_interna,
+                status_aplicacao: false
+            }));
+
+            const { error } = await supabase.from("ajustes_faturamento").insert(payload);
+            if (error) throw error;
+
+            alert(`${toSave.length} ajustes salvos com sucesso!`);
+            setShowPreview(false);
+            setPendingAdjustments([]);
+            fetchAjustes();
+        } catch (err: any) {
+            console.error("Error saving batch:", err);
+            alert("Erro ao salvar lote: " + err.message);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     // Filtered data
     const descontosPendentes = ajustes.filter(a => a.tipo === "DESCONTO" && !a.status_aplicacao);
     const acrescimosPendentes = ajustes.filter(a => a.tipo === "ACRESCIMO" && !a.status_aplicacao);
@@ -413,9 +598,18 @@ export default function AjustesPage() {
                                 {/* TAB CONTENTS */}
                                 {activeTab === "descontos" && (
                                     <div className="space-y-6">
-                                        <div className="flex justify-between items-center bg-amber-950/20 p-4 rounded-xl border border-amber-900/30">
-                                            <span className="text-amber-500 font-bold uppercase text-xs tracking-widest">Saldo Total Pendente</span>
-                                            <span className="text-2xl font-black text-amber-500">{fmtCurrency(totalDescontos)}</span>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div className="flex justify-between items-center bg-amber-950/20 p-4 rounded-xl border border-amber-900/30">
+                                                <div className="flex flex-col">
+                                                    <span className="text-amber-500 font-bold uppercase text-[10px] tracking-widest">Saldo Total Pendente</span>
+                                                    <span className="text-2xl font-black text-amber-500">{fmtCurrency(totalDescontos)}</span>
+                                                </div>
+                                            </div>
+                                            <BatchUploadAction
+                                                type="DESCONTO"
+                                                isLoading={isProcessingFile}
+                                                onUpload={(files) => handleFileUpload(files, "DESCONTO")}
+                                            />
                                         </div>
                                         <div className="table-container">
                                             <table className="w-full">
@@ -465,9 +659,18 @@ export default function AjustesPage() {
 
                                 {activeTab === "acrescimos" && (
                                     <div className="space-y-6">
-                                        <div className="flex justify-between items-center bg-[var(--primary)]/10 p-4 rounded-xl border border-[var(--primary)]/20">
-                                            <span className="text-[var(--primary)] font-bold uppercase text-xs tracking-widest">Saldo Total Pendente</span>
-                                            <span className="text-2xl font-black text-[var(--primary)]">{fmtCurrency(totalAcrescimos)}</span>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div className="flex justify-between items-center bg-[var(--primary)]/10 p-4 rounded-xl border border-[var(--primary)]/20">
+                                                <div className="flex flex-col">
+                                                    <span className="text-[var(--primary)] font-bold uppercase text-[10px] tracking-widest">Saldo Total Pendente</span>
+                                                    <span className="text-2xl font-black text-[var(--primary)]">{fmtCurrency(totalAcrescimos)}</span>
+                                                </div>
+                                            </div>
+                                            <BatchUploadAction
+                                                type="ACRESCIMO"
+                                                isLoading={isProcessingFile}
+                                                onUpload={(files) => handleFileUpload(files, "ACRESCIMO")}
+                                            />
                                         </div>
                                         <div className="table-container">
                                             <table className="w-full">
@@ -872,6 +1075,120 @@ export default function AjustesPage() {
                         </div>
                     </div>
                 )}
+            </Modal>
+
+            {/* MODAL PREVIEW BATCH */}
+            <Modal
+                isOpen={showPreview}
+                onClose={() => { setShowPreview(false); setPendingAdjustments([]); }}
+                title="Preview de Importação em Lote"
+                width="1000px"
+            >
+                <div className="space-y-6">
+                    <div className="bg-[var(--bg-main)] border border-[var(--border)] rounded-xl p-4 flex justify-between items-center shadow-inner">
+                        <div className="flex gap-6">
+                            <div className="flex flex-col">
+                                <span className="text-[10px] uppercase font-black text-[var(--fg-dim)] tracking-widest">Total Identificado</span>
+                                <span className="text-xl font-black text-white">{pendingAdjustments.length} itens</span>
+                            </div>
+                            <div className="flex flex-col border-l border-[var(--border)] pl-6">
+                                <span className="text-[10px] uppercase font-black text-[var(--fg-dim)] tracking-widest">Válidos p/ Salvar</span>
+                                <span className="text-xl font-black text-emerald-500">{pendingAdjustments.filter(p => p.status === "OK").length} itens</span>
+                            </div>
+                            <div className="flex flex-col border-l border-[var(--border)] pl-6">
+                                <span className="text-[10px] uppercase font-black text-[var(--fg-dim)] tracking-widest">Valor Total</span>
+                                <span className="text-xl font-black text-[var(--primary)]">
+                                    {fmtCurrency(pendingAdjustments.filter(p => p.status === "OK").reduce((acc, curr) => acc + curr.valor, 0))}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="max-h-[500px] overflow-y-auto border border-[var(--border)] rounded-xl bg-[var(--bg-card)]">
+                        <table className="w-full text-left border-collapse">
+                            <thead className="sticky top-0 bg-[var(--bg-card)] shadow-sm z-10">
+                                <tr className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest border-b border-[var(--border)]">
+                                    <th className="p-4">Status</th>
+                                    <th className="p-4">Cliente (Planilha)</th>
+                                    <th className="p-4">Tipo</th>
+                                    <th className="p-4">Descrição Gerada</th>
+                                    <th className="p-4 text-right">Valor</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {pendingAdjustments.map((item) => (
+                                    <tr key={item.id} className={`border-b border-[var(--border)]/50 ${item.status === 'ERROR' ? 'bg-red-500/5' : 'hover:bg-white/[0.02]'}`}>
+                                        <td className="p-4">
+                                            {item.status === "OK" ? (
+                                                <div className="flex items-center gap-1.5 text-emerald-500 text-[10px] font-bold">
+                                                    <CheckCircle2 size={14} /> OK
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center gap-1.5 text-red-500 text-[10px] font-bold" title={item.warning}>
+                                                    <AlertTriangle size={14} /> Mismatch
+                                                </div>
+                                            )}
+                                        </td>
+                                        <td className="p-4">
+                                            <div className="flex flex-col">
+                                                <span className={`text-sm font-bold ${item.status === 'ERROR' ? 'text-red-400' : 'text-white'}`}>
+                                                    {item.cliente_nome}
+                                                </span>
+                                                {item.status === 'ERROR' && (
+                                                    <span className="text-[9px] text-red-500/80 font-medium uppercase tracking-tight">
+                                                        ⚠️ {item.warning}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className="p-4">
+                                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${item.tipo === 'DESCONTO' ? 'bg-amber-900/40 text-amber-500' : 'bg-primary/20 text-primary'}`}>
+                                                {item.tipo}
+                                            </span>
+                                        </td>
+                                        <td className="p-4">
+                                            <div className="flex flex-col">
+                                                <div className="text-xs text-white max-w-[250px] truncate" title={item.motivo}>
+                                                    {item.motivo}
+                                                </div>
+                                                {item.observacao_interna && (
+                                                    <div className="text-[10px] text-[var(--fg-dim)] italic truncate max-w-[250px]">
+                                                        {item.observacao_interna}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className={`p-4 text-right font-mono font-bold ${item.tipo === 'DESCONTO' ? 'text-amber-500' : 'text-[var(--primary)]'}`}>
+                                            {fmtCurrency(item.valor)}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-2">
+                        <p className="text-[10px] text-[var(--fg-dim)] italic">
+                            * Apenas itens marcados como <span className="text-emerald-500 font-bold">OK</span> serão salvos no banco.
+                        </p>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => { setShowPreview(false); setPendingAdjustments([]); }}
+                                className="btn btn-ghost"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleSaveBatch}
+                                disabled={isSaving || pendingAdjustments.filter(p => p.status === "OK").length === 0}
+                                className="btn btn-primary min-w-[180px] h-12 flex items-center justify-center gap-2 shadow-lg shadow-[var(--primary)]/20"
+                            >
+                                {isSaving ? <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin" /> : <Save size={20} />}
+                                Salvar Ajustes no Banco
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </Modal>
         </div >
     );

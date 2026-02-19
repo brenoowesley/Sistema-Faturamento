@@ -484,7 +484,7 @@ export default function LoteFechamentoPage() {
                         )}
 
                         <button
-                            disabled={isClosing || totals.boleto === 0 || (lote && lote.status !== "PENDENTE" && lote.status !== "ABERTO")}
+                            disabled={isClosing || totals.boleto === 0 || !!(lote && lote.status !== "PENDENTE" && lote.status !== "ABERTO")}
                             onClick={handleFecharLote}
                             className="group relative w-full md:w-auto overflow-hidden bg-gradient-to-r from-[#6366f1] to-[#8b5cf6] text-white px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center justify-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed shadow-[0_4px_20px_rgba(99,102,241,0.3)] hover:shadow-[0_0_30px_rgba(99,102,241,0.5)]"
                         >

@@ -76,8 +76,15 @@ export async function GET(req: NextRequest) {
                 .from("faturamentos_lote")
                 .select("data_inicio_ciclo, data_fim_ciclo")
                 .eq("id", loteId)
-                .single();
-            if (loteErr) throw loteErr;
+                .maybeSingle();
+
+            if (loteErr) {
+                console.error("Erro ao buscar dados do lote:", loteErr);
+                throw loteErr;
+            }
+            if (!lote) {
+                return NextResponse.json({ error: "Lote não encontrado no banco de dados." }, { status: 404 });
+            }
 
             // Fetch ADJUSTMENTS for the simulated batch
             const { data: ajustes, error: ajErr } = await supabase
