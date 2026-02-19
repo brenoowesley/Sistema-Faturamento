@@ -1,6 +1,6 @@
-"use client";
+import Link from "next/link";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useDropzone } from "react-dropzone";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
@@ -35,15 +35,17 @@ interface ClienteDB {
     razao_social: string;
     nome_fantasia: string | null;
     nome: string | null;
+    nome_conta_azul: string | null;
     cnpj: string;
     ciclo_faturamento_id: string | null;
     ciclos_faturamento?: { nome: string } | null;
     status: boolean;
 }
 
-type ValidationStatus = "OK" | "CANCELAR" | "CORREÇÃO" | "FORA_PERIODO";
+type ValidationStatus = "OK" | "CANCELAR" | "CORREÇÃO" | "FORA_PERIODO" | "DUPLICATA" | "EXCLUIDO";
 
 interface Agendamento {
+    id: string;
     nome: string;
     telefone: string;
     estado: string;
@@ -71,6 +73,7 @@ interface Agendamento {
     // Interactive fields
     isRemoved?: boolean;
     manualValue?: number;
+    exclusionReason?: string;
 }
 
 interface ConciliationResult {
@@ -79,7 +82,7 @@ interface ConciliationResult {
 }
 
 type Step = "setup" | "results";
-type ResultTab = "validacoes" | "duplicatas" | "conciliacao" | "validados";
+type ResultTab = "validacoes" | "duplicatas" | "conciliacao" | "validados" | "excluidos";
 
 /* ================================================================
    COLUMN MAP — case-insensitive header → key
@@ -203,7 +206,34 @@ export default function NovoFaturamento() {
     /* --- Results state --- */
     const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
     const [conciliation, setConciliation] = useState<ConciliationResult>({ naoCadastrados: [], ausentesNoLote: [] });
-    const [financialSummary, setFinancialSummary] = useState<{ ciclo: string; total: number }[]>([]);
+    const financialSummary = useMemo(() => {
+        if (agendamentos.length === 0) return [];
+
+        const sumByCiclo = new Map<string, number>();
+        let originalBruto = 0;
+        let totalLiquido = 0;
+        let totalExcluido = 0;
+
+        for (const a of agendamentos) {
+            originalBruto += a.valorIwof;
+            if (!a.isRemoved && a.status === "OK") {
+                const ciclo = a.cicloNome || "Sem Ciclo";
+                sumByCiclo.set(ciclo, (sumByCiclo.get(ciclo) ?? 0) + a.valorIwof);
+                totalLiquido += a.valorIwof;
+            } else if (a.isRemoved) {
+                totalExcluido += a.valorIwof;
+            }
+        }
+
+        const summaryArr = Array.from(sumByCiclo.entries()).map(([ciclo, total]) => ({ ciclo: ciclo as string, total: total as number }));
+        summaryArr.push({ ciclo: "BRUTO ORIGINAL", total: originalBruto });
+        summaryArr.push({ ciclo: "LÍQUIDO P/ LOTE", total: totalLiquido });
+        summaryArr.push({ ciclo: "EXCLUÍDOS", total: totalExcluido });
+
+        return summaryArr;
+    }, [agendamentos]);
+
+    const agendamentosMap = useMemo(() => new Map(agendamentos.map(a => [a.id, a])), [agendamentos]);
     const [activeTab, setActiveTab] = useState<ResultTab>("validacoes");
     const [processing, setProcessing] = useState(false);
     const [dbClientes, setDbClientes] = useState<ClienteDB[]>([]);
@@ -216,7 +246,7 @@ export default function NovoFaturamento() {
 
     /* --- Save state --- */
     const [saving, setSaving] = useState(false);
-    const [saveResult, setSaveResult] = useState<{ ok: number; err: number } | null>(null);
+    const [saveResult, setSaveResult] = useState<{ ok: number; err: number; loteId?: string } | null>(null);
 
     /* --- Fetch ciclos --- */
     useEffect(() => {
@@ -267,7 +297,7 @@ export default function NovoFaturamento() {
             /* --- Fetch all active clients from DB --- */
             const { data: clientesDB } = await supabase
                 .from("clientes")
-                .select("id, razao_social, nome_fantasia, nome, cnpj, ciclo_faturamento_id, ciclos_faturamento(nome), status")
+                .select("id, razao_social, nome_fantasia, nome, nome_conta_azul, cnpj, ciclo_faturamento_id, ciclos_faturamento(nome), status")
                 .eq("status", true);
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -279,9 +309,14 @@ export default function NovoFaturamento() {
             const clienteByName = new Map<string, ClienteDB>();
             for (const c of clientes) {
                 clienteByCnpj.set(normalizeCnpj(c.cnpj), c);
+                // Populate name lookup with all name variants
                 const names = [c.razao_social, c.nome_fantasia, c.nome].filter(Boolean).map((n) => n!.toLowerCase().trim());
                 for (const n of names) {
                     clienteByName.set(n, c);
+                }
+                // Prioritize nome_conta_azul — set LAST so it overwrites any previous entry with the same key
+                if (c.nome_conta_azul) {
+                    clienteByName.set(c.nome_conta_azul.toLowerCase().trim(), c);
                 }
             }
 
@@ -325,28 +360,40 @@ export default function NovoFaturamento() {
                 let status: ValidationStatus = "OK";
                 if (fracaoHora < 0.16 && fracaoHora > 0) {
                     status = "CANCELAR";
-                } else if (fracaoHora > 6) {
-                    status = "CORREÇÃO";
                 } else if (inicio && pStart && pEnd) {
                     if (inicio < pStart || inicio > pEnd) {
                         status = "FORA_PERIODO";
                     }
                 }
 
+                /* --- Auto-cap at 6 hours --- */
+                let cappedFracaoHora = fracaoHora;
+                let cappedValorIwof = valorIwof;
+                let cappedTermino = termino;
+                if (fracaoHora > 6) {
+                    const ratio = 6 / fracaoHora;
+                    cappedFracaoHora = 6;
+                    cappedValorIwof = Math.round(valorIwof * ratio * 100) / 100;
+                    if (inicio) {
+                        cappedTermino = new Date(inicio.getTime() + 6 * 60 * 60 * 1000);
+                    }
+                }
+
                 parsed.push({
+                    id: `${Date.now()}-${parsed.length}-${Math.random().toString(36).slice(2)}`,
                     nome,
                     telefone,
                     estado,
                     loja: loja.toUpperCase(), // ALWAYS UPPERCASE
                     vaga,
                     inicio,
-                    termino,
+                    termino: cappedTermino,
                     refAgendamento,
                     agendadoEm,
                     iniciadoEm,
                     concluidoEm,
-                    valorIwof,
-                    fracaoHora,
+                    valorIwof: cappedValorIwof,
+                    fracaoHora: cappedFracaoHora,
                     statusAgendamento,
                     dataCancelamento,
                     motivoCancelamento,
@@ -359,48 +406,44 @@ export default function NovoFaturamento() {
             }
 
             /* --- Duplicate Detection --- */
-            const identicalGroups: Map<string, Agendamento[]> = new Map();
-            const suspiciousList: Agendamento[][] = [];
-            const seenInGroups = new Set<number>(); // Use index instead of refAgendamento for exclusion
+            const identicalMap: Map<string, Agendamento[]> = new Map();
+            const suspiciousListResult: Agendamento[][] = [];
+            const seenIndicesSet = new Set<number>();
 
             for (let i = 0; i < parsed.length; i++) {
                 const a = parsed[i];
-                if (seenInGroups.has(i)) continue;
+                // Exact key matching all core content
+                const key = `${a.nome.toLowerCase()}|${a.loja.toLowerCase()}|${a.inicio?.getTime()}|${a.termino?.getTime()}|${a.valorIwof}|${a.vaga.toLowerCase()}|${a.telefone}|${a.fracaoHora}`;
 
-                const sameKey = parsed.filter((x, idx) =>
-                    idx !== i &&
-                    !seenInGroups.has(idx) &&
-                    x.nome === a.nome &&
-                    x.loja === a.loja &&
-                    x.inicio?.getTime() === a.inicio?.getTime() &&
-                    x.termino?.getTime() === a.termino?.getTime() &&
-                    x.valorIwof === a.valorIwof
-                );
+                if (!identicalMap.has(key)) {
+                    identicalMap.set(key, []);
+                }
+                identicalMap.get(key)!.push(a);
+            }
 
-                if (sameKey.length > 0) {
-                    const group = [a, ...sameKey];
-                    // Also include logic where even if refAgendamento is identical but other fields are identical
-                    // Marking as identical if all core fields match (even if it's the same system ID)
-                    seenInGroups.add(i);
-                    parsed.forEach((x, idx) => {
-                        if (sameKey.includes(x)) seenInGroups.add(idx);
+            const identicalGroupsResult: Agendamento[][] = [];
+            for (const group of identicalMap.values()) {
+                if (group.length > 1) {
+                    identicalGroupsResult.push(group);
+                    group.forEach(a => {
+                        const idx = parsed.indexOf(a);
+                        if (idx !== -1) seenIndicesSet.add(idx);
                     });
-                    const groupKey = `${a.nome}|${a.loja}|${a.inicio?.getTime()}|${a.termino?.getTime()}|${a.valorIwof}`;
-                    identicalGroups.set(groupKey, group);
                 }
             }
 
             // Suspicious: >99% similarity in name + same exact inicio + same exact termino
             for (let i = 0; i < parsed.length; i++) {
                 const a = parsed[i];
-                if (seenInGroups.has(i)) continue;
+                if (seenIndicesSet.has(i)) continue;
 
                 const suspicious = parsed.filter((b, idx) => {
-                    if (idx === i || seenInGroups.has(idx)) return false;
+                    if (idx === i || seenIndicesSet.has(idx)) return false;
 
                     const sameInicio = a.inicio?.getTime() === b.inicio?.getTime();
                     const sameTermino = a.termino?.getTime() === b.termino?.getTime();
-                    if (!sameInicio || !sameTermino) return false;
+                    const sameLoja = a.loja === b.loja;
+                    if (!sameInicio || !sameTermino || !sameLoja) return false;
 
                     const nameSim = getSimilarity(a.nome, b.nome);
                     return nameSim >= 0.99;
@@ -408,17 +451,17 @@ export default function NovoFaturamento() {
 
                 if (suspicious.length > 0) {
                     const group = [a, ...suspicious];
-                    seenInGroups.add(i);
+                    seenIndicesSet.add(i);
                     parsed.forEach((x, idx) => {
-                        if (suspicious.includes(x)) seenInGroups.add(idx);
+                        if (suspicious.includes(x)) seenIndicesSet.add(idx);
                     });
-                    suspiciousList.push(group);
+                    suspiciousListResult.push(group);
                 }
             }
 
             setDuplicates({
-                identical: Array.from(identicalGroups.values()),
-                suspicious: suspiciousList
+                identical: identicalGroupsResult,
+                suspicious: suspiciousListResult
             });
 
             setAgendamentos(parsed);
@@ -435,30 +478,10 @@ export default function NovoFaturamento() {
                 }
             }
 
-            // B) Clientes cadastrados com o ciclo selecionado que NÃO vieram na planilha
-            const ausentesNoLote = clientes.filter((c) => {
-                if (selectedCicloIds.length > 0 && c.ciclo_faturamento_id && !selectedCicloIds.includes(c.ciclo_faturamento_id)) return false;
-                return !lojasVistas.has(c.id);
-            });
-
             setConciliation({
                 naoCadastrados: Array.from(naoCadastrados.values()),
-                ausentesNoLote,
+                ausentesNoLote: [],
             });
-
-            /* --- Financial summary --- */
-            const sumByCiclo = new Map<string, number>();
-            for (const a of parsed) {
-                if (a.status !== "OK") continue;
-                const ciclo = a.cicloNome || "Sem Ciclo";
-                sumByCiclo.set(ciclo, (sumByCiclo.get(ciclo) ?? 0) + a.valorIwof);
-            }
-            // Add totals for all rows (including non-OK for visibility)
-            let grandTotal = 0;
-            for (const a of parsed) grandTotal += a.valorIwof;
-            const summaryArr = Array.from(sumByCiclo.entries()).map(([ciclo, total]) => ({ ciclo, total }));
-            summaryArr.push({ ciclo: "TOTAL BRUTO", total: grandTotal });
-            setFinancialSummary(summaryArr);
 
             setProcessing(false);
             setStep("results");
@@ -479,14 +502,28 @@ export default function NovoFaturamento() {
             const ext = file.name.split(".").pop()?.toLowerCase();
 
             if (ext === "csv") {
-                Papa.parse(file, {
-                    header: true,
-                    encoding: "ISO-8859-1",
-                    skipEmptyLines: true,
-                    complete: (result) => {
-                        processFile(result.data as Record<string, string>[]);
-                    },
-                });
+                // Auto-detect encoding: try UTF-8 first, fallback to ISO-8859-1 if garbled
+                const tryParse = (encoding: string) => {
+                    Papa.parse(file, {
+                        header: true,
+                        encoding,
+                        skipEmptyLines: true,
+                        complete: (result) => {
+                            const rows = result.data as Record<string, string>[];
+                            // Check for mojibake patterns in headers + first few rows
+                            const sample = [Object.keys(rows[0] || {}).join(" "), ...rows.slice(0, 5).map(r => Object.values(r).join(" "))].join(" ");
+                            const hasMojibake = /Ã[£¡ªâ©³µ]|Ã\u0083|Ã\u0082|Ã§Ã|Ã­|Ã³|Ãº|Ã\u00A3/.test(sample);
+
+                            if (encoding === "UTF-8" && hasMojibake) {
+                                // Retry with Latin-1
+                                tryParse("ISO-8859-1");
+                            } else {
+                                processFile(rows);
+                            }
+                        },
+                    });
+                };
+                tryParse("UTF-8");
             } else {
                 // xlsx / xls
                 const reader = new FileReader();
@@ -514,16 +551,16 @@ export default function NovoFaturamento() {
     });
 
     /* --- Interactive Audit Actions --- */
-    const toggleRemoval = (ref: string) => {
+    const toggleRemoval = (id: string) => {
         setAgendamentos((prev) =>
-            prev.map((a) => (a.refAgendamento === ref ? { ...a, isRemoved: !a.isRemoved } : a))
+            prev.map((a) => (a.id === id ? { ...a, isRemoved: !a.isRemoved } : a))
         );
     };
 
     const massRemoveForaPeriodo = () => {
         setAgendamentos((prev) =>
             prev.map((a) => {
-                const isSelected = selectedRefs.has(a.refAgendamento);
+                const isSelected = selectedRefs.has(a.id);
                 if (isSelected && a.status === "FORA_PERIODO") {
                     return { ...a, isRemoved: true };
                 }
@@ -533,11 +570,11 @@ export default function NovoFaturamento() {
         setSelectedRefs(new Set());
     };
 
-    const toggleSelect = (ref: string) => {
+    const toggleSelect = (id: string) => {
         setSelectedRefs((prev) => {
             const next = new Set(prev);
-            if (next.has(ref)) next.delete(ref);
-            else next.add(ref);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
             return next;
         });
     };
@@ -557,10 +594,11 @@ export default function NovoFaturamento() {
         });
     };
 
-    const keepOnlyOne = (idsToKeepOne: string[]) => {
-        if (idsToKeepOne.length < 2) return;
+    const keepOnlyOne = (ids: string[]) => {
+        if (ids.length < 2) return;
+        const toRemove = new Set(ids.slice(1));
         setAgendamentos(prev => prev.map(a => {
-            if (idsToKeepOne.slice(1).includes(a.refAgendamento)) {
+            if (toRemove.has(a.id)) {
                 return { ...a, isRemoved: true };
             }
             return a;
@@ -568,32 +606,32 @@ export default function NovoFaturamento() {
     };
 
     const autoClearDuplicates = () => {
-        const refsToRemove = new Set<string>();
+        const idsToRemove = new Set<string>();
 
         // ONLY Identical groups for auto cleanup
         duplicates.identical.forEach(group => {
             group.slice(1).forEach(a => {
-                if (!a.isRemoved) refsToRemove.add(a.refAgendamento);
+                if (!a.isRemoved) idsToRemove.add(a.id);
             });
         });
 
-        if (refsToRemove.size === 0) return;
+        if (idsToRemove.size === 0) return;
 
         setAgendamentos(prev => prev.map(a => {
-            if (refsToRemove.has(a.refAgendamento)) {
+            if (idsToRemove.has(a.id)) {
                 return { ...a, isRemoved: true };
             }
             return a;
         }));
 
-        setRemovedCount(refsToRemove.size);
+        setRemovedCount(idsToRemove.size);
         setTimeout(() => setRemovedCount(null), 5000);
     };
 
-    const applyCorrection = (ref: string, newValue: number) => {
+    const applyCorrection = (id: string, newValue: number) => {
         setAgendamentos((prev) =>
             prev.map((a) =>
-                a.refAgendamento === ref ? { ...a, manualValue: newValue, status: "OK" as const } : a
+                a.id === id ? { ...a, manualValue: newValue, status: "OK" as const } : a
             )
         );
         setEditingAgendamentoId(null);
@@ -607,9 +645,7 @@ export default function NovoFaturamento() {
         setSaving(true);
         setSaveResult(null);
 
-        const validadosParaSalvar = agendamentos.filter(
-            (a) => a.status === "OK" && a.clienteId && !a.isRemoved
-        );
+
 
         /* 1) Create lote */
         const { data: lote, error: loteErr } = await supabase
@@ -632,20 +668,39 @@ export default function NovoFaturamento() {
         }
 
         /* 2) Bulk insert agendamentos */
-        const rows = validadosParaSalvar.map((a) => {
-            const cliente = dbClientes.find((c) => c.id === a.clienteId);
-            return {
-                lote_id: lote.id,
-                nome_profissional: a.nome || "N/A",
-                loja_id: a.clienteId!,
-                cnpj_loja: cliente?.cnpj || null,
-                data_inicio: a.inicio?.toISOString() ?? periodoInicio,
-                data_fim: a.termino?.toISOString() ?? periodoFim,
-                valor_iwof: a.manualValue ?? a.valorIwof,
-                fracao_hora: a.fracaoHora,
-                status_validacao: "OK",
-            };
-        });
+        const allDuplicateIds = new Set([
+            ...duplicates.identical.flat().map(d => d.id),
+            ...duplicates.suspicious.flat().map(d => d.id)
+        ]);
+
+        const rows = agendamentos
+            .filter((a) => a.clienteId) // only those with a client match
+            .map((a) => {
+                let finalStatus = a.status as string;
+
+                if (a.isRemoved) {
+                    if (a.status === "CANCELAR") finalStatus = "CANCELADO";
+                    else if (allDuplicateIds.has(a.id)) {
+                        finalStatus = "DUPLICATA";
+                    } else {
+                        finalStatus = "EXCLUIDO";
+                    }
+                } else if (a.status === "OK") {
+                    finalStatus = "VALIDADO";
+                }
+
+                return {
+                    lote_id: lote.id,
+                    nome_profissional: a.nome || "N/A",
+                    loja_id: a.clienteId!,
+                    cnpj_loja: a.refAgendamento || null,
+                    data_inicio: a.inicio?.toISOString() ?? periodoInicio,
+                    data_fim: a.termino?.toISOString() ?? periodoFim,
+                    valor_iwof: a.manualValue ?? a.valorIwof,
+                    fracao_hora: a.fracaoHora,
+                    status_validacao: finalStatus,
+                };
+            });
 
         let ok = 0;
         let err = 0;
@@ -664,16 +719,17 @@ export default function NovoFaturamento() {
         }
 
         setSaving(false);
-        setSaveResult({ ok, err });
+        setSaveResult({ ok, err, loteId: lote.id });
     };
 
     /* ================================================================
        DERIVED DATA
        ================================================================ */
 
-    const validacoes = agendamentos.filter((a) => a.status === "CANCELAR" || a.status === "CORREÇÃO");
-    const foraPeriodo = agendamentos.filter((a) => a.status === "FORA_PERIODO");
-    const validados = agendamentos.filter((a) => a.status === "OK");
+    const excluidos = agendamentos.filter((a) => a.isRemoved);
+    const validacoes = agendamentos.filter((a) => !a.isRemoved && (a.status === "CANCELAR" || a.status === "CORREÇÃO"));
+    const foraPeriodo = agendamentos.filter((a) => !a.isRemoved && a.status === "FORA_PERIODO");
+    const validados = agendamentos.filter((a) => !a.isRemoved && a.status === "OK");
     const selectedCicloNomes = ciclos.filter((c) => selectedCicloIds.includes(c.id)).map((c) => c.nome);
 
     const setupReady = periodoInicio && periodoFim && selectedCicloIds.length > 0;
@@ -859,8 +915,19 @@ export default function NovoFaturamento() {
 
     const TABS: { key: ResultTab; label: string; count: number }[] = [
         { key: "validacoes", label: "Validações", count: validacoes.length + foraPeriodo.length },
-        { key: "duplicatas", label: "Duplicatas", count: duplicates.identical.length + duplicates.suspicious.length },
+        {
+            key: "duplicatas",
+            label: "Duplicatas",
+            count: duplicates.identical.reduce((acc, group) => {
+                const activeCount = group.filter(item => !(agendamentosMap.get(item.id)?.isRemoved)).length;
+                return acc + Math.max(0, activeCount - 1);
+            }, 0) + duplicates.suspicious.filter(group => {
+                const activeCount = group.filter(item => !(agendamentosMap.get(item.id)?.isRemoved)).length;
+                return activeCount > 1;
+            }).length // Use length of filtered array
+        },
         { key: "conciliacao", label: "Conciliação", count: conciliation.naoCadastrados.length + conciliation.ausentesNoLote.length },
+        { key: "excluidos", label: "Excluídos", count: excluidos.length },
         { key: "validados", label: "Validados", count: validados.length },
     ];
 
@@ -895,9 +962,12 @@ export default function NovoFaturamento() {
                         key={fs.ciclo}
                         className="card"
                         style={{
-                            borderLeft: fs.ciclo === "TOTAL BRUTO"
-                                ? "3px solid var(--accent)"
-                                : "3px solid #22c55e",
+                            borderLeft:
+                                fs.ciclo === "BRUTO ORIGINAL"
+                                    ? "3px solid var(--accent)"
+                                    : fs.ciclo === "EXCLUÍDOS"
+                                        ? "3px solid var(--danger)"
+                                        : "3px solid #22c55e",
                         }}
                     >
                         <div className="flex items-center justify-between">
@@ -908,7 +978,12 @@ export default function NovoFaturamento() {
                                 <p
                                     className="text-xl font-bold mt-1"
                                     style={{
-                                        color: fs.ciclo === "TOTAL BRUTO" ? "var(--accent)" : "#22c55e",
+                                        color:
+                                            fs.ciclo === "BRUTO ORIGINAL"
+                                                ? "var(--accent)"
+                                                : fs.ciclo === "EXCLUÍDOS"
+                                                    ? "var(--danger)"
+                                                    : "#22c55e",
                                     }}
                                 >
                                     {fmtCurrency(fs.total)}
@@ -917,7 +992,12 @@ export default function NovoFaturamento() {
                             <DollarSign
                                 size={24}
                                 style={{
-                                    color: fs.ciclo === "TOTAL BRUTO" ? "var(--accent)" : "#22c55e",
+                                    color:
+                                        fs.ciclo === "BRUTO ORIGINAL"
+                                            ? "var(--accent)"
+                                            : fs.ciclo === "EXCLUÍDOS"
+                                                ? "var(--danger)"
+                                                : "#22c55e",
                                     opacity: 0.4,
                                 }}
                             />
@@ -1026,7 +1106,7 @@ export default function NovoFaturamento() {
                                                                         MOTIVO: {a.status === "CANCELAR" ? "MENOS DE 10 MINUTOS" : "MAIS DE 6 HORAS"}
                                                                     </p>
 
-                                                                    {editingAgendamentoId === a.refAgendamento ? (
+                                                                    {editingAgendamentoId === a.id ? (
                                                                         <div className="bg-[var(--bg-card-hover)] p-3 rounded mb-4">
                                                                             <label className="text-[10px] text-[var(--fg-dim)] mb-1 block uppercase">Ajustar Valor Bruto</label>
                                                                             <div className="flex gap-2">
@@ -1039,7 +1119,7 @@ export default function NovoFaturamento() {
                                                                                 />
                                                                                 <button
                                                                                     className="btn btn-primary btn-sm h-8"
-                                                                                    onClick={() => applyCorrection(a.refAgendamento, parseFloat(tempValue) || 0)}
+                                                                                    onClick={() => applyCorrection(a.id, parseFloat(tempValue) || 0)}
                                                                                 >
                                                                                     Ok
                                                                                 </button>
@@ -1082,16 +1162,16 @@ export default function NovoFaturamento() {
                                                                         <div className="flex items-center gap-1">
                                                                             <button
                                                                                 className={`btn btn-sm h-7 px-2 text-[10px] ${a.isRemoved ? "btn-success" : "btn-danger"}`}
-                                                                                onClick={() => toggleRemoval(a.refAgendamento)}
+                                                                                onClick={() => toggleRemoval(a.id)}
                                                                             >
                                                                                 {a.isRemoved ? "Restaurar" : "Remover"}
                                                                             </button>
 
-                                                                            {!a.isRemoved && a.status === "CORREÇÃO" && editingAgendamentoId !== a.refAgendamento && (
+                                                                            {!a.isRemoved && a.status === "CORREÇÃO" && editingAgendamentoId !== a.id && (
                                                                                 <button
                                                                                     className="btn btn-ghost btn-sm h-7 px-2 text-[10px] border border-[var(--border)]"
                                                                                     onClick={() => {
-                                                                                        setEditingAgendamentoId(a.refAgendamento);
+                                                                                        setEditingAgendamentoId(a.id);
                                                                                         setTempValue((a.manualValue ?? a.valorIwof).toString());
                                                                                     }}
                                                                                 >
@@ -1233,30 +1313,38 @@ export default function NovoFaturamento() {
                                                 </h4>
                                             </div>
                                             <div className="space-y-4">
-                                                {duplicates.identical.map((group, idx) => (
-                                                    <div key={idx} className="bg-[var(--bg-card-hover)] rounded-lg p-4 border border-[var(--border)]">
-                                                        <div className="flex justify-between items-center mb-3">
-                                                            <div className="text-xs text-[var(--fg-dim)]">
-                                                                Mesmo Profissional, Loja, Horário e Valor
-                                                            </div>
-                                                            <button
-                                                                className="btn btn-danger btn-xs"
-                                                                onClick={() => keepOnlyOne(group.map(a => a.refAgendamento))}
-                                                                disabled={group.every(a => a.isRemoved) || group.slice(1).every(a => a.isRemoved)}
-                                                            >
-                                                                Manter Apenas Um
-                                                            </button>
-                                                        </div>
-                                                        <div className="space-y-2 opacity-80">
-                                                            {group.map((a, i) => (
-                                                                <div key={i} className={`flex justify-between text-[11px] ${a.isRemoved ? "line-through opacity-40" : ""}`}>
-                                                                    <span>{a.loja} - {a.nome}</span>
-                                                                    <span className="font-mono">{fmtCurrency(a.valorIwof)}</span>
+                                                {duplicates.identical
+                                                    .filter(group => group.filter(item => !(agendamentosMap.get(item.id)?.isRemoved)).length > 1)
+                                                    .map((group, idx) => (
+                                                        <div key={idx} className="bg-[var(--bg-card-hover)] rounded-lg p-4 border border-[var(--border)]">
+                                                            <div className="flex justify-between items-center mb-3">
+                                                                <div className="text-xs text-[var(--fg-dim)]">
+                                                                    Mesmo Profissional, Loja, Horário e Valor
                                                                 </div>
-                                                            ))}
+                                                                <button
+                                                                    className="btn btn-danger btn-xs"
+                                                                    onClick={() => keepOnlyOne(group.map(a => a.id))}
+                                                                    disabled={
+                                                                        group.map(item => agendamentosMap.get(item.id) || item).every(a => a.isRemoved) ||
+                                                                        group.slice(1).map(item => agendamentosMap.get(item.id) || item).every(a => a.isRemoved)
+                                                                    }
+                                                                >
+                                                                    Manter Apenas Um
+                                                                </button>
+                                                            </div>
+                                                            <div className="space-y-2 opacity-80">
+                                                                {group.map((item, i) => {
+                                                                    const a = agendamentosMap.get(item.id) || item;
+                                                                    return (
+                                                                        <div key={i} className={`flex justify-between text-[11px] ${a.isRemoved ? "line-through opacity-40" : ""}`}>
+                                                                            <span>{a.loja} - {a.nome}</span>
+                                                                            <span className="font-mono">{fmtCurrency(a.valorIwof)}</span>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                ))}
+                                                    ))}
                                             </div>
                                         </div>
                                     )}
@@ -1270,41 +1358,51 @@ export default function NovoFaturamento() {
                                                 </h4>
                                             </div>
                                             <div className="space-y-4">
-                                                {duplicates.suspicious.map((group, idx) => (
-                                                    <div key={idx} className="bg-[var(--bg-card-hover)] rounded-lg p-4 border border-[#f59e0b22]">
-                                                        <div className="flex justify-between items-center mb-3">
-                                                            <div className="text-xs text-[#f59e0b]">
-                                                                Match Suspeito ({" > 99%"}): Requer Revisão Manual
-                                                            </div>
-                                                            <div className="flex gap-2">
-                                                                <button
-                                                                    className="btn btn-ghost btn-xs text-[var(--fg-dim)]"
-                                                                    onClick={() => keepOnlyOne(group.map(a => a.refAgendamento))}
-                                                                    disabled={group.every(a => a.isRemoved) || group.slice(1).every(a => a.isRemoved)}
-                                                                >
-                                                                    Manter Um
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            {group.map((a, i) => (
-                                                                <div key={i} className={`flex justify-between text-[11px] ${a.isRemoved ? "line-through opacity-40" : ""}`}>
-                                                                    <span>{a.loja} - {a.nome}</span>
-                                                                    <div className="flex items-center gap-3">
-                                                                        <span className="text-[var(--fg-dim)]">{fmtDate(a.inicio)}</span>
-                                                                        <span className="font-mono">{fmtCurrency(a.valorIwof)}</span>
-                                                                        <button
-                                                                            className="btn btn-ghost btn-xs w-6 h-6 p-0"
-                                                                            onClick={() => toggleRemoval(a.refAgendamento)}
-                                                                        >
-                                                                            {a.isRemoved ? "↩" : "×"}
-                                                                        </button>
-                                                                    </div>
+                                                {duplicates.suspicious
+                                                    .filter(group => group.filter(item => !(agendamentosMap.get(item.id)?.isRemoved)).length > 1)
+                                                    .map((group, idx) => (
+                                                        <div key={idx} className="bg-[var(--bg-card-hover)] rounded-lg p-4 border border-[#f59e0b22]">
+                                                            <div className="flex justify-between items-center mb-3">
+                                                                <div className="text-xs text-[#f59e0b]">
+                                                                    Match Suspeito ({" > 99%"}): Requer Revisão Manual
                                                                 </div>
-                                                            ))}
+                                                                <div className="flex gap-2">
+                                                                    <button
+                                                                        className="btn btn-ghost btn-xs text-[var(--fg-dim)]"
+                                                                        onClick={() => keepOnlyOne(group.map(a => a.id))}
+                                                                        disabled={
+                                                                            group.map(item => agendamentosMap.get(item.id) || item).every(a => a.isRemoved) ||
+                                                                            group.slice(1).map(item => agendamentosMap.get(item.id) || item).every(a => a.isRemoved)
+                                                                        }
+                                                                    >
+                                                                        Manter Um
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            <div className="space-y-2">
+                                                                {group.map((item, i) => {
+                                                                    const a = agendamentosMap.get(item.id) || item;
+                                                                    return (
+                                                                        <div key={i} className={`flex justify-between text-[11px] ${a.isRemoved ? "line-through opacity-40" : ""}`}>
+                                                                            <span>{a.loja} - {a.nome}</span>
+                                                                            <div className="flex items-center gap-3">
+                                                                                <span className="text-[var(--fg-dim)]">
+                                                                                    {fmtDate(a.inicio)} {a.inicio?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                                                </span>
+                                                                                <span className="font-mono">{fmtCurrency(a.valorIwof)}</span>
+                                                                                <button
+                                                                                    className="btn btn-ghost btn-xs w-6 h-6 p-0"
+                                                                                    onClick={() => toggleRemoval(a.id)}
+                                                                                >
+                                                                                    {a.isRemoved ? "↩" : "×"}
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                ))}
+                                                    ))}
                                             </div>
                                         </div>
                                     )}
@@ -1390,6 +1488,49 @@ export default function NovoFaturamento() {
                         </div>
                     )}
 
+                    {/* ----------- TAB: EXCLUÍDOS ----------- */}
+                    {activeTab === "excluidos" && (
+                        <div>
+                            {excluidos.length === 0 ? (
+                                <p className="text-sm text-[var(--fg-dim)] py-8 text-center">
+                                    Nenhum agendamento excluído.
+                                </p>
+                            ) : (
+                                <div className="overflow-x-auto">
+                                    <table className="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Loja</th>
+                                                <th>Usuário</th>
+                                                <th>Valor</th>
+                                                <th>Ação</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {excluidos.map((a, i) => (
+                                                <tr key={i} className="opacity-60">
+                                                    <td>
+                                                        <span className="table-primary">{a.loja}</span>
+                                                    </td>
+                                                    <td className="text-sm text-[var(--fg-muted)]">{a.nome}</td>
+                                                    <td className="table-mono">{fmtCurrency(a.valorIwof)}</td>
+                                                    <td>
+                                                        <button
+                                                            className="btn btn-success btn-xs"
+                                                            onClick={() => toggleRemoval(a.refAgendamento)}
+                                                        >
+                                                            Restaurar
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* ----------- TAB: VALIDADOS ----------- */}
                     {activeTab === "validados" && (
                         <div>
@@ -1448,19 +1589,27 @@ export default function NovoFaturamento() {
                 <div className="text-sm text-[var(--fg-dim)]">
                     {validados.filter((a) => a.clienteId).length} de {validados.length} validados possuem vínculo no banco
                 </div>
-                <button
-                    className="btn btn-primary"
-                    disabled={saving || validados.filter((a) => a.clienteId).length === 0 || saveResult !== null}
-                    onClick={handleSave}
-                >
-                    {saving ? (
-                        "Salvando..."
-                    ) : saveResult ? (
-                        <><CheckCircle2 size={18} /> Lote Gerado</>
-                    ) : (
-                        <><Save size={18} /> Confirmar e Gerar Lote</>
-                    )}
-                </button>
+
+                {saveResult?.loteId ? (
+                    <Link
+                        href={`/faturamento/lote/${saveResult.loteId}`}
+                        className="btn btn-success"
+                    >
+                        <CheckCircle2 size={18} /> Ir para Fechamento
+                    </Link>
+                ) : (
+                    <button
+                        className="btn btn-primary"
+                        disabled={saving || validados.filter((a) => a.clienteId).length === 0}
+                        onClick={handleSave}
+                    >
+                        {saving ? (
+                            "Salvando..."
+                        ) : (
+                            <><Save size={18} /> Confirmar e Gerar Lote</>
+                        )}
+                    </button>
+                )}
             </div>
         </div>
     );
