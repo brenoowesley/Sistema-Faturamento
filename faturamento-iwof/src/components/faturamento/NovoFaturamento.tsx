@@ -19,6 +19,8 @@ import {
     Users,
     UserX,
     Plus,
+    ChevronDown,
+    ChevronRight,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -222,21 +224,33 @@ export default function NovoFaturamento() {
         let originalBruto = 0;
         let totalLiquido = 0;
         let totalExcluido = 0;
+        let totalPendenteCorrecao = 0;
 
         for (const a of agendamentos) {
-            originalBruto += a.valorIwof;
+            originalBruto += a.originalValorIwof ?? a.valorIwof;
             if (!a.isRemoved && a.status === "OK") {
+                const val = a.manualValue ?? a.valorIwof;
                 const ciclo = a.cicloNome || "Sem Ciclo";
-                sumByCiclo.set(ciclo, (sumByCiclo.get(ciclo) ?? 0) + a.valorIwof);
-                totalLiquido += a.valorIwof;
+                sumByCiclo.set(ciclo, (sumByCiclo.get(ciclo) ?? 0) + val);
+                totalLiquido += val;
+            } else if (!a.isRemoved && a.status === "CORREÇÃO") {
+                // CORREÇÃO items: count their SUGGESTED value in liquid total
+                const val = a.suggestedValorIwof ?? a.valorIwof;
+                const ciclo = a.cicloNome || "Sem Ciclo";
+                sumByCiclo.set(ciclo, (sumByCiclo.get(ciclo) ?? 0) + val);
+                totalLiquido += val;
+                totalPendenteCorrecao += val;
             } else if (a.isRemoved) {
-                totalExcluido += a.valorIwof;
+                totalExcluido += a.originalValorIwof ?? a.valorIwof;
             }
         }
 
         const summaryArr = Array.from(sumByCiclo.entries()).map(([ciclo, total]) => ({ ciclo: ciclo as string, total: total as number }));
         summaryArr.push({ ciclo: "BRUTO ORIGINAL", total: originalBruto });
         summaryArr.push({ ciclo: "LÍQUIDO P/ LOTE", total: totalLiquido });
+        if (totalPendenteCorrecao > 0) {
+            summaryArr.push({ ciclo: "PENDENTES CORREÇÃO", total: totalPendenteCorrecao });
+        }
         summaryArr.push({ ciclo: "EXCLUÍDOS", total: totalExcluido });
 
         return summaryArr;
@@ -252,6 +266,10 @@ export default function NovoFaturamento() {
     const [isMinimized, setIsMinimized] = useState(false);
     const [duplicates, setDuplicates] = useState<{ identical: Agendamento[][], suspicious: Agendamento[][] }>({ identical: [], suspicious: [] });
     const [removedCount, setRemovedCount] = useState<number | null>(null);
+    const [conciliacaoCicloFilter, setConciliacaoCicloFilter] = useState<string | null>(null);
+    const [collapsedLojas, setCollapsedLojas] = useState(false);
+    const [collapsedValidacoes, setCollapsedValidacoes] = useState(false);
+    const [collapsedForaPeriodo, setCollapsedForaPeriodo] = useState(false);
 
     /* --- Save state --- */
     const [saving, setSaving] = useState(false);
@@ -717,7 +735,7 @@ export default function NovoFaturamento() {
                     } else {
                         finalStatus = "EXCLUIDO";
                     }
-                } else if (a.status === "OK") {
+                } else if (a.status === "OK" || a.status === "CORREÇÃO") {
                     finalStatus = "VALIDADO";
                 }
 
@@ -728,7 +746,7 @@ export default function NovoFaturamento() {
                     cnpj_loja: a.refAgendamento || null,
                     data_inicio: a.inicio?.toISOString() ?? periodoInicio,
                     data_fim: a.termino?.toISOString() ?? periodoFim,
-                    valor_iwof: a.manualValue ?? a.valorIwof,
+                    valor_iwof: a.manualValue ?? a.suggestedValorIwof ?? a.valorIwof,
                     fracao_hora: a.fracaoHora,
                     status_validacao: finalStatus,
                 };
@@ -999,7 +1017,9 @@ export default function NovoFaturamento() {
                                     ? "3px solid var(--accent)"
                                     : fs.ciclo === "EXCLUÍDOS"
                                         ? "3px solid var(--danger)"
-                                        : "3px solid #22c55e",
+                                        : fs.ciclo === "PENDENTES CORREÇÃO"
+                                            ? "3px solid #f59e0b"
+                                            : "3px solid #22c55e",
                         }}
                     >
                         <div className="flex items-center justify-between">
@@ -1015,7 +1035,9 @@ export default function NovoFaturamento() {
                                                 ? "var(--accent)"
                                                 : fs.ciclo === "EXCLUÍDOS"
                                                     ? "var(--danger)"
-                                                    : "#22c55e",
+                                                    : fs.ciclo === "PENDENTES CORREÇÃO"
+                                                        ? "#f59e0b"
+                                                        : "#22c55e",
                                     }}
                                 >
                                     {fmtCurrency(fs.total)}
@@ -1029,7 +1051,9 @@ export default function NovoFaturamento() {
                                             ? "var(--accent)"
                                             : fs.ciclo === "EXCLUÍDOS"
                                                 ? "var(--danger)"
-                                                : "#22c55e",
+                                                : fs.ciclo === "PENDENTES CORREÇÃO"
+                                                    ? "#f59e0b"
+                                                    : "#22c55e",
                                     opacity: 0.4,
                                 }}
                             />
@@ -1052,6 +1076,56 @@ export default function NovoFaturamento() {
                 )}
                 <span className="badge badge-info">Ciclos: {selectedCicloNomes.join(", ")}</span>
             </div>
+
+            {/* ======== Resumo de Faturamento (Lojas + Contagem) ======== */}
+            {agendamentos.length > 0 && (() => {
+                const faturados = agendamentos.filter(a => !a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO"));
+                const lojaMap = new Map<string, { count: number; total: number }>();
+                for (const a of faturados) {
+                    const val = a.manualValue ?? (a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : a.valorIwof);
+                    const entry = lojaMap.get(a.loja) ?? { count: 0, total: 0 };
+                    entry.count += 1;
+                    entry.total += val;
+                    lojaMap.set(a.loja, entry);
+                }
+                const lojasArr = Array.from(lojaMap.entries()).sort((a, b) => b[1].total - a[1].total);
+                return (
+                    <div className="card mb-5">
+                        <button className="flex items-center justify-between w-full mb-3 group" onClick={() => setCollapsedLojas(p => !p)}>
+                            <div className="flex items-center gap-2">
+                                {collapsedLojas ? <ChevronRight size={16} className="text-[var(--fg-dim)]" /> : <ChevronDown size={16} className="text-[var(--fg-dim)]" />}
+                                <Users size={16} className="text-[var(--accent)]" />
+                                <h4 className="text-sm font-semibold text-white">
+                                    Lojas Faturadas ({lojasArr.length}) — {faturados.length} agendamentos contabilizados
+                                </h4>
+                            </div>
+                            <span className="text-[10px] text-[var(--fg-dim)] uppercase tracking-wider group-hover:text-white transition-colors">
+                                {collapsedLojas ? "Expandir" : "Recolher"}
+                            </span>
+                        </button>
+                        {!collapsedLojas && <div className="overflow-x-auto">
+                            <table className="w-full text-[11px]">
+                                <thead>
+                                    <tr className="text-[var(--fg-dim)] uppercase tracking-wider">
+                                        <th className="text-left py-1.5 px-2">Loja</th>
+                                        <th className="text-center py-1.5 px-2">Agendamentos</th>
+                                        <th className="text-right py-1.5 px-2">Valor Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {lojasArr.map(([loja, info]) => (
+                                        <tr key={loja} className="border-t border-[var(--border)] hover:bg-[var(--bg-card-hover)]">
+                                            <td className="py-1.5 px-2 text-white font-medium">{loja}</td>
+                                            <td className="py-1.5 px-2 text-center font-mono text-[var(--fg-muted)]">{info.count}</td>
+                                            <td className="py-1.5 px-2 text-right font-mono text-[var(--success)]">{fmtCurrency(info.total)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>}
+                    </div>
+                );
+            })()}
 
             {/* Save result banner */}
             {saveResult && (
@@ -1100,173 +1174,205 @@ export default function NovoFaturamento() {
                                 </p>
                             ) : (
                                 <>
-                                    {/* ====== CANCELAR section (< 10 min) — shown first ====== */}
-                                    {(() => {
-                                        const cancelarItems = validacoes.filter(a => a.status === "CANCELAR");
-                                        if (cancelarItems.length === 0) return null;
-                                        return (
-                                            <div className="mb-10">
-                                                <div className="flex items-center gap-2 mb-4">
-                                                    <AlertTriangle size={18} className="text-[var(--danger)]" />
-                                                    <h4 className="text-base font-semibold text-[var(--danger)]">
-                                                        Cancelamentos — Menos de 10 Minutos ({cancelarItems.length})
-                                                    </h4>
-                                                </div>
-                                                <div className="space-y-8">
-                                                    {getGroupedByEstado(cancelarItems).map(([uf, items]) => (
-                                                        <div key={uf}>
-                                                            <div className="flex items-center gap-3 mb-4 bg-[var(--bg-card)] p-2 rounded-lg border-l-4 border-[var(--danger)]">
-                                                                <span className="text-xl font-bold text-[var(--danger)] ml-2">{uf}</span>
-                                                                <span className="text-xs text-[var(--fg-dim)] uppercase tracking-widest">{items.length} agendamentos</span>
+                                    {/* ====== Collapsible header for Cancelamentos + Correções ====== */}
+                                    <div className="mb-10">
+                                        <button className="flex items-center justify-between w-full mb-4 group" onClick={() => setCollapsedValidacoes(p => !p)}>
+                                            <div className="flex items-center gap-2">
+                                                {collapsedValidacoes ? <ChevronRight size={18} className="text-[var(--danger)]" /> : <ChevronDown size={18} className="text-[var(--danger)]" />}
+                                                <AlertTriangle size={18} className="text-[var(--danger)]" />
+                                                <h4 className="text-base font-semibold text-[var(--danger)]">
+                                                    Cancelamentos e Correções ({validacoes.length})
+                                                </h4>
+                                            </div>
+                                            <span className="text-[10px] text-[var(--fg-dim)] uppercase tracking-wider group-hover:text-white transition-colors">
+                                                {collapsedValidacoes ? "Expandir" : "Recolher"}
+                                            </span>
+                                        </button>
+
+                                        {!collapsedValidacoes && (() => {
+                                            // Group ALL validation items by UF
+                                            const allByUf: Record<string, { cancelar: Agendamento[]; correcao: Agendamento[] }> = {};
+                                            for (const a of validacoes) {
+                                                const uf = a.estado || "SEM ESTADO";
+                                                if (!allByUf[uf]) allByUf[uf] = { cancelar: [], correcao: [] };
+                                                if (a.status === "CANCELAR") allByUf[uf].cancelar.push(a);
+                                                else if (a.status === "CORREÇÃO") allByUf[uf].correcao.push(a);
+                                            }
+                                            const ufEntries = Object.entries(allByUf).sort(([a], [b]) => a.localeCompare(b));
+
+                                            return (
+                                                <div className="space-y-6">
+                                                    {ufEntries.map(([uf, { cancelar, correcao }]) => (
+                                                        <div key={uf} className="rounded-2xl border border-[var(--border)] overflow-hidden" style={{ background: "var(--bg-card)" }}>
+                                                            {/* ── State header ── */}
+                                                            <div className="flex items-center justify-between px-5 py-3" style={{ background: "linear-gradient(135deg, rgba(99,102,241,0.15), rgba(99,102,241,0.05))", borderBottom: "1px solid var(--border)" }}>
+                                                                <div className="flex items-center gap-3">
+                                                                    <span className="text-2xl font-black tracking-tight text-white">{uf}</span>
+                                                                    <div className="h-5 w-px bg-[var(--border)]" />
+                                                                    <span className="text-xs text-[var(--fg-dim)]">
+                                                                        {cancelar.length + correcao.length} agendamento{cancelar.length + correcao.length !== 1 ? "s" : ""}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    {cancelar.length > 0 && (
+                                                                        <span className="badge badge-danger text-[9px] px-2 py-0.5">{cancelar.length} cancelar</span>
+                                                                    )}
+                                                                    {correcao.length > 0 && (
+                                                                        <span className="badge badge-info text-[9px] px-2 py-0.5">{correcao.length} correção</span>
+                                                                    )}
+                                                                </div>
                                                             </div>
-                                                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                                                                {items.map((a) => (
-                                                                    <div key={a.id} className={`card p-4 border-l-4 border-[var(--danger)] transition-all ${a.isRemoved ? "opacity-30 grayscale blur-[1px]" : ""}`}>
-                                                                        <div className="flex justify-between items-start mb-3">
-                                                                            <div className="flex-1 min-w-0 mr-2">
-                                                                                <h5 className="font-bold text-white text-sm leading-tight truncate">{a.loja}</h5>
-                                                                                <p className="text-[10px] text-[var(--fg-dim)] uppercase mt-0.5">{a.nome}</p>
-                                                                            </div>
-                                                                            <span className="badge badge-danger text-[9px] px-1.5 py-0.5 h-auto">CANCELAR</span>
+
+                                                            <div className="p-5 space-y-6">
+                                                                {/* ── CANCELAR items ── */}
+                                                                {cancelar.length > 0 && (
+                                                                    <div>
+                                                                        <div className="flex items-center gap-2 mb-3">
+                                                                            <div className="w-2 h-2 rounded-full bg-[var(--danger)]" />
+                                                                            <h5 className="text-xs font-semibold text-[var(--danger)] uppercase tracking-widest">
+                                                                                Cancelamentos — Menos de 10 min ({cancelar.length})
+                                                                            </h5>
                                                                         </div>
-                                                                        <p className="text-[10px] font-medium mb-3 text-[var(--danger)]">MOTIVO: MENOS DE 10 MINUTOS</p>
-                                                                        <div className="grid grid-cols-2 gap-y-1.5 text-[10px] mb-4">
-                                                                            <div className="text-[var(--fg-dim)] uppercase">Horário</div>
-                                                                            <div className="text-right text-[var(--fg-muted)]">{fmtDate(a.inicio)} - {fmtDate(a.termino)}</div>
-                                                                            <div className="text-[var(--fg-dim)] uppercase">Duração</div>
-                                                                            <div className="text-right font-mono font-bold text-[var(--danger)]">{a.fracaoHora.toFixed(2)}h</div>
-                                                                            <div className="text-[var(--fg-dim)] uppercase">Valor Bruto</div>
-                                                                            <div className="text-right font-mono text-white">{fmtCurrency(a.valorIwof)}</div>
-                                                                        </div>
-                                                                        <div className="pt-3 border-t border-[var(--border)] flex justify-between items-center gap-2">
-                                                                            <button className={`btn btn-sm h-7 px-2 text-[10px] ${a.isRemoved ? "btn-success" : "btn-danger"}`} onClick={() => toggleRemoval(a.id)}>
-                                                                                {a.isRemoved ? "Restaurar" : "Remover"}
-                                                                            </button>
-                                                                            <a href={`https://administrativo.iwof.com.br/workers/${a.refAgendamento}`} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm h-7 w-7 p-0 flex items-center justify-center text-[var(--fg-dim)] hover:text-white" title="Perfil Admin">
-                                                                                <ExternalLink size={12} />
-                                                                            </a>
+                                                                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                                                                            {cancelar.map((a) => (
+                                                                                <div key={a.id} className={`rounded-xl p-4 border-l-4 border-[var(--danger)] transition-all ${a.isRemoved ? "opacity-30 grayscale blur-[1px]" : ""}`} style={{ background: "rgba(239,68,68,0.04)", border: "1px solid rgba(239,68,68,0.15)", borderLeft: "4px solid var(--danger)" }}>
+                                                                                    <div className="flex justify-between items-start mb-3">
+                                                                                        <div className="flex-1 min-w-0 mr-2">
+                                                                                            <h5 className="font-bold text-white text-sm leading-tight truncate">{a.loja}</h5>
+                                                                                            <p className="text-[10px] text-[var(--fg-dim)] uppercase mt-0.5">{a.nome}</p>
+                                                                                        </div>
+                                                                                        <span className="badge badge-danger text-[9px] px-1.5 py-0.5 h-auto">CANCELAR</span>
+                                                                                    </div>
+                                                                                    <div className="grid grid-cols-2 gap-y-1.5 text-[10px] mb-4">
+                                                                                        <div className="text-[var(--fg-dim)] uppercase">Horário</div>
+                                                                                        <div className="text-right text-[var(--fg-muted)]">{fmtDate(a.inicio)} - {fmtDate(a.termino)}</div>
+                                                                                        <div className="text-[var(--fg-dim)] uppercase">Duração</div>
+                                                                                        <div className="text-right font-mono font-bold text-[var(--danger)]">{a.fracaoHora.toFixed(2)}h</div>
+                                                                                        <div className="text-[var(--fg-dim)] uppercase">Valor Bruto</div>
+                                                                                        <div className="text-right font-mono text-white">{fmtCurrency(a.valorIwof)}</div>
+                                                                                    </div>
+                                                                                    <div className="pt-3 border-t border-[var(--border)] flex justify-between items-center gap-2">
+                                                                                        <button className={`btn btn-sm h-7 px-2 text-[10px] ${a.isRemoved ? "btn-success" : "btn-danger"}`} onClick={() => toggleRemoval(a.id)}>
+                                                                                            {a.isRemoved ? "Restaurar" : "Remover"}
+                                                                                        </button>
+                                                                                        <a href={`https://administrativo.iwof.com.br/workers/${a.refAgendamento}`} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm h-7 w-7 p-0 flex items-center justify-center text-[var(--fg-dim)] hover:text-white" title="Perfil Admin">
+                                                                                            <ExternalLink size={12} />
+                                                                                        </a>
+                                                                                    </div>
+                                                                                </div>
+                                                                            ))}
                                                                         </div>
                                                                     </div>
-                                                                ))}
+                                                                )}
+
+                                                                {/* ── CORREÇÃO items ── */}
+                                                                {correcao.length > 0 && (
+                                                                    <div>
+                                                                        <div className="flex items-center gap-2 mb-3">
+                                                                            <div className="w-2 h-2 rounded-full" style={{ background: "#f59e0b" }} />
+                                                                            <h5 className="text-xs font-semibold uppercase tracking-widest" style={{ color: "#f59e0b" }}>
+                                                                                Correções — Mais de 6h ({correcao.length})
+                                                                            </h5>
+                                                                        </div>
+                                                                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                                                                            {correcao.map((a) => (
+                                                                                <div key={a.id} className={`rounded-xl p-4 transition-all ${a.isRemoved ? "opacity-30 grayscale blur-[1px]" : ""}`} style={{ background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.15)", borderLeft: "4px solid #f59e0b" }}>
+                                                                                    <div className="flex justify-between items-start mb-3">
+                                                                                        <div className="flex-1 min-w-0 mr-2">
+                                                                                            <h5 className="font-bold text-white text-sm leading-tight truncate">{a.loja}</h5>
+                                                                                            <p className="text-[10px] text-[var(--fg-dim)] uppercase mt-0.5">{a.nome}</p>
+                                                                                        </div>
+                                                                                        <span className="badge badge-info text-[9px] px-1.5 py-0.5 h-auto">CORREÇÃO</span>
+                                                                                    </div>
+
+                                                                                    <p className="text-[10px] font-medium mb-3" style={{ color: "#f59e0b" }}>
+                                                                                        MOTIVO: MAIS DE 6 HORAS ({(a.originalFracaoHora ?? a.fracaoHora).toFixed(2)}h)
+                                                                                    </p>
+
+                                                                                    {/* Original values */}
+                                                                                    <div className="grid grid-cols-2 gap-y-1.5 text-[10px] mb-3">
+                                                                                        <div className="text-[var(--fg-dim)] uppercase">Horário Original</div>
+                                                                                        <div className="text-right text-[var(--fg-muted)]">{fmtDate(a.inicio)} - {fmtDate(a.originalTermino ?? a.termino)}</div>
+                                                                                        <div className="text-[var(--fg-dim)] uppercase">Duração Original</div>
+                                                                                        <div className="text-right font-mono font-bold" style={{ color: "#f59e0b" }}>{(a.originalFracaoHora ?? a.fracaoHora).toFixed(2)}h</div>
+                                                                                        <div className="text-[var(--fg-dim)] uppercase">Valor Original</div>
+                                                                                        <div className="text-right font-mono text-white">{fmtCurrency(a.originalValorIwof ?? a.valorIwof)}</div>
+                                                                                    </div>
+
+                                                                                    {/* Suggested values */}
+                                                                                    {a.suggestedValorIwof != null && (
+                                                                                        <div className="rounded-lg p-3 mb-3" style={{ background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.15)" }}>
+                                                                                            <p className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "#22c55e" }}>⚡ Sugestão (Cap 6h)</p>
+                                                                                            <div className="grid grid-cols-2 gap-y-1.5 text-[10px]">
+                                                                                                <div className="text-[var(--fg-dim)] uppercase">Horário Sugerido</div>
+                                                                                                <div className="text-right font-mono text-[var(--success)]">{fmtDate(a.inicio)} - {fmtDate(a.suggestedTermino ?? null)}</div>
+                                                                                                <div className="text-[var(--fg-dim)] uppercase">Duração Sugerida</div>
+                                                                                                <div className="text-right font-mono font-bold text-[var(--success)]">{a.suggestedFracaoHora?.toFixed(2)}h</div>
+                                                                                                <div className="text-[var(--fg-dim)] uppercase">Valor Sugerido</div>
+                                                                                                <div className="text-right font-mono font-bold text-[var(--success)]">{fmtCurrency(a.suggestedValorIwof)}</div>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    )}
+
+                                                                                    {/* Inline manual editor */}
+                                                                                    {editingAgendamentoId === a.id && (
+                                                                                        <div className="bg-[var(--bg-card-hover)] p-3 rounded mb-3">
+                                                                                            <label className="text-[10px] text-[var(--fg-dim)] mb-1 block uppercase">Ajustar Valor Manualmente</label>
+                                                                                            <div className="flex gap-2">
+                                                                                                <input type="number" className="input flex-1 h-8 text-sm" value={tempValue} onChange={(e) => setTempValue(e.target.value)} autoFocus />
+                                                                                                <button className="btn btn-primary btn-sm h-8" onClick={() => applyCorrection(a.id, parseFloat(tempValue) || 0)}>Ok</button>
+                                                                                                <button className="btn btn-ghost btn-sm h-8" onClick={() => setEditingAgendamentoId(null)}>X</button>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    )}
+
+                                                                                    {/* Action buttons */}
+                                                                                    <div className="pt-3 border-t border-[var(--border)] flex flex-wrap justify-between items-center gap-2">
+                                                                                        <div className="flex items-center gap-1 flex-wrap">
+                                                                                            {!a.isRemoved && a.suggestedValorIwof != null && editingAgendamentoId !== a.id && (
+                                                                                                <button className="btn btn-sm h-7 px-3 text-[10px]" style={{ background: "#22c55e", color: "#fff" }} onClick={() => confirmCorrection(a.id)}>
+                                                                                                    ✓ Confirmar Sugestão
+                                                                                                </button>
+                                                                                            )}
+                                                                                            {!a.isRemoved && editingAgendamentoId !== a.id && (
+                                                                                                <button className="btn btn-ghost btn-sm h-7 px-2 text-[10px] border border-[var(--border)]" onClick={() => { setEditingAgendamentoId(a.id); setTempValue((a.suggestedValorIwof ?? a.valorIwof).toString()); }}>
+                                                                                                    Editar Valor
+                                                                                                </button>
+                                                                                            )}
+                                                                                            <button className={`btn btn-sm h-7 px-2 text-[10px] ${a.isRemoved ? "btn-success" : "btn-danger"}`} onClick={() => toggleRemoval(a.id)}>
+                                                                                                {a.isRemoved ? "Restaurar" : "Remover"}
+                                                                                            </button>
+                                                                                        </div>
+                                                                                        <a href={`https://administrativo.iwof.com.br/workers/${a.refAgendamento}`} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm h-7 w-7 p-0 flex items-center justify-center text-[var(--fg-dim)] hover:text-white" title="Perfil Admin">
+                                                                                            <ExternalLink size={12} />
+                                                                                        </a>
+                                                                                    </div>
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     ))}
                                                 </div>
-                                            </div>
-                                        );
-                                    })()}
-
-                                    {/* ====== CORREÇÃO section (> 6h) — shown second ====== */}
-                                    {(() => {
-                                        const correcaoItems = validacoes.filter(a => a.status === "CORREÇÃO");
-                                        if (correcaoItems.length === 0) return null;
-                                        return (
-                                            <div className="mb-10">
-                                                <div className="flex items-center gap-2 mb-4">
-                                                    <Clock size={18} style={{ color: "#f59e0b" }} />
-                                                    <h4 className="text-base font-semibold" style={{ color: "#f59e0b" }}>
-                                                        Correções — Mais de 6 Horas ({correcaoItems.length})
-                                                    </h4>
-                                                </div>
-                                                <div className="space-y-8">
-                                                    {getGroupedByEstado(correcaoItems).map(([uf, items]) => (
-                                                        <div key={uf}>
-                                                            <div className="flex items-center gap-3 mb-4 bg-[var(--bg-card)] p-2 rounded-lg border-l-4 border-[#f59e0b]">
-                                                                <span className="text-xl font-bold ml-2" style={{ color: "#f59e0b" }}>{uf}</span>
-                                                                <span className="text-xs text-[var(--fg-dim)] uppercase tracking-widest">{items.length} agendamentos</span>
-                                                            </div>
-                                                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                                                                {items.map((a) => (
-                                                                    <div key={a.id} className={`card p-4 border-l-4 border-[#f59e0b] transition-all ${a.isRemoved ? "opacity-30 grayscale blur-[1px]" : ""}`}>
-                                                                        <div className="flex justify-between items-start mb-3">
-                                                                            <div className="flex-1 min-w-0 mr-2">
-                                                                                <h5 className="font-bold text-white text-sm leading-tight truncate">{a.loja}</h5>
-                                                                                <p className="text-[10px] text-[var(--fg-dim)] uppercase mt-0.5">{a.nome}</p>
-                                                                            </div>
-                                                                            <span className="badge badge-info text-[9px] px-1.5 py-0.5 h-auto">CORREÇÃO</span>
-                                                                        </div>
-
-                                                                        <p className="text-[10px] font-medium mb-3" style={{ color: "#f59e0b" }}>
-                                                                            MOTIVO: MAIS DE 6 HORAS ({(a.originalFracaoHora ?? a.fracaoHora).toFixed(2)}h)
-                                                                        </p>
-
-                                                                        {/* Original values */}
-                                                                        <div className="grid grid-cols-2 gap-y-1.5 text-[10px] mb-3">
-                                                                            <div className="text-[var(--fg-dim)] uppercase">Horário Original</div>
-                                                                            <div className="text-right text-[var(--fg-muted)]">{fmtDate(a.inicio)} - {fmtDate(a.originalTermino ?? a.termino)}</div>
-                                                                            <div className="text-[var(--fg-dim)] uppercase">Duração Original</div>
-                                                                            <div className="text-right font-mono font-bold" style={{ color: "#f59e0b" }}>{(a.originalFracaoHora ?? a.fracaoHora).toFixed(2)}h</div>
-                                                                            <div className="text-[var(--fg-dim)] uppercase">Valor Original</div>
-                                                                            <div className="text-right font-mono text-white">{fmtCurrency(a.originalValorIwof ?? a.valorIwof)}</div>
-                                                                        </div>
-
-                                                                        {/* Suggested values (highlighted box) */}
-                                                                        {a.suggestedValorIwof != null && (
-                                                                            <div className="bg-[var(--bg-card-hover)] rounded-lg p-3 mb-3 border border-[#f59e0b33]">
-                                                                                <p className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "#f59e0b" }}>⚡ Sugestão (Cap 6h)</p>
-                                                                                <div className="grid grid-cols-2 gap-y-1.5 text-[10px]">
-                                                                                    <div className="text-[var(--fg-dim)] uppercase">Horário Sugerido</div>
-                                                                                    <div className="text-right font-mono text-[var(--success)]">{fmtDate(a.inicio)} - {fmtDate(a.suggestedTermino ?? null)}</div>
-                                                                                    <div className="text-[var(--fg-dim)] uppercase">Duração Sugerida</div>
-                                                                                    <div className="text-right font-mono font-bold text-[var(--success)]">{a.suggestedFracaoHora?.toFixed(2)}h</div>
-                                                                                    <div className="text-[var(--fg-dim)] uppercase">Valor Sugerido</div>
-                                                                                    <div className="text-right font-mono font-bold text-[var(--success)]">{fmtCurrency(a.suggestedValorIwof)}</div>
-                                                                                </div>
-                                                                            </div>
-                                                                        )}
-
-                                                                        {/* Inline manual editor */}
-                                                                        {editingAgendamentoId === a.id && (
-                                                                            <div className="bg-[var(--bg-card-hover)] p-3 rounded mb-3">
-                                                                                <label className="text-[10px] text-[var(--fg-dim)] mb-1 block uppercase">Ajustar Valor Manualmente</label>
-                                                                                <div className="flex gap-2">
-                                                                                    <input type="number" className="input flex-1 h-8 text-sm" value={tempValue} onChange={(e) => setTempValue(e.target.value)} autoFocus />
-                                                                                    <button className="btn btn-primary btn-sm h-8" onClick={() => applyCorrection(a.id, parseFloat(tempValue) || 0)}>Ok</button>
-                                                                                    <button className="btn btn-ghost btn-sm h-8" onClick={() => setEditingAgendamentoId(null)}>X</button>
-                                                                                </div>
-                                                                            </div>
-                                                                        )}
-
-                                                                        {/* Action buttons */}
-                                                                        <div className="pt-3 border-t border-[var(--border)] flex flex-wrap justify-between items-center gap-2">
-                                                                            <div className="flex items-center gap-1 flex-wrap">
-                                                                                {!a.isRemoved && a.suggestedValorIwof != null && editingAgendamentoId !== a.id && (
-                                                                                    <button className="btn btn-sm h-7 px-3 text-[10px]" style={{ background: "#22c55e", color: "#fff" }} onClick={() => confirmCorrection(a.id)}>
-                                                                                        ✓ Confirmar Sugestão
-                                                                                    </button>
-                                                                                )}
-                                                                                {!a.isRemoved && editingAgendamentoId !== a.id && (
-                                                                                    <button className="btn btn-ghost btn-sm h-7 px-2 text-[10px] border border-[var(--border)]" onClick={() => { setEditingAgendamentoId(a.id); setTempValue((a.suggestedValorIwof ?? a.valorIwof).toString()); }}>
-                                                                                        Editar Valor
-                                                                                    </button>
-                                                                                )}
-                                                                                <button className={`btn btn-sm h-7 px-2 text-[10px] ${a.isRemoved ? "btn-success" : "btn-danger"}`} onClick={() => toggleRemoval(a.id)}>
-                                                                                    {a.isRemoved ? "Restaurar" : "Remover"}
-                                                                                </button>
-                                                                            </div>
-                                                                            <a href={`https://administrativo.iwof.com.br/workers/${a.refAgendamento}`} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm h-7 w-7 p-0 flex items-center justify-center text-[var(--fg-dim)] hover:text-white" title="Perfil Admin">
-                                                                                <ExternalLink size={12} />
-                                                                            </a>
-                                                                        </div>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        );
-                                    })()}
+                                            );
+                                        })()}
+                                    </div>
 
                                     <div className="mt-12 pt-12 border-t border-[var(--border)]">
                                         <div className="flex items-center justify-between mb-4">
-                                            <div className="flex items-center gap-2">
+                                            <button className="flex items-center gap-2 group" onClick={() => setCollapsedForaPeriodo(p => !p)}>
+                                                {collapsedForaPeriodo ? <ChevronRight size={16} style={{ color: "#f59e0b" }} /> : <ChevronDown size={16} style={{ color: "#f59e0b" }} />}
                                                 <Clock size={16} style={{ color: "#f59e0b" }} />
                                                 <h4 className="text-sm font-semibold" style={{ color: "#f59e0b" }}>
                                                     Fora do Período ({foraPeriodo.filter(a => !a.isRemoved).length})
                                                 </h4>
-                                            </div>
-                                            {foraPeriodo.some(a => !a.isRemoved) && (
+                                                <span className="text-[10px] text-[var(--fg-dim)] uppercase tracking-wider group-hover:text-white transition-colors ml-2">
+                                                    {collapsedForaPeriodo ? "Expandir" : "Recolher"}
+                                                </span>
+                                            </button>
+                                            {!collapsedForaPeriodo && foraPeriodo.some(a => !a.isRemoved) && (
                                                 <button
                                                     className="btn btn-ghost btn-xs text-[var(--danger)] gap-1"
                                                     onClick={massRemoveForaPeriodo}
@@ -1275,7 +1381,7 @@ export default function NovoFaturamento() {
                                                 </button>
                                             )}
                                         </div>
-                                        <div className="overflow-x-auto">
+                                        {!collapsedForaPeriodo && <div className="overflow-x-auto">
                                             <table className="data-table">
                                                 <thead>
                                                     <tr>
@@ -1328,7 +1434,7 @@ export default function NovoFaturamento() {
                                                     ))}
                                                 </tbody>
                                             </table>
-                                        </div>
+                                        </div>}
                                     </div>
                                 </>
                             )}
@@ -1469,83 +1575,212 @@ export default function NovoFaturamento() {
                             )}
                         </div>
                     )}
-                    {activeTab === "conciliacao" && (
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            {/* Não Cadastrados */}
-                            <div>
-                                <div className="flex items-center gap-2 mb-3">
-                                    <UserX size={16} className="text-[var(--danger)]" />
-                                    <h4 className="text-sm font-semibold text-[var(--danger)]">
-                                        Lojas Não Cadastradas ({conciliation.naoCadastrados.length})
-                                    </h4>
-                                </div>
-                                {conciliation.naoCadastrados.length === 0 ? (
-                                    <p className="text-sm text-[var(--fg-dim)] py-4">
-                                        Todas as lojas da planilha estão cadastradas ✓
-                                    </p>
-                                ) : (
-                                    <div className="overflow-x-auto">
-                                        <table className="data-table">
-                                            <thead>
-                                                <tr>
-                                                    <th>Loja</th>
-                                                    <th>Refs Detectadas</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {conciliation.naoCadastrados.map((item, i) => (
-                                                    <tr key={i} className="row-invalid">
-                                                        <td className="table-primary">{item.loja}</td>
-                                                        <td className="table-mono text-sm">{item.cnpj || "—"}</td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                )}
-                            </div>
+                    {activeTab === "conciliacao" && (() => {
+                        /* --- Compute conciliation data --- */
+                        const activeCiclos = Array.from(new Set(agendamentos.map(a => a.cicloNome).filter(Boolean))) as string[];
 
-                            {/* Ausentes no Lote */}
+                        const filtered = conciliacaoCicloFilter
+                            ? agendamentos.filter(a => a.cicloNome === conciliacaoCicloFilter)
+                            : agendamentos;
+
+                        // Lojas faturadas: have at least one active OK or CORREÇÃO appointment
+                        const faturadoMap = new Map<string, { count: number; total: number; ciclo: string }>();
+                        const allLojasInSheet = new Set<string>();
+
+                        for (const a of filtered) {
+                            allLojasInSheet.add(a.loja);
+                            if (!a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO")) {
+                                const val = a.manualValue ?? (a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : a.valorIwof);
+                                const entry = faturadoMap.get(a.loja) ?? { count: 0, total: 0, ciclo: a.cicloNome || "—" };
+                                entry.count += 1;
+                                entry.total += val;
+                                faturadoMap.set(a.loja, entry);
+                            }
+                        }
+
+                        const lojasFaturadas = Array.from(faturadoMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+                        const lojasSemFaturamento = Array.from(allLojasInSheet).filter(l => !faturadoMap.has(l)).sort();
+
+                        // Ausentes filtrados por ciclo
+                        const ausentesFiltrados = conciliacaoCicloFilter
+                            ? conciliation.ausentesNoLote.filter(c => c.ciclos_faturamento?.nome === conciliacaoCicloFilter)
+                            : conciliation.ausentesNoLote;
+
+                        return (
                             <div>
-                                <div className="flex items-center gap-2 mb-3">
-                                    <Users size={16} style={{ color: "#f59e0b" }} />
-                                    <h4 className="text-sm font-semibold" style={{ color: "#f59e0b" }}>
-                                        Clientes Ausentes do Lote ({conciliation.ausentesNoLote.length})
-                                    </h4>
+                                {/* Ciclo filter chips */}
+                                <div className="flex flex-wrap gap-2 mb-6">
+                                    <button
+                                        className={`badge cursor-pointer transition-all text-xs px-3 py-1.5 ${!conciliacaoCicloFilter ? "badge-success" : "badge-info"}`}
+                                        style={{ border: !conciliacaoCicloFilter ? "2px solid #22c55e" : "2px solid transparent" }}
+                                        onClick={() => setConciliacaoCicloFilter(null)}
+                                    >
+                                        {!conciliacaoCicloFilter && "✓ "}Todos os Ciclos
+                                    </button>
+                                    {activeCiclos.sort().map(c => (
+                                        <button
+                                            key={c}
+                                            className={`badge cursor-pointer transition-all text-xs px-3 py-1.5 ${conciliacaoCicloFilter === c ? "badge-success" : "badge-info"}`}
+                                            style={{ border: conciliacaoCicloFilter === c ? "2px solid #22c55e" : "2px solid transparent" }}
+                                            onClick={() => setConciliacaoCicloFilter(conciliacaoCicloFilter === c ? null : c)}
+                                        >
+                                            {conciliacaoCicloFilter === c && "✓ "}{c}
+                                        </button>
+                                    ))}
                                 </div>
-                                {conciliation.ausentesNoLote.length === 0 ? (
-                                    <p className="text-sm text-[var(--fg-dim)] py-4">
-                                        Todos os clientes dos ciclos selecionados vieram na planilha ✓
-                                    </p>
-                                ) : (
-                                    <div className="overflow-x-auto">
-                                        <table className="data-table">
-                                            <thead>
-                                                <tr>
-                                                    <th>Cliente</th>
-                                                    <th>CNPJ</th>
-                                                    <th>Ciclo</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {conciliation.ausentesNoLote.map((c) => (
-                                                    <tr key={c.id}>
-                                                        <td className="table-primary">{c.nome || c.razao_social}</td>
-                                                        <td className="table-mono text-sm">{c.cnpj}</td>
-                                                        <td>
-                                                            <span className="badge badge-info" style={{ fontSize: 11 }}>
-                                                                {c.ciclos_faturamento?.nome ?? "—"}
-                                                            </span>
+
+                                {/* ---- Lojas Faturadas ---- */}
+                                <div className="mb-8">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <CheckCircle2 size={16} className="text-[var(--success)]" />
+                                        <h4 className="text-sm font-semibold text-[var(--success)] uppercase tracking-wider">
+                                            Lojas Faturadas ({lojasFaturadas.length})
+                                        </h4>
+                                        <span className="text-xs text-[var(--fg-dim)] ml-2">
+                                            {lojasFaturadas.reduce((s, [, d]) => s + d.count, 0)} agendamentos contabilizados
+                                        </span>
+                                    </div>
+                                    {lojasFaturadas.length === 0 ? (
+                                        <p className="text-sm text-[var(--fg-dim)] py-4 text-center bg-[var(--bg-card-hover)] rounded-xl border border-dashed border-[var(--border)]">
+                                            Nenhuma loja faturada {conciliacaoCicloFilter ? `para o ciclo "${conciliacaoCicloFilter}"` : ""}.
+                                        </p>
+                                    ) : (
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-[11px]">
+                                                <thead>
+                                                    <tr className="text-[var(--fg-dim)] uppercase tracking-wider text-[10px]">
+                                                        <th className="text-left py-2 px-3">Loja</th>
+                                                        <th className="text-center py-2 px-3">Ciclo</th>
+                                                        <th className="text-center py-2 px-3">Agendamentos</th>
+                                                        <th className="text-right py-2 px-3">Valor Total</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {lojasFaturadas.map(([loja, info]) => (
+                                                        <tr key={loja} className="border-t border-[var(--border)] hover:bg-[var(--bg-card-hover)]">
+                                                            <td className="py-2 px-3 text-white font-medium">{loja}</td>
+                                                            <td className="py-2 px-3 text-center">
+                                                                <span className="badge badge-info" style={{ fontSize: 10 }}>{info.ciclo}</span>
+                                                            </td>
+                                                            <td className="py-2 px-3 text-center font-mono text-[var(--fg-muted)]">{info.count}</td>
+                                                            <td className="py-2 px-3 text-right font-mono text-[var(--success)]">{fmtCurrency(info.total)}</td>
+                                                        </tr>
+                                                    ))}
+                                                    <tr className="border-t-2 border-[var(--border)] font-semibold">
+                                                        <td className="py-2 px-3 text-white" colSpan={2}>TOTAL</td>
+                                                        <td className="py-2 px-3 text-center font-mono text-white">
+                                                            {lojasFaturadas.reduce((s, [, d]) => s + d.count, 0)}
+                                                        </td>
+                                                        <td className="py-2 px-3 text-right font-mono text-[var(--success)]">
+                                                            {fmtCurrency(lojasFaturadas.reduce((s, [, d]) => s + d.total, 0))}
                                                         </td>
                                                     </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* ---- Lojas Sem Faturamento ---- */}
+                                {lojasSemFaturamento.length > 0 && (
+                                    <div className="mb-8">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <AlertTriangle size={16} style={{ color: "#f59e0b" }} />
+                                            <h4 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "#f59e0b" }}>
+                                                Lojas Sem Faturamento ({lojasSemFaturamento.length})
+                                            </h4>
+                                        </div>
+                                        <p className="text-xs text-[var(--fg-dim)] mb-2">
+                                            Lojas presentes na planilha, mas sem agendamentos válidos (cancelados, excluídos, ou sem match).
+                                        </p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {lojasSemFaturamento.map(loja => (
+                                                <span key={loja} className="badge" style={{ background: "rgba(245,158,11,0.12)", color: "#f59e0b", fontSize: 11 }}>
+                                                    {loja}
+                                                </span>
+                                            ))}
+                                        </div>
                                     </div>
                                 )}
+
+                                {/* ---- Lojas Não Cadastradas ---- */}
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6 pt-6 border-t border-[var(--border)]">
+                                    <div>
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <UserX size={16} className="text-[var(--danger)]" />
+                                            <h4 className="text-sm font-semibold text-[var(--danger)] uppercase tracking-wider">
+                                                Lojas Não Cadastradas ({conciliation.naoCadastrados.length})
+                                            </h4>
+                                        </div>
+                                        {conciliation.naoCadastrados.length === 0 ? (
+                                            <p className="text-sm text-[var(--fg-dim)] py-4">
+                                                Todas as lojas da planilha estão cadastradas ✓
+                                            </p>
+                                        ) : (
+                                            <div className="overflow-x-auto">
+                                                <table className="data-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Loja</th>
+                                                            <th>Refs Detectadas</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {conciliation.naoCadastrados.map((item, i) => (
+                                                            <tr key={i} className="row-invalid">
+                                                                <td className="table-primary">{item.loja}</td>
+                                                                <td className="table-mono text-sm">{item.cnpj || "—"}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Ausentes no Lote */}
+                                    <div>
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <Users size={16} style={{ color: "#f59e0b" }} />
+                                            <h4 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "#f59e0b" }}>
+                                                Clientes Ausentes do Lote ({ausentesFiltrados.length})
+                                            </h4>
+                                        </div>
+                                        {ausentesFiltrados.length === 0 ? (
+                                            <p className="text-sm text-[var(--fg-dim)] py-4">
+                                                Todos os clientes {conciliacaoCicloFilter ? `do ciclo "${conciliacaoCicloFilter}"` : "dos ciclos selecionados"} vieram na planilha ✓
+                                            </p>
+                                        ) : (
+                                            <div className="overflow-x-auto">
+                                                <table className="data-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Cliente</th>
+                                                            <th>CNPJ</th>
+                                                            <th>Ciclo</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {ausentesFiltrados.map((c) => (
+                                                            <tr key={c.id}>
+                                                                <td className="table-primary">{c.nome || c.razao_social}</td>
+                                                                <td className="table-mono text-sm">{c.cnpj}</td>
+                                                                <td>
+                                                                    <span className="badge badge-info" style={{ fontSize: 11 }}>
+                                                                        {c.ciclos_faturamento?.nome ?? "—"}
+                                                                    </span>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        );
+                    })()}
 
                     {/* ----------- TAB: EXCLUÍDOS ----------- */}
                     {activeTab === "excluidos" && (
@@ -1641,7 +1876,8 @@ export default function NovoFaturamento() {
                         </div>
                     )}
                 </div>
-            )}
+            )
+            }
 
             {/* ======== Action bar ======== */}
             <div className="flex items-center justify-between mt-5 pt-4 border-t border-[var(--border)]">
@@ -1670,6 +1906,6 @@ export default function NovoFaturamento() {
                     </button>
                 )}
             </div>
-        </div>
+        </div >
     );
 }

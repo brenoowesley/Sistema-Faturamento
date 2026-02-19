@@ -178,8 +178,7 @@ export default function LoteFechamentoPage() {
     }, [lojas, searchTerm]);
 
     const totals = useMemo(() => {
-        const activeLojas = lojas.filter(l => l.active);
-        const boleto = activeLojas.reduce((acc, curr) => acc + (curr.valorBase + curr.acrescimos) - curr.descontos, 0);
+        const boleto = lojas.reduce((acc, curr) => acc + (curr.valorBase + curr.acrescimos) - curr.descontos, 0);
         return {
             boleto,
             nf: boleto * 0.115,
@@ -197,9 +196,8 @@ export default function LoteFechamentoPage() {
 
         setIsClosing(true);
         try {
-            // 1. Get all adjustments ids from active stores
-            const activeLojas = lojas.filter(l => l.active);
-            const adjustmentIds = activeLojas.flatMap(l => l.ajustesDetalhes.map(aj => aj.id));
+            // 1. Get all adjustments ids from ALL stores (toggle only affects NF emission)
+            const adjustmentIds = lojas.flatMap(l => l.ajustesDetalhes.map(aj => aj.id));
 
             // 2. Mark adjustments as applied
             if (adjustmentIds.length > 0) {
@@ -285,7 +283,7 @@ export default function LoteFechamentoPage() {
                         <table className="w-full text-left border-collapse">
                             <thead>
                                 <tr className="bg-[var(--bg-main)]/50 text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest border-b border-[var(--border)]">
-                                    <th className="p-4 w-16 text-center">Ativo</th>
+                                    <th className="p-4 w-16 text-center">Emitir NF</th>
                                     <th className="p-4">Cliente / Loja</th>
                                     <th className="p-4 text-right">Valor Base</th>
                                     <th className="p-4 text-right">Acréscimos</th>
@@ -301,7 +299,7 @@ export default function LoteFechamentoPage() {
                                     return (
                                         <tr
                                             key={loja.id}
-                                            className={`border-b border-[var(--border)]/50 transition-all duration-300 ${!loja.active ? 'opacity-40 grayscale pointer-events-none select-none bg-black/20' : 'hover:bg-white/[0.02]'}`}
+                                            className={`border-b border-[var(--border)]/50 transition-all duration-300 ${!loja.active ? 'opacity-60 bg-black/10' : 'hover:bg-white/[0.02]'}`}
                                         >
                                             <td className="p-4 text-center">
                                                 <div
