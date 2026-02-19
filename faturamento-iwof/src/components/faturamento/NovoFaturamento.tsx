@@ -45,7 +45,7 @@ interface ClienteDB {
     status: boolean;
 }
 
-type ValidationStatus = "OK" | "CANCELAR" | "CORREÇÃO" | "FORA_PERIODO" | "DUPLICATA" | "EXCLUIDO";
+type ValidationStatus = "OK" | "CANCELAR" | "CORREÇÃO" | "FORA_PERIODO" | "DUPLICATA" | "EXCLUIDO" | "CICLO_INCORRETO";
 
 interface Agendamento {
     id: string;
@@ -93,7 +93,7 @@ interface ConciliationResult {
 }
 
 type Step = "setup" | "results";
-type ResultTab = "validacoes" | "duplicatas" | "conciliacao" | "validados" | "excluidos";
+type ResultTab = "validacoes" | "duplicatas" | "conciliacao" | "validados" | "excluidos" | "ciclos";
 
 /* ================================================================
    COLUMN MAP — case-insensitive header → key
@@ -326,14 +326,37 @@ export default function NovoFaturamento() {
             const pStart = periodoInicio ? new Date(periodoInicio + "T00:00:00") : null;
             const pEnd = periodoFim ? new Date(periodoFim + "T23:59:59") : null;
 
-            /* --- Fetch all active clients from DB --- */
-            const { data: clientesDB } = await supabase
-                .from("clientes")
-                .select("id, razao_social, nome_fantasia, nome, nome_conta_azul, cnpj, ciclo_faturamento_id, ciclos_faturamento(nome), status")
-                .eq("status", true);
+            /* --- Fetch all active clients from DB (Paginated) --- */
+            let allClientes: any[] = [];
+            let from = 0;
+            const step = 1000;
+            let hasMore = true;
 
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const clientes: ClienteDB[] = (clientesDB as any[]) ?? [];
+            while (hasMore) {
+                const { data: chunk, error } = await supabase
+                    .from("clientes")
+                    .select("id, razao_social, nome_fantasia, nome, nome_conta_azul, cnpj, ciclo_faturamento_id, ciclos_faturamento(nome), status")
+                    .eq("status", true)
+                    .range(from, from + step - 1);
+
+                if (error) {
+                    console.error("Erro ao buscar clientes:", error);
+                    break;
+                }
+
+                if (chunk && chunk.length > 0) {
+                    allClientes = [...allClientes, ...chunk];
+                    from += step;
+                } else {
+                    hasMore = false;
+                }
+
+                if (chunk && chunk.length < step) {
+                    hasMore = false;
+                }
+            }
+
+            const clientes: ClienteDB[] = allClientes;
             setDbClientes(clientes);
 
             /* Build lookup maps */
@@ -394,7 +417,15 @@ export default function NovoFaturamento() {
                     status = "CANCELAR";
                 } else if (fracaoHora > 6) {
                     status = "CORREÇÃO";
-                } else if (inicio && pStart && pEnd) {
+                } else if (selectedCicloIds.length > 0) {
+                    // Se houver ciclos selecionados, a validação de ciclo é estrita.
+                    // Bloqueia se não houver cliente, se o cliente não tiver ciclo ou se o ciclo for diferente.
+                    if (!matched || !matched.ciclo_faturamento_id || !selectedCicloIds.includes(matched.ciclo_faturamento_id)) {
+                        status = "CICLO_INCORRETO";
+                    }
+                }
+
+                if (status === "OK" && inicio && pStart && pEnd) {
                     if (inicio < pStart || inicio > pEnd) {
                         status = "FORA_PERIODO";
                     }
@@ -729,7 +760,17 @@ export default function NovoFaturamento() {
         ]);
 
         const rows = agendamentos
-            .filter((a) => a.clienteId) // only those with a client match
+            .filter((a) => {
+                // Must have a client
+                if (!a.clienteId) return false;
+                // Exclude removed items unless they are cancellations/duplicates we want to track (actually usually we just exclude them from billing)
+                // BUT the main issue is CICLO_INCORRETO and FORA_PERIODO.
+                // We ONLY want to bill: OK, CORREÇÃO, or REMOVED (as explicit status)
+                // If it is CICLO_INCORRETO or FORA_PERIODO, it MUST NOT enter the lote.
+                if (a.status === "CICLO_INCORRETO" || a.status === "FORA_PERIODO") return false;
+
+                return true;
+            })
             .map((a) => {
                 let finalStatus = a.status as string;
 
@@ -751,7 +792,7 @@ export default function NovoFaturamento() {
                     cnpj_loja: a.refAgendamento || null,
                     data_inicio: a.inicio?.toISOString() ?? periodoInicio,
                     data_fim: a.termino?.toISOString() ?? periodoFim,
-                    valor_iwof: a.manualValue ?? a.suggestedValorIwof ?? a.valorIwof,
+                    valor_iwof: Number(parseFloat(String(a.manualValue ?? a.suggestedValorIwof ?? a.valorIwof)).toFixed(2)),
                     fracao_hora: a.fracaoHora,
                     status_validacao: finalStatus,
                 };
@@ -785,6 +826,7 @@ export default function NovoFaturamento() {
     const validacoes = agendamentos.filter((a) => !a.isRemoved && (a.status === "CANCELAR" || a.status === "CORREÇÃO"));
     const foraPeriodo = agendamentos.filter((a) => !a.isRemoved && a.status === "FORA_PERIODO");
     const validados = agendamentos.filter((a) => !a.isRemoved && a.status === "OK");
+    const ciclosIncorretos = agendamentos.filter((a) => !a.isRemoved && a.status === "CICLO_INCORRETO");
     const selectedCicloNomes = ciclos.filter((c) => selectedCicloIds.includes(c.id)).map((c) => c.nome);
 
     const setupReady = periodoInicio && periodoFim && selectedCicloIds.length > 0;
@@ -982,6 +1024,7 @@ export default function NovoFaturamento() {
             }).length // Use length of filtered array
         },
         { key: "conciliacao", label: "Conciliação", count: conciliation.naoCadastrados.length + conciliation.ausentesNoLote.length },
+        { key: "ciclos", label: "Ciclo Incorreto", count: ciclosIncorretos.length },
         { key: "excluidos", label: "Excluídos", count: excluidos.length },
         { key: "validados", label: "Validados", count: validados.length },
     ];
@@ -1077,6 +1120,11 @@ export default function NovoFaturamento() {
                 {foraPeriodo.length > 0 && (
                     <span className="badge" style={{ background: "rgba(245,158,11,0.15)", color: "#f59e0b" }}>
                         {foraPeriodo.length} fora do período
+                    </span>
+                )}
+                {ciclosIncorretos.length > 0 && (
+                    <span className="badge" style={{ background: "rgba(245,158,11,0.15)", color: "#f59e0b" }}>
+                        {ciclosIncorretos.length} ciclo incorreto
                     </span>
                 )}
                 <span className="badge badge-info">Ciclos: {selectedCicloNomes.join(", ")}</span>
@@ -1803,6 +1851,61 @@ export default function NovoFaturamento() {
                             </div>
                         );
                     })()}
+
+                    {/* ----------- TAB: CICLO INCORRETO ----------- */}
+                    {activeTab === "ciclos" && (
+                        <div>
+                            {ciclosIncorretos.length === 0 ? (
+                                <p className="text-sm text-[var(--fg-dim)] py-8 text-center">
+                                    Nenhum agendamento com ciclo divergente.
+                                </p>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex gap-3">
+                                        <AlertTriangle className="text-amber-500 shrink-0" size={18} />
+                                        <p className="text-xs text-amber-200/80 leading-relaxed">
+                                            Estes agendamentos pertencem a lojas que <strong>não fazem parte do ciclo selecionado</strong> ({selectedCicloNomes.join(", ")}).
+                                            Eles foram movidos para cá e não serão incluídos no lote para evitar faturamento indevido.
+                                        </p>
+                                    </div>
+
+                                    <div className="overflow-x-auto">
+                                        <table className="data-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Loja</th>
+                                                    <th>Ciclo no Banco</th>
+                                                    <th>Valor</th>
+                                                    <th>Ação</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {ciclosIncorretos.map((a, i) => (
+                                                    <tr key={i}>
+                                                        <td>
+                                                            <span className="table-primary">{a.loja}</span>
+                                                        </td>
+                                                        <td>
+                                                            <span className="badge badge-warning">{a.cicloNome || "SEM CICLO"}</span>
+                                                        </td>
+                                                        <td className="table-mono">{fmtCurrency(a.valorIwof)}</td>
+                                                        <td>
+                                                            <button
+                                                                className="btn btn-ghost btn-xs text-[var(--danger)]"
+                                                                onClick={() => toggleRemoval(a.id)}
+                                                            >
+                                                                Ignorar
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     {/* ----------- TAB: EXCLUÍDOS ----------- */}
                     {activeTab === "excluidos" && (

@@ -117,14 +117,38 @@ export default function FiscalProcessingPage() {
             }
             setLote(loteData);
 
-            // Fetch validated appointments
-            const { data: agendamentos, error: agendErr } = await supabase
-                .from("agendamentos_brutos")
-                .select("loja_id, valor_iwof, clientes(*)")
-                .eq("lote_id", loteId)
-                .eq("status_validacao", "VALIDADO");
+            // Fetch validated appointments (Paginated)
+            let allAgendamentos: any[] = [];
+            let from = 0;
+            const step = 1000;
+            let hasMore = true;
 
-            if (agendErr) throw agendErr;
+            while (hasMore) {
+                const { data: chunk, error } = await supabase
+                    .from("agendamentos_brutos")
+                    .select("loja_id, valor_iwof, clientes(*)")
+                    .eq("lote_id", loteId)
+                    .eq("status_validacao", "VALIDADO")
+                    .range(from, from + step - 1);
+
+                if (error) {
+                    console.error("Erro ao buscar agendamentos:", error);
+                    break;
+                }
+
+                if (chunk && chunk.length > 0) {
+                    allAgendamentos = [...allAgendamentos, ...chunk];
+                    from += step;
+                } else {
+                    hasMore = false;
+                }
+
+                if (chunk && chunk.length < step) {
+                    hasMore = false;
+                }
+            }
+
+            const agendamentos = allAgendamentos;
 
             // Fetch adjustments ALREADY applied to this batch (marked in previous step)
             const { data: ajustes, error: ajErr } = await supabase
@@ -331,6 +355,12 @@ export default function FiscalProcessingPage() {
         }
     };
 
+    const handleExportarNFE = () => {
+        // Trigger download via window.location or hidden link
+        const url = `/api/documentos/exportar-nfe?loteId=${loteId}`;
+        window.open(url, "_blank");
+    };
+
     if (loading) {
         return (
             <div className="min-h-screen bg-[var(--bg-main)] flex items-center justify-center">
@@ -395,6 +425,28 @@ export default function FiscalProcessingPage() {
                                 <CheckCircle2 size={12} className="text-emerald-500" /> Somente .ZIP
                             </div>
                         </div>
+
+                        {/* Export Shortcut */}
+                        <div className="mt-8 bg-[var(--bg-card)] rounded-3xl border border-[var(--border)] p-6">
+                            <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+                                        <FileSearch size={24} />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-white font-bold">Ainda não tem a planilha para o NFE.io?</h4>
+                                        <p className="text-[var(--fg-dim)] text-xs">Gere o arquivo consolidado para importar no sistema de Notas Fiscais.</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={handleExportarNFE}
+                                    className="btn btn-outline btn-success flex items-center gap-2 px-8 py-3 rounded-xl font-bold uppercase tracking-tight transition-all hover:scale-105 active:scale-95 whitespace-nowrap"
+                                >
+                                    <FileSearch size={18} /> Exportar Planilha NFE.io (.xlsx)
+                                </button>
+                            </div>
+                        </div>
+
                         {processingZIP && (
                             <div className="mt-8 flex flex-col items-center gap-4">
                                 <div className="w-full h-1 bg-[var(--border)] rounded-full overflow-hidden">
@@ -512,20 +564,28 @@ export default function FiscalProcessingPage() {
                         </div>
 
                         {lote?.status === "CONSOLIDADO" ? (
-                            <button
-                                disabled={isDispatching}
-                                onClick={handleDisparar}
-                                className="group relative overflow-hidden bg-[var(--primary)] text-white px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
-                            >
-                                {isDispatching ? (
-                                    <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                                ) : (
-                                    <>
-                                        Preencher Planilha e Disparar Robôs (Legado)
-                                        <ArrowRight size={18} />
-                                    </>
-                                )}
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={handleExportarNFE}
+                                    className="btn btn-outline btn-success flex items-center gap-2 px-6 py-4 rounded-2xl font-bold uppercase tracking-tight transition-all hover:scale-105 active:scale-95"
+                                >
+                                    <FileSearch size={18} /> Exportar Planilha NFE.io (.xlsx)
+                                </button>
+                                <button
+                                    disabled={isDispatching}
+                                    onClick={handleDisparar}
+                                    className="group relative overflow-hidden bg-[var(--primary)] text-white px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
+                                >
+                                    {isDispatching ? (
+                                        <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                                    ) : (
+                                        <>
+                                            Preencher Planilha e Disparar Robôs (Legado)
+                                            <ArrowRight size={18} />
+                                        </>
+                                    )}
+                                </button>
+                            </div>
                         ) : lote?.status === "CONCLUÍDO" ? (
                             <div className="flex items-center gap-2 text-emerald-500 font-black uppercase tracking-widest text-sm">
                                 <CheckCircle2 size={24} /> Lote Finalizado

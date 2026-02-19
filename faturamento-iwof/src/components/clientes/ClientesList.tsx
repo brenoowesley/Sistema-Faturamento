@@ -330,6 +330,18 @@ export default function ClientesList() {
     const totalPages = Math.ceil(total / pageSize);
     const isEditing = editingId !== null;
 
+    const getMissingFields = (c: Cliente) => {
+        const missing = [];
+        if (!c.nome_conta_azul || c.nome_conta_azul === "") missing.push("Nome Conta Azul");
+        if (!c.ciclo_faturamento_id) missing.push("Ciclo de Faturamento");
+        if (!c.email_contato || c.email_contato === "") missing.push("E-mail de Contato");
+        return missing;
+    };
+
+    const isPendente = (c: Cliente) => {
+        return c.status && getMissingFields(c).length > 0;
+    };
+
     /* --- XLSX export --- */
     const handleExport = async () => {
         // Fetch ALL matching clients (no pagination)
@@ -391,13 +403,14 @@ export default function ClientesList() {
                 {([
                     { key: "todos" as StatusFilter, label: "Total", count: counts.todos, icon: Users, color: "var(--fg-muted)", bg: "var(--bg-card)" },
                     { key: "ativos" as StatusFilter, label: "Ativos", count: counts.ativos, icon: UserCheck, color: "#22c55e", bg: "rgba(34,197,94,0.08)" },
-                    { key: "pendentes" as StatusFilter, label: "Pendentes", count: counts.pendentes, icon: Clock, color: "#f59e0b", bg: "rgba(245,158,11,0.08)" },
+                    { key: "pendentes" as StatusFilter, label: "Pendentes", count: counts.pendentes, icon: Clock, color: "#f59e0b", bg: "rgba(245,158,11,0.08)", tooltip: "Clientes ativos que não possuem Nome Conta Azul, Ciclo ou E-mail de Contato" },
                     { key: "inativos" as StatusFilter, label: "Inativos", count: counts.inativos, icon: UserX, color: "#ef4444", bg: "rgba(239,68,68,0.08)" },
                 ]).map((card) => (
                     <button
                         key={card.key}
                         onClick={() => { setStatusFilter(card.key); setPage(0); }}
                         className="card text-left transition-all"
+                        title={card.tooltip}
                         style={{
                             border: statusFilter === card.key
                                 ? `2px solid ${card.color}`
@@ -526,11 +539,18 @@ export default function ClientesList() {
                                     </td>
                                     <td>{c.tempo_pagamento_dias} dias</td>
                                     <td>
-                                        <span
-                                            className={`badge ${c.status ? "badge-success" : "badge-danger"}`}
-                                        >
-                                            {c.status ? "Ativo" : "Inativo"}
-                                        </span>
+                                        {(() => {
+                                            const pending = isPendente(c);
+                                            const missing = getMissingFields(c);
+                                            return (
+                                                <span
+                                                    className={`badge ${c.status ? (pending ? "badge-warning" : "badge-success") : "badge-danger"}`}
+                                                    title={pending ? `Faltando: ${missing.join(", ")}` : undefined}
+                                                >
+                                                    {c.status ? (pending ? "Pendente" : "Ativo") : "Inativo"}
+                                                </span>
+                                            );
+                                        })()}
                                     </td>
                                     <td>
                                         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>

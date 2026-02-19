@@ -49,6 +49,7 @@ interface LojaConsolidada {
     descontos: number;
     ajustesDetalhes: AjusteItem[];
     active: boolean;
+    ciclo: string;
 }
 
 /* ================================================================
@@ -95,14 +96,38 @@ export default function LoteFechamentoPage() {
             if (loteErr) throw loteErr;
             setLote(loteData);
 
-            // 2. Fetch Validated Appointments
-            const { data: agendamentos, error: agendErr } = await supabase
-                .from("agendamentos_brutos")
-                .select("loja_id, valor_iwof, clientes(*)")
-                .eq("lote_id", loteId)
-                .eq("status_validacao", "VALIDADO");
+            // 2. Fetch Validated Appointments (Paginated)
+            let allAgendamentos: any[] = [];
+            let from = 0;
+            const step = 1000;
+            let hasMore = true;
 
-            if (agendErr) throw agendErr;
+            while (hasMore) {
+                const { data: chunk, error } = await supabase
+                    .from("agendamentos_brutos")
+                    .select("loja_id, valor_iwof, clientes(*, ciclos_faturamento(nome))")
+                    .eq("lote_id", loteId)
+                    .eq("status_validacao", "VALIDADO")
+                    .range(from, from + step - 1);
+
+                if (error) {
+                    console.error("Erro ao buscar agendamentos:", error);
+                    break;
+                }
+
+                if (chunk && chunk.length > 0) {
+                    allAgendamentos = [...allAgendamentos, ...chunk];
+                    from += step;
+                } else {
+                    hasMore = false;
+                }
+
+                if (chunk && chunk.length < step) {
+                    hasMore = false;
+                }
+            }
+
+            const agendamentos = allAgendamentos;
 
             // 3. Get unique store IDs involved
             const storeIds = Array.from(new Set(agendamentos.map(a => a.loja_id)));
@@ -132,29 +157,36 @@ export default function LoteFechamentoPage() {
                         acrescimos: 0,
                         descontos: 0,
                         ajustesDetalhes: [],
-                        active: true
+                        active: true,
+                        ciclo: client.ciclos_faturamento?.nome || "-"
                     });
                 }
                 const store = consolidatedMap.get(a.loja_id)!;
-                store.valorBase += Number(a.valor_iwof);
+                store.valorBase += Number(a.valor_iwof) || 0;
             });
 
             ajustes.forEach(aj => {
                 const store = consolidatedMap.get(aj.cliente_id);
                 if (store) {
-                    if (aj.tipo === "ACRESCIMO") store.acrescimos += Number(aj.valor);
-                    if (aj.tipo === "DESCONTO") store.descontos += Number(aj.valor);
+                    if (aj.tipo === "ACRESCIMO") store.acrescimos += Number(aj.valor) || 0;
+                    if (aj.tipo === "DESCONTO") store.descontos += Number(aj.valor) || 0;
                     store.ajustesDetalhes.push({
                         id: aj.id,
                         tipo: aj.tipo,
-                        valor: aj.valor,
+                        valor: Number(aj.valor) || 0,
                         motivo: aj.motivo,
                         cliente_id: aj.cliente_id
                     });
                 }
             });
 
-            setLojas(Array.from(consolidatedMap.values()));
+            const finalLojas = Array.from(consolidatedMap.values());
+            console.log("DADOS AGRUPADOS (DEBUG):", {
+                totalAgendamentos: agendamentos.length,
+                totalLojas: finalLojas.length,
+                detalhes: finalLojas
+            });
+            setLojas(finalLojas);
 
         } catch (err) {
             console.error("Error fetching data:", err);
@@ -170,9 +202,11 @@ export default function LoteFechamentoPage() {
 
     // Financial calculations
     const filteredLojas = useMemo(() => {
+        const lowerSearch = searchTerm.toLowerCase();
         return lojas.filter(l =>
-            l.razao_social.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            l.nome_fantasia?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            l.razao_social.toLowerCase().includes(lowerSearch) ||
+            l.nome_fantasia?.toLowerCase().includes(lowerSearch) ||
+            l.nome_conta_azul?.toLowerCase().includes(lowerSearch) ||
             l.cnpj.includes(searchTerm)
         );
     }, [lojas, searchTerm]);
@@ -222,7 +256,7 @@ export default function LoteFechamentoPage() {
             if (loteErr) throw loteErr;
 
             alert("Lote fechado com sucesso!");
-            router.push(`/faturamento/lote/fiscal/${loteId}`); // Assume this is the next step
+            router.push(`/faturamento/lote/${loteId}/fiscal`);
 
         } catch (err) {
             console.error("Error closing batch:", err);
@@ -266,7 +300,7 @@ export default function LoteFechamentoPage() {
                         <Search className="absolute left-3 top-2.5 text-[var(--fg-dim)]" size={18} />
                         <input
                             type="text"
-                            placeholder="Buscar loja ou CNPJ..."
+                            placeholder="Buscar loja, CNPJ ou razão social..."
                             className="w-full bg-[var(--bg-card)] border border-[var(--border)] text-white pl-10 pr-4 py-2 rounded-xl text-sm focus:border-[var(--primary)] outline-none transition-all shadow-inner"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
@@ -285,6 +319,7 @@ export default function LoteFechamentoPage() {
                                 <tr className="bg-[var(--bg-main)]/50 text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest border-b border-[var(--border)]">
                                     <th className="p-4 w-16 text-center">Emitir NF</th>
                                     <th className="p-4">Cliente / Loja</th>
+                                    <th className="p-4 text-center">Ciclo</th>
                                     <th className="p-4 text-right">Valor Base</th>
                                     <th className="p-4 text-right">Acréscimos</th>
                                     <th className="p-4 text-right">Descontos</th>
@@ -315,6 +350,7 @@ export default function LoteFechamentoPage() {
                                                     <span className="text-[10px] text-[var(--fg-dim)] font-mono">{loja.cnpj}</span>
                                                 </div>
                                             </td>
+                                            <td className="p-4 text-center text-xs font-semibold text-[var(--fg-dim)] uppercase tracking-wider">{loja.ciclo}</td>
                                             <td className="p-4 text-right text-sm font-medium text-white/70">{fmtCurrency(loja.valorBase)}</td>
 
                                             {/* ACRESCIMOS WITH TOOLTIP */}
@@ -386,7 +422,7 @@ export default function LoteFechamentoPage() {
                 <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
 
                     {/* Totals Grid */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 w-full md:w-auto">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-8 w-full md:w-auto">
                         <div className="flex flex-col">
                             <span className="text-[10px] uppercase font-black text-[var(--fg-dim)] tracking-widest flex items-center gap-2">
                                 <Receipt size={12} className="text-white" /> Total Boletos
@@ -405,24 +441,42 @@ export default function LoteFechamentoPage() {
                             </span>
                             <span className="text-2xl font-black text-emerald-500">{fmtCurrency(totals.nc)}</span>
                         </div>
+                        <div className="flex flex-col">
+                            <span className="text-[10px] uppercase font-black text-[var(--fg-dim)] tracking-widest flex items-center gap-2">
+                                <Building2 size={12} className="text-white" /> Lojas Faturadas
+                            </span>
+                            <span className="text-2xl font-black text-white">{filteredLojas.length}</span>
+                        </div>
                     </div>
 
-                    {/* Action Button */}
-                    <button
-                        disabled={isClosing || totals.boleto === 0}
-                        onClick={handleFecharLote}
-                        className="group relative w-full md:w-auto overflow-hidden bg-[var(--primary)] text-black px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center justify-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed hover:shadow-[0_0_30px_rgba(37,99,235,0.4)]"
-                    >
-                        {isClosing ? (
-                            <div className="w-5 h-5 border-2 border-black/20 border-t-black rounded-full animate-spin"></div>
-                        ) : (
-                            <>
-                                Fechar Lote e Avançar para Fiscal
-                                <ArrowRight className="transition-transform group-hover:translate-x-1" size={18} />
-                            </>
+                    {/* Action Buttons */}
+                    <div className="flex items-center gap-4 w-full md:w-auto justify-end">
+                        {/* Show simple navigation if already closed */}
+                        {lote && lote.status !== "PENDENTE" && lote.status !== "ABERTO" && (
+                            <button
+                                onClick={() => router.push(`/faturamento/lote/${loteId}/fiscal`)}
+                                className="group relative overflow-hidden bg-[var(--bg-card)] border border-[var(--border)] text-white px-6 py-4 rounded-xl font-bold uppercase tracking-tighter text-xs flex items-center justify-center gap-2 hover:bg-white/5 active:scale-95 transition-all"
+                            >
+                                Ir para Fiscal <ArrowRight size={14} />
+                            </button>
                         )}
-                        <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-12"></div>
-                    </button>
+
+                        <button
+                            disabled={isClosing || totals.boleto === 0 || (lote && lote.status !== "PENDENTE" && lote.status !== "ABERTO")}
+                            onClick={handleFecharLote}
+                            className="group relative w-full md:w-auto overflow-hidden bg-[var(--primary)] text-black px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center justify-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed hover:shadow-[0_0_30px_rgba(37,99,235,0.4)]"
+                        >
+                            {isClosing ? (
+                                <div className="w-5 h-5 border-2 border-black/20 border-t-black rounded-full animate-spin"></div>
+                            ) : (
+                                <>
+                                    Fechar Lote e Avançar para Fiscal
+                                    <ArrowRight className="transition-transform group-hover:translate-x-1" size={18} />
+                                </>
+                            )}
+                            <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-12"></div>
+                        </button>
+                    </div>
                 </div>
             </footer>
 
