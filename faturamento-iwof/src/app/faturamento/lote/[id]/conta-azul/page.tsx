@@ -354,7 +354,7 @@ export default function ContaAzulStagingPage() {
             "Categoria": r.categoria,
             "Descrição": r.descricao,
             "Cliente/Fornecedor": r.cliente,
-            "CNPJ/CPF": r.cnpj,
+            "CNPJ/CPF Cliente/Fornecedor": r.cnpj,
             "Centro de Custo": r.centroCusto,
             "Observações": r.observacoes
         }));
