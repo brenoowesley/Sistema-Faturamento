@@ -1,6 +1,6 @@
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/server";
 import * as xlsx from "xlsx";
 
 export async function GET(req: NextRequest) {
@@ -12,10 +12,7 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ error: "loteId is required" }, { status: 400 });
         }
 
-        const supabase = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-        );
+        const supabase = await createClient();
 
         // 1. Fetch ALL store data for this batch (not just validated) to identify exclusions
         const { data: allInBatchRaw, error: allInBatchErr } = await supabase
@@ -122,50 +119,60 @@ export async function GET(req: NextRequest) {
             });
 
             records = Array.from(consolidatedMap.values()).map(r => {
-                const base = (r.valor_bruto + r.acrescimos) - r.descontos;
+                const baseResumo = (r.valor_bruto + r.acrescimos) - r.descontos;
                 return {
                     ...r,
-                    valor_nf_emitida: Math.max(0, base * 0.115) // Consistency fix: use full base, floor at 0
+                    valor_base_calculo: baseResumo,
+                    valor_nf_emitida: Math.max(0, baseResumo * 0.115)
                 };
             });
         }
 
-        // AUDIT & EXCLUSIONS LOGIC
-        const excludedList: any[] = [];
+        // --- AUDIT SECTION ---
+        const auditExport = {
+            loteId,
+            total_lojas_encontradas: allStoresInBatchMap.size,
+            total_lojas_exportadas: records?.length || 0,
+            simulation_used: simulationUsed,
+            excluded: [] as any[]
+        };
 
-        console.log(`[EXPORT AUDIT] Lote: ${loteId}`);
-        console.log(`[EXPORT AUDIT] Total de lojas no Lote (Bruto): ${allStoresInBatchMap.size}`);
-        console.log(`[EXPORT AUDIT] Total de lojas exportadas para NFE: ${records?.length || 0}`);
+        const recordsWithBase = records?.map(r => {
+            const base = r.valor_base_calculo ?? ((r.valor_bruto + (r.acrescimos || 0)) - (r.descontos || 0));
+            return {
+                ...r,
+                valor_base_calculo: base,
+                valor_nf_emitida: r.valor_nf_emitida ?? Math.max(0, base * 0.115)
+            };
+        });
 
         allStoresInBatchMap.forEach((store, id) => {
-            const isExported = records?.some(r => r.cliente_id === id);
+            const isExported = recordsWithBase?.some(r => r.cliente_id === id || (r.clientes as any)?.id === id);
 
             if (!isExported) {
                 let motivo = "Desconhecido";
                 if (simulationUsed) {
                     if (!store.status.has("VALIDADO")) {
-                        motivo = `Agendamentos possuem status: ${Array.from(store.status).join(", ")} (Nenhum como 'VALIDADO')`;
+                        motivo = `Status: ${Array.from(store.status).join(", ")} (Nenhum como 'VALIDADO')`;
                     } else {
-                        // This case implies that even if VALIDADO, the final calculated value was <= 0
-                        motivo = `Valor líquido final resultou em zero ou negativo após descontos.`;
+                        motivo = `Valor líquido <= 0 após ajustes.`;
                     }
                 } else {
-                    motivo = "Loja não incluída na consolidação final do lote (Fechar Lote).";
+                    motivo = "Não consolidado no fechamento (Status consolidado?)";
                 }
-
-                console.warn(`[EXPORT AUDIT] EXCLUÍDO: ${store.cnpj} - ${store.nome}. Motivo: ${motivo}`);
-                excludedList.push({
-                    "CNPJ": store.cnpj,
-                    "NOME": store.nome,
-                    "VALOR_TENTADO": store.totalTentado,
-                    "STATUS_NO_LOTE": Array.from(store.status).join(", "),
-                    "MOTIVO_EXCLUSAO": motivo
-                });
-            } else {
-                const r = records?.find(rec => rec.cliente_id === id || (rec.clientes as any)?.id === id);
-                console.log(`[EXPORT AUDIT] OK: ${store.cnpj} - ${store.nome} | Valor NF: ${r?.valor_nf_emitida}`);
+                auditExport.excluded.push({ cnpj: store.cnpj, nome: store.nome, motivo });
             }
         });
+
+        console.log("[NFE EXPORT AUDIT]", JSON.stringify(auditExport, null, 2));
+        // --- END AUDIT SECTION ---
+
+        // NF Não Emitidas (Valor <= 0 ou Excluídos)
+        const excludedList: any[] = auditExport.excluded.map(ex => ({
+            "Loja": ex.nome,
+            "CNPJ": ex.cnpj,
+            "Motivo": ex.motivo
+        }));
 
         if (!records || records.length === 0) {
             // If no records to export, but there might be exclusions, still generate a file with just exclusions

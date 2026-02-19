@@ -259,10 +259,12 @@ export default function AjustesPage() {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [isSaving, setIsSaving] = useState(false);
 
-    // Batch Upload states
     const [pendingAdjustments, setPendingAdjustments] = useState<any[]>([]);
     const [showPreview, setShowPreview] = useState(false);
     const [isProcessingFile, setIsProcessingFile] = useState(false);
+
+    // Bulk action states
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
     // Form states
     const [formData, setFormData] = useState({
@@ -403,6 +405,45 @@ export default function AjustesPage() {
         else setShowModalAcrescimo(true);
     };
 
+    const handleBulkDelete = async () => {
+        if (selectedIds.size === 0) return;
+        if (!confirm(`Deseja realmente excluir os ${selectedIds.size} itens selecionados?`)) return;
+
+        setIsSaving(true);
+        try {
+            const { error } = await supabase
+                .from("ajustes_faturamento")
+                .delete()
+                .in("id", Array.from(selectedIds));
+
+            if (error) throw error;
+
+            alert(`${selectedIds.size} itens excluídos com sucesso!`);
+            setSelectedIds(new Set());
+            fetchAjustes();
+        } catch (err: any) {
+            console.error("Error bulk deleting:", err);
+            alert("Erro ao excluir itens: " + err.message);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const toggleSelection = (id: string) => {
+        const next = new Set(selectedIds);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        setSelectedIds(next);
+    };
+
+    const toggleAll = (ids: string[]) => {
+        if (selectedIds.size === ids.length) {
+            setSelectedIds(new Set());
+        } else {
+            setSelectedIds(new Set(ids));
+        }
+    };
+
     const handleFileUpload = useCallback(async (acceptedFiles: File[], type: AjusteTipo) => {
         if (acceptedFiles.length === 0) return;
         setIsProcessingFile(true);
@@ -426,37 +467,40 @@ export default function AjustesPage() {
 
                 if (type === "ACRESCIMO") {
                     // Acréscimos: Nome, Loja, Vaga, Valor IWOF, ...
-                    const lojaNome = row["Loja"];
-                    const profissional = row["Nome"];
-                    const vaga = row["Vaga"];
+                    const lojaNome = row["Loja"] || row["LOJA"] || row["Empresa"] || row["EMPRESA"];
+                    const profissional = row["Nome"] || row["NOME"] || row["Profissional"] || row["PROFISSIONAL"] || row["Prestador"] || row["PRESTADOR"];
+                    const vaga = row["Vaga"] || row["VAGA"] || row["Cargo"] || row["CARGO"];
                     valor = parseDinheiroBrasil(row["Valor IWOF"]);
-                    motivo = `${vaga || "Vaga"} - ${profissional || "Profissional"}`;
+                    motivo = vaga || "Acréscimo em Lote";
 
+                    const normalizedSearch = (lojaNome || "").toUpperCase().trim();
                     clienteMatch = clientes.find(c =>
-                        (c.razao_social || "").toLowerCase().trim() === (lojaNome || "").toLowerCase().trim() ||
-                        (c.nome_fantasia || "").toLowerCase().trim() === (lojaNome || "").toLowerCase().trim()
+                        (c.nome_conta_azul || "").toUpperCase().trim() === normalizedSearch ||
+                        (c.razao_social || "").toUpperCase().trim() === normalizedSearch ||
+                        (c.nome_fantasia || "").toUpperCase().trim() === normalizedSearch
                     );
                 } else {
                     // Descontos: Empresa, CNPJ, Valor, Motivo, Usuário, Aplicado, ...
                     const cnpj = limparCNPJ(row["CNPJ"]);
-                    const empresa = row["Empresa"];
-                    const motivoRaw = row["Motivo"];
-                    const usuario = row["Usuário"];
+                    const empresa = row["Empresa"] || row["EMPRESA"];
+                    const motivoRaw = row["Motivo"] || row["MOTIVO"];
+                    const usuario = row["Usuário"] || row["USUÁRIO"] || row["Usuario"];
                     const jaAplicado = String(row["Aplicado"]).toUpperCase() === "TRUE" || row["Aplicado"] === true;
 
                     if (jaAplicado) continue; // Skip already applied
 
-                    valor = parseDinheiroBrasil(row["Valor"]);
+                    valor = parseDinheiroBrasil(row["Valor"] || row["VALOR"]);
                     motivo = motivoRaw || "Desconto em Lote";
-                    const obsInterna = usuario ? `Usuário Importação: ${usuario}` : "";
 
                     if (cnpj) {
                         clienteMatch = clientes.find(c => limparCNPJ(c.cnpj) === cnpj);
                     }
                     if (!clienteMatch && empresa) {
+                        const normalizedEmpresa = (empresa || "").toUpperCase().trim();
                         clienteMatch = clientes.find(c =>
-                            (c.razao_social || "").toLowerCase().trim() === (empresa || "").toLowerCase().trim() ||
-                            (c.nome_fantasia || "").toLowerCase().trim() === (empresa || "").toLowerCase().trim()
+                            (c.nome_conta_azul || "").toUpperCase().trim() === normalizedEmpresa ||
+                            (c.razao_social || "").toUpperCase().trim() === normalizedEmpresa ||
+                            (c.nome_fantasia || "").toUpperCase().trim() === normalizedEmpresa
                         );
                     }
                 }
@@ -473,8 +517,10 @@ export default function AjustesPage() {
                     tipo: type,
                     valor,
                     motivo,
-                    observacao_interna: type === "DESCONTO" ? (row["Usuário"] ? `Usuário Importação: ${row["Usuário"]}` : "") : "",
-                    nome_profissional: row["Nome"] || "N/A",
+                    observacao_interna: type === "DESCONTO" ? (row["Usuário"] || row["USUÁRIO"] || row["Usuario"] ? `Planilha Usuário/Audit: ${row["Usuário"] || row["USUÁRIO"] || row["Usuario"]}` : "") : "",
+                    nome_profissional: type === "DESCONTO"
+                        ? (row["Usuário"] || row["USUÁRIO"] || row["Usuario"] || row["Nome"] || row["NOME"] || row["Profissional"] || row["PROFISSIONAL"] || "N/A")
+                        : (row["Nome"] || row["NOME"] || row["Profissional"] || row["PROFISSIONAL"] || row["Prestador"] || row["PRESTADOR"] || "N/A"),
                     data_ocorrencia: new Date().toISOString().split("T")[0],
                     status,
                     warning
@@ -605,16 +651,34 @@ export default function AjustesPage() {
                                                     <span className="text-2xl font-black text-amber-500">{fmtCurrency(totalDescontos)}</span>
                                                 </div>
                                             </div>
-                                            <BatchUploadAction
-                                                type="DESCONTO"
-                                                isLoading={isProcessingFile}
-                                                onUpload={(files) => handleFileUpload(files, "DESCONTO")}
-                                            />
+                                            <div className="flex flex-col gap-2">
+                                                <BatchUploadAction
+                                                    type="DESCONTO"
+                                                    isLoading={isProcessingFile}
+                                                    onUpload={(files) => handleFileUpload(files, "DESCONTO")}
+                                                />
+                                                {selectedIds.size > 0 && (
+                                                    <button
+                                                        onClick={handleBulkDelete}
+                                                        className="btn btn-danger w-full bg-red-600 hover:bg-red-700 flex items-center justify-center gap-2 h-10 rounded-xl transition-all"
+                                                    >
+                                                        <Trash2 size={16} /> Excluir {selectedIds.size} selecionados
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
                                         <div className="table-container">
                                             <table className="w-full">
                                                 <thead>
                                                     <tr>
+                                                        <th className="w-10">
+                                                            <input
+                                                                type="checkbox"
+                                                                className="checkbox checkbox-xs"
+                                                                checked={selectedIds.size === descontosPendentes.length && descontosPendentes.length > 0}
+                                                                onChange={() => toggleAll(descontosPendentes.map(d => d.id))}
+                                                            />
+                                                        </th>
                                                         <th>Empresa</th>
                                                         <th>Profissional</th>
                                                         <th>Motivo</th>
@@ -626,6 +690,14 @@ export default function AjustesPage() {
                                                 <tbody>
                                                     {descontosPendentes.map(a => (
                                                         <tr key={a.id} className="hover:bg-[var(--bg-card-hover)] transition-colors cursor-pointer group" onClick={() => { setSelectedAjuste(a); setShowModalDetalhes(true); }}>
+                                                            <td onClick={(e) => e.stopPropagation()}>
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="checkbox checkbox-xs"
+                                                                    checked={selectedIds.has(a.id)}
+                                                                    onChange={() => toggleSelection(a.id)}
+                                                                />
+                                                            </td>
                                                             <td className="table-primary">{a.clientes?.nome_conta_azul || a.clientes?.nome_fantasia || a.clientes?.razao_social}</td>
                                                             <td className="text-sm">{a.nome_profissional}</td>
                                                             <td className="text-xs text-[var(--fg-dim)]">{a.motivo}</td>
@@ -666,16 +738,34 @@ export default function AjustesPage() {
                                                     <span className="text-2xl font-black text-[var(--primary)]">{fmtCurrency(totalAcrescimos)}</span>
                                                 </div>
                                             </div>
-                                            <BatchUploadAction
-                                                type="ACRESCIMO"
-                                                isLoading={isProcessingFile}
-                                                onUpload={(files) => handleFileUpload(files, "ACRESCIMO")}
-                                            />
+                                            <div className="flex flex-col gap-2">
+                                                <BatchUploadAction
+                                                    type="ACRESCIMO"
+                                                    isLoading={isProcessingFile}
+                                                    onUpload={(files) => handleFileUpload(files, "ACRESCIMO")}
+                                                />
+                                                {selectedIds.size > 0 && (
+                                                    <button
+                                                        onClick={handleBulkDelete}
+                                                        className="btn btn-danger w-full bg-red-600 hover:bg-red-700 flex items-center justify-center gap-2 h-10 rounded-xl transition-all"
+                                                    >
+                                                        <Trash2 size={16} /> Excluir {selectedIds.size} selecionados
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
                                         <div className="table-container">
                                             <table className="w-full">
                                                 <thead>
                                                     <tr>
+                                                        <th className="w-10">
+                                                            <input
+                                                                type="checkbox"
+                                                                className="checkbox checkbox-xs"
+                                                                checked={selectedIds.size === acrescimosPendentes.length && acrescimosPendentes.length > 0}
+                                                                onChange={() => toggleAll(acrescimosPendentes.map(a => a.id))}
+                                                            />
+                                                        </th>
                                                         <th>Empresa</th>
                                                         <th>Profissional</th>
                                                         <th>Motivo</th>
@@ -687,6 +777,14 @@ export default function AjustesPage() {
                                                 <tbody>
                                                     {acrescimosPendentes.map(a => (
                                                         <tr key={a.id} className="hover:bg-[var(--bg-card-hover)] transition-colors cursor-pointer group" onClick={() => { setSelectedAjuste(a); setShowModalDetalhes(true); }}>
+                                                            <td onClick={(e) => e.stopPropagation()}>
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="checkbox checkbox-xs"
+                                                                    checked={selectedIds.has(a.id)}
+                                                                    onChange={() => toggleSelection(a.id)}
+                                                                />
+                                                            </td>
                                                             <td className="table-primary">{a.clientes?.nome_conta_azul || a.clientes?.nome_fantasia || a.clientes?.razao_social}</td>
                                                             <td className="text-sm">{a.nome_profissional}</td>
                                                             <td className="text-xs text-[var(--fg-dim)]">{a.motivo}</td>
@@ -1110,8 +1208,9 @@ export default function AjustesPage() {
                                 <tr className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest border-b border-[var(--border)]">
                                     <th className="p-4">Status</th>
                                     <th className="p-4">Cliente (Planilha)</th>
+                                    <th className="p-4">Profissional</th>
                                     <th className="p-4">Tipo</th>
-                                    <th className="p-4">Descrição Gerada</th>
+                                    <th className="p-4">Motivo</th>
                                     <th className="p-4 text-right">Valor</th>
                                 </tr>
                             </thead>
@@ -1140,6 +1239,9 @@ export default function AjustesPage() {
                                                     </span>
                                                 )}
                                             </div>
+                                        </td>
+                                        <td className="p-4">
+                                            <span className="text-xs text-white font-medium">{item.nome_profissional}</span>
                                         </td>
                                         <td className="p-4">
                                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${item.tipo === 'DESCONTO' ? 'bg-amber-900/40 text-amber-500' : 'bg-primary/20 text-primary'}`}>

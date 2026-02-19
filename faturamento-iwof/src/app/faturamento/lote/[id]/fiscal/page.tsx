@@ -363,9 +363,8 @@ export default function FiscalProcessingPage() {
                         valor_bruto: item.loja.valorBruto,
                         acrescimos: item.loja.acrescimos,
                         descontos: item.loja.descontos,
-                        valor_irrf: item.irrfCalculado,
-                        numero_nf: item.xml?.numeroNF || null,
-                        valor_nf_emitida: item.loja.valorBruto * 0.115, // NF base for reference
+                        valor_ir_xml: item.irrfCalculado,
+                        valor_nf_emitida: ((item.loja.valorBruto + item.loja.acrescimos) - item.loja.descontos) * 0.115,
                         valor_nc_final: item.ncFinal,
                         valor_boleto_final: item.boletoFinal
                     });
