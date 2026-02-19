@@ -164,6 +164,11 @@ function fmtDate(d: Date | null): string {
     return d.toLocaleDateString("pt-BR");
 }
 
+function fmtTime(d: Date | null): string {
+    if (!d) return "";
+    return d.toLocaleTimeString("pt-BR", { hour: '2-digit', minute: '2-digit' });
+}
+
 /* --- Similarity Helper --- */
 function getSimilarity(s1: string, s2: string): number {
     const longer = s1.length < s2.length ? s2 : s1;
@@ -1239,13 +1244,19 @@ export default function NovoFaturamento() {
                                                                                     <div className="flex justify-between items-start mb-3">
                                                                                         <div className="flex-1 min-w-0 mr-2">
                                                                                             <h5 className="font-bold text-white text-sm leading-tight truncate">{a.loja}</h5>
-                                                                                            <p className="text-[10px] text-[var(--fg-dim)] uppercase mt-0.5">{a.nome}</p>
+                                                                                            <div className="flex flex-col mt-0.5">
+                                                                                                <p className="text-[10px] text-[var(--fg-dim)] uppercase font-bold">{a.nome}</p>
+                                                                                                <p className="text-[9px] text-[var(--fg-muted)] uppercase tracking-wider">{a.vaga}</p>
+                                                                                            </div>
                                                                                         </div>
                                                                                         <span className="badge badge-danger text-[9px] px-1.5 py-0.5 h-auto">CANCELAR</span>
                                                                                     </div>
                                                                                     <div className="grid grid-cols-2 gap-y-1.5 text-[10px] mb-4">
                                                                                         <div className="text-[var(--fg-dim)] uppercase">Horário</div>
-                                                                                        <div className="text-right text-[var(--fg-muted)]">{fmtDate(a.inicio)} - {fmtDate(a.termino)}</div>
+                                                                                        <div className="text-right text-[var(--fg-muted)]">
+                                                                                            {fmtDate(a.inicio)} <br />
+                                                                                            <span className="text-[9px] opacity-70">{fmtTime(a.inicio)} - {fmtTime(a.termino)}</span>
+                                                                                        </div>
                                                                                         <div className="text-[var(--fg-dim)] uppercase">Duração</div>
                                                                                         <div className="text-right font-mono font-bold text-[var(--danger)]">{a.fracaoHora.toFixed(2)}h</div>
                                                                                         <div className="text-[var(--fg-dim)] uppercase">Valor Bruto</div>
@@ -1255,8 +1266,9 @@ export default function NovoFaturamento() {
                                                                                         <button className={`btn btn-sm h-7 px-2 text-[10px] ${a.isRemoved ? "btn-success" : "btn-danger"}`} onClick={() => toggleRemoval(a.id)}>
                                                                                             {a.isRemoved ? "Restaurar" : "Remover"}
                                                                                         </button>
-                                                                                        <a href={`https://administrativo.iwof.com.br/workers/${a.refAgendamento}`} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm h-7 w-7 p-0 flex items-center justify-center text-[var(--fg-dim)] hover:text-white" title="Perfil Admin">
-                                                                                            <ExternalLink size={12} />
+                                                                                        <a href={`https://administrativo.iwof.com.br/workers/${a.refAgendamento}`} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-sm h-7 px-3 flex items-center gap-2 text-[var(--fg-dim)] hover:text-white hover:border-[var(--fg-dim)] transition-colors" title="Ver Perfil no Admin">
+                                                                                            <span className="text-[10px] uppercase font-semibold">Perfil</span>
+                                                                                            <ExternalLink size={10} />
                                                                                         </a>
                                                                                     </div>
                                                                                 </div>
@@ -1280,7 +1292,10 @@ export default function NovoFaturamento() {
                                                                                     <div className="flex justify-between items-start mb-3">
                                                                                         <div className="flex-1 min-w-0 mr-2">
                                                                                             <h5 className="font-bold text-white text-sm leading-tight truncate">{a.loja}</h5>
-                                                                                            <p className="text-[10px] text-[var(--fg-dim)] uppercase mt-0.5">{a.nome}</p>
+                                                                                            <div className="flex flex-col mt-0.5">
+                                                                                                <p className="text-[10px] text-[var(--fg-dim)] uppercase font-bold">{a.nome}</p>
+                                                                                                <p className="text-[9px] text-[var(--fg-muted)] uppercase tracking-wider">{a.vaga}</p>
+                                                                                            </div>
                                                                                         </div>
                                                                                         <span className="badge badge-info text-[9px] px-1.5 py-0.5 h-auto">CORREÇÃO</span>
                                                                                     </div>
@@ -1292,7 +1307,10 @@ export default function NovoFaturamento() {
                                                                                     {/* Original values */}
                                                                                     <div className="grid grid-cols-2 gap-y-1.5 text-[10px] mb-3">
                                                                                         <div className="text-[var(--fg-dim)] uppercase">Horário Original</div>
-                                                                                        <div className="text-right text-[var(--fg-muted)]">{fmtDate(a.inicio)} - {fmtDate(a.originalTermino ?? a.termino)}</div>
+                                                                                        <div className="text-right text-[var(--fg-muted)]">
+                                                                                            {fmtDate(a.inicio)} <br />
+                                                                                            <span className="text-[9px] opacity-70">{fmtTime(a.inicio)} - {fmtTime(a.originalTermino ?? a.termino)}</span>
+                                                                                        </div>
                                                                                         <div className="text-[var(--fg-dim)] uppercase">Duração Original</div>
                                                                                         <div className="text-right font-mono font-bold" style={{ color: "#f59e0b" }}>{(a.originalFracaoHora ?? a.fracaoHora).toFixed(2)}h</div>
                                                                                         <div className="text-[var(--fg-dim)] uppercase">Valor Original</div>
@@ -1305,7 +1323,10 @@ export default function NovoFaturamento() {
                                                                                             <p className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "#22c55e" }}>⚡ Sugestão (Cap 6h)</p>
                                                                                             <div className="grid grid-cols-2 gap-y-1.5 text-[10px]">
                                                                                                 <div className="text-[var(--fg-dim)] uppercase">Horário Sugerido</div>
-                                                                                                <div className="text-right font-mono text-[var(--success)]">{fmtDate(a.inicio)} - {fmtDate(a.suggestedTermino ?? null)}</div>
+                                                                                                <div className="text-right font-mono text-[var(--success)]">
+                                                                                                    {fmtDate(a.inicio)} <br />
+                                                                                                    <span className="opacity-70">{fmtTime(a.inicio)} - {fmtTime(a.suggestedTermino ?? null)}</span>
+                                                                                                </div>
                                                                                                 <div className="text-[var(--fg-dim)] uppercase">Duração Sugerida</div>
                                                                                                 <div className="text-right font-mono font-bold text-[var(--success)]">{a.suggestedFracaoHora?.toFixed(2)}h</div>
                                                                                                 <div className="text-[var(--fg-dim)] uppercase">Valor Sugerido</div>
@@ -1331,20 +1352,21 @@ export default function NovoFaturamento() {
                                                                                         <div className="flex items-center gap-1 flex-wrap">
                                                                                             {!a.isRemoved && a.suggestedValorIwof != null && editingAgendamentoId !== a.id && (
                                                                                                 <button className="btn btn-sm h-7 px-3 text-[10px]" style={{ background: "#22c55e", color: "#fff" }} onClick={() => confirmCorrection(a.id)}>
-                                                                                                    ✓ Confirmar Sugestão
+                                                                                                    ✓ Confirmar
                                                                                                 </button>
                                                                                             )}
                                                                                             {!a.isRemoved && editingAgendamentoId !== a.id && (
                                                                                                 <button className="btn btn-ghost btn-sm h-7 px-2 text-[10px] border border-[var(--border)]" onClick={() => { setEditingAgendamentoId(a.id); setTempValue((a.suggestedValorIwof ?? a.valorIwof).toString()); }}>
-                                                                                                    Editar Valor
+                                                                                                    Editar
                                                                                                 </button>
                                                                                             )}
                                                                                             <button className={`btn btn-sm h-7 px-2 text-[10px] ${a.isRemoved ? "btn-success" : "btn-danger"}`} onClick={() => toggleRemoval(a.id)}>
                                                                                                 {a.isRemoved ? "Restaurar" : "Remover"}
                                                                                             </button>
                                                                                         </div>
-                                                                                        <a href={`https://administrativo.iwof.com.br/workers/${a.refAgendamento}`} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm h-7 w-7 p-0 flex items-center justify-center text-[var(--fg-dim)] hover:text-white" title="Perfil Admin">
-                                                                                            <ExternalLink size={12} />
+                                                                                        <a href={`https://administrativo.iwof.com.br/workers/${a.refAgendamento}`} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-sm h-7 px-3 flex items-center gap-2 text-[var(--fg-dim)] hover:text-white hover:border-[var(--fg-dim)] transition-colors" title="Ver Perfil no Admin">
+                                                                                            <span className="text-[10px] uppercase font-semibold">Perfil</span>
+                                                                                            <ExternalLink size={10} />
                                                                                         </a>
                                                                                     </div>
                                                                                 </div>
