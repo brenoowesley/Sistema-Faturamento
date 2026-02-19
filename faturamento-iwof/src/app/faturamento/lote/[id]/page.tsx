@@ -225,6 +225,18 @@ export default function LoteFechamentoPage() {
         setLojas(prev => prev.map(l => l.id === id ? { ...l, active: !l.active } : l));
     };
 
+    const handleToggleAll = () => {
+        const allFilteredActive = filteredLojas.every(l => l.active);
+        const targetIds = new Set(filteredLojas.map(l => l.id));
+
+        setLojas(prev => prev.map(l => {
+            if (targetIds.has(l.id)) {
+                return { ...l, active: !allFilteredActive };
+            }
+            return l;
+        }));
+    };
+
     const handleFecharLote = async () => {
         if (!confirm("Deseja realmente fechar este lote? Esta ação marcará os ajustes como aplicados e avançará para o fiscal.")) return;
 
@@ -317,7 +329,17 @@ export default function LoteFechamentoPage() {
                         <table className="w-full text-left border-collapse">
                             <thead>
                                 <tr className="bg-[var(--bg-main)]/50 text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest border-b border-[var(--border)]">
-                                    <th className="p-4 w-16 text-center">Emitir NF</th>
+                                    <th className="p-4 w-28 text-center bg-white/5">
+                                        <div className="flex flex-col items-center gap-2">
+                                            <span>Emitir NF</span>
+                                            <button
+                                                onClick={handleToggleAll}
+                                                className={`text-[9px] px-2 py-0.5 rounded border transition-colors ${filteredLojas.every(l => l.active) ? 'bg-[var(--primary)] text-white border-[var(--primary)]' : 'bg-transparent text-[var(--fg-dim)] border-[var(--border)] hover:border-[var(--primary)]'}`}
+                                            >
+                                                {filteredLojas.every(l => l.active) ? 'Desmarcar Todos' : 'Marcar Todos'}
+                                            </button>
+                                        </div>
+                                    </th>
                                     <th className="p-4">Cliente / Loja</th>
                                     <th className="p-4 text-center">Ciclo</th>
                                     <th className="p-4 text-right">Valor Base</th>

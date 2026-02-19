@@ -101,6 +101,17 @@ export default function FiscalProcessingPage() {
     const [isDispatching, setIsDispatching] = useState(false);
     const [processingZIP, setProcessingZIP] = useState(false);
 
+    // Filter State
+    const [filters, setFilters] = useState({
+        loja: "",
+        status: "TODOS",
+        nota: "",
+        calculoBase: "",
+        irrf: "",
+        ncFinal: "",
+        boletoFinal: ""
+    });
+
     // 1. Initial Data Fetch
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -305,6 +316,32 @@ export default function FiscalProcessingPage() {
         }
     }, [lojas]);
 
+    // Computed Filtered Data
+    const filteredConciliacao = useMemo(() => {
+        return conciliacao.filter(item => {
+            const matchesLoja = (item.loja.nome_fantasia || item.loja.razao_social || "").toLowerCase().includes(filters.loja.toLowerCase()) ||
+                item.loja.cnpj.includes(filters.loja.replace(/\D/g, ""));
+
+            const matchesStatus = filters.status === "TODOS" || item.status === filters.status;
+
+            const matchesNota = (item.xml?.numeroNF || "-").toLowerCase().includes(filters.nota.toLowerCase());
+
+            const matchesCalculoBase = filters.calculoBase === "" ||
+                fmtCurrency((item.loja.valorBruto + item.loja.acrescimos) - item.loja.descontos).includes(filters.calculoBase);
+
+            const matchesIrrf = filters.irrf === "" ||
+                fmtCurrency(item.irrfCalculado).includes(filters.irrf);
+
+            const matchesNcFinal = filters.ncFinal === "" ||
+                fmtCurrency(item.ncFinal).includes(filters.ncFinal);
+
+            const matchesBoletoFinal = filters.boletoFinal === "" ||
+                fmtCurrency(item.boletoFinal).includes(filters.boletoFinal);
+
+            return matchesLoja && matchesStatus && matchesNota && matchesCalculoBase && matchesIrrf && matchesNcFinal && matchesBoletoFinal;
+        });
+    }, [conciliacao, filters]);
+
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
         accept: { "application/zip": [".zip"] },
@@ -506,55 +543,142 @@ export default function FiscalProcessingPage() {
                                 <table className="w-full text-left border-collapse">
                                     <thead>
                                         <tr className="bg-[var(--bg-main)]/50 text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest border-b border-[var(--border)]">
-                                            <th className="p-4">Loja / CNPJ</th>
-                                            <th className="p-4">Status XML</th>
-                                            <th className="p-4">Nº Nota</th>
-                                            <th className="p-4 text-right">Cálculo Base</th>
-                                            <th className="p-4 text-right text-amber-500">IRRF (XML)</th>
-                                            <th className="p-4 text-right text-[var(--primary)]">NC Final</th>
-                                            <th className="p-4 text-right text-white">Boleto Final</th>
+                                            <th className="p-4">
+                                                <div className="flex flex-col gap-2">
+                                                    Loja / CNPJ
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Filtrar..."
+                                                        value={filters.loja}
+                                                        onChange={e => setFilters({ ...filters, loja: e.target.value })}
+                                                        className="bg-[var(--bg-main)] border border-[var(--border)] rounded-lg px-2 py-1 text-[10px] font-medium text-white outline-none focus:border-[var(--primary)]/50 transition-all"
+                                                    />
+                                                </div>
+                                            </th>
+                                            <th className="p-4">
+                                                <div className="flex flex-col gap-2">
+                                                    Status XML
+                                                    <select
+                                                        value={filters.status}
+                                                        onChange={e => setFilters({ ...filters, status: e.target.value as any })}
+                                                        className="bg-[var(--bg-main)] border border-[var(--border)] rounded-lg px-2 py-1 text-[10px] font-medium text-white outline-none focus:border-[var(--primary)]/50 transition-all cursor-pointer"
+                                                    >
+                                                        <option value="TODOS">TODOS</option>
+                                                        <option value="MATCH">XML OK</option>
+                                                        <option value="MISSING">XML AUSENTE</option>
+                                                    </select>
+                                                </div>
+                                            </th>
+                                            <th className="p-4">
+                                                <div className="flex flex-col gap-2">
+                                                    Nº Nota
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Nº..."
+                                                        value={filters.nota}
+                                                        onChange={e => setFilters({ ...filters, nota: e.target.value })}
+                                                        className="bg-[var(--bg-main)] border border-[var(--border)] rounded-lg px-2 py-1 text-[10px] font-medium text-white outline-none focus:border-[var(--primary)]/50 transition-all"
+                                                    />
+                                                </div>
+                                            </th>
+                                            <th className="p-4 text-right">
+                                                <div className="flex flex-col gap-2 items-end">
+                                                    Cálculo Base
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Valor..."
+                                                        value={filters.calculoBase}
+                                                        onChange={e => setFilters({ ...filters, calculoBase: e.target.value })}
+                                                        className="w-20 bg-[var(--bg-main)] border border-[var(--border)] rounded-lg px-2 py-1 text-[10px] font-medium text-white outline-none focus:border-[var(--primary)]/50 transition-all text-right"
+                                                    />
+                                                </div>
+                                            </th>
+                                            <th className="p-4 text-right text-amber-500">
+                                                <div className="flex flex-col gap-2 items-end">
+                                                    IRRF (XML)
+                                                    <input
+                                                        type="text"
+                                                        placeholder="IR..."
+                                                        value={filters.irrf}
+                                                        onChange={e => setFilters({ ...filters, irrf: e.target.value })}
+                                                        className="w-20 bg-[var(--bg-main)] border border-[var(--border)] rounded-lg px-2 py-1 text-[10px] font-medium text-white outline-none focus:border-[var(--primary)]/50 transition-all text-right"
+                                                    />
+                                                </div>
+                                            </th>
+                                            <th className="p-4 text-right text-[var(--primary)]">
+                                                <div className="flex flex-col gap-2 items-end">
+                                                    NC Final
+                                                    <input
+                                                        type="text"
+                                                        placeholder="NC..."
+                                                        value={filters.ncFinal}
+                                                        onChange={e => setFilters({ ...filters, ncFinal: e.target.value })}
+                                                        className="w-20 bg-[var(--bg-main)] border border-[var(--border)] rounded-lg px-2 py-1 text-[10px] font-medium text-white outline-none focus:border-[var(--primary)]/50 transition-all text-right"
+                                                    />
+                                                </div>
+                                            </th>
+                                            <th className="p-4 text-right text-white">
+                                                <div className="flex flex-col gap-2 items-end">
+                                                    Boleto Final
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Boleto..."
+                                                        value={filters.boletoFinal}
+                                                        onChange={e => setFilters({ ...filters, boletoFinal: e.target.value })}
+                                                        className="w-20 bg-[var(--bg-main)] border border-[var(--border)] rounded-lg px-2 py-1 text-[10px] font-medium text-white outline-none focus:border-[var(--primary)]/50 transition-all text-right"
+                                                    />
+                                                </div>
+                                            </th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {conciliacao.map(item => {
-                                            const calcBase = (item.loja.valorBruto + item.loja.acrescimos) - item.loja.descontos;
-                                            return (
-                                                <tr key={item.loja.id} className="border-b border-[var(--border)]/50 hover:bg-white/[0.02] transition-colors">
-                                                    <td className="p-4">
-                                                        <div className="flex flex-col">
-                                                            <span className="text-white font-bold text-sm">{item.loja.nome_fantasia || item.loja.razao_social}</span>
-                                                            <span className="text-[10px] text-[var(--fg-dim)] font-mono">{item.loja.cnpj}</span>
-                                                        </div>
-                                                    </td>
-                                                    <td className="p-4">
-                                                        {item.status === "MATCH" ? (
-                                                            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-bold">
-                                                                <CheckCircle2 size={10} /> XML OK
-                                                            </span>
-                                                        ) : (
-                                                            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-500/10 text-amber-500 text-[10px] font-bold">
-                                                                <AlertTriangle size={10} /> XML AUSENTE
-                                                            </span>
-                                                        )}
-                                                    </td>
-                                                    <td className="p-4 font-mono text-sm text-[var(--fg-dim)]">
-                                                        {item.xml?.numeroNF || "-"}
-                                                    </td>
-                                                    <td className="p-4 text-right text-xs text-[var(--fg-dim)]">
-                                                        {fmtCurrency(calcBase)}
-                                                    </td>
-                                                    <td className="p-4 text-right font-bold text-amber-500">
-                                                        {fmtCurrency(item.irrfCalculado)}
-                                                    </td>
-                                                    <td className="p-4 text-right font-bold text-[var(--primary)]">
-                                                        {fmtCurrency(item.ncFinal)}
-                                                    </td>
-                                                    <td className="p-4 text-right font-black text-white text-lg">
-                                                        {fmtCurrency(item.boletoFinal)}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
+                                        {filteredConciliacao.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={7} className="p-12 text-center text-[var(--fg-dim)] italic text-sm">
+                                                    Nenhum registro encontrado para os filtros aplicados.
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            filteredConciliacao.map(item => {
+                                                const calcBase = (item.loja.valorBruto + item.loja.acrescimos) - item.loja.descontos;
+                                                return (
+                                                    <tr key={item.loja.id} className="border-b border-[var(--border)]/50 hover:bg-white/[0.02] transition-colors">
+                                                        <td className="p-4">
+                                                            <div className="flex flex-col">
+                                                                <span className="text-white font-bold text-sm">{item.loja.nome_fantasia || item.loja.razao_social}</span>
+                                                                <span className="text-[10px] text-[var(--fg-dim)] font-mono">{item.loja.cnpj}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-4">
+                                                            {item.status === "MATCH" ? (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-bold">
+                                                                    <CheckCircle2 size={10} /> XML OK
+                                                                </span>
+                                                            ) : (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-500/10 text-amber-500 text-[10px] font-bold">
+                                                                    <AlertTriangle size={10} /> XML AUSENTE
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                        <td className="p-4 font-mono text-sm text-[var(--fg-dim)]">
+                                                            {item.xml?.numeroNF || "-"}
+                                                        </td>
+                                                        <td className="p-4 text-right text-xs text-[var(--fg-dim)]">
+                                                            {fmtCurrency(calcBase)}
+                                                        </td>
+                                                        <td className="p-4 text-right font-bold text-amber-500">
+                                                            {fmtCurrency(item.irrfCalculado)}
+                                                        </td>
+                                                        <td className="p-4 text-right font-bold text-[var(--primary)]">
+                                                            {fmtCurrency(item.ncFinal)}
+                                                        </td>
+                                                        <td className="p-4 text-right font-black text-white text-lg">
+                                                            {fmtCurrency(item.boletoFinal)}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })
+                                        )}
                                     </tbody>
                                 </table>
                             </div>

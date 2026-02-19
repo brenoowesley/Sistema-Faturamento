@@ -20,7 +20,16 @@ export async function GET(req: NextRequest) {
         // 1. Fetch ALL store data for this batch (not just validated) to identify exclusions
         const { data: allInBatchRaw, error: allInBatchErr } = await supabase
             .from("agendamentos_brutos")
-            .select("loja_id, status_validacao, valor_iwof, clientes(razao_social, cnpj)")
+            .select(`
+                loja_id, 
+                status_validacao, 
+                valor_iwof, 
+                clientes (
+                    razao_social, nome_fantasia, cnpj, email_principal, emails_faturamento,
+                    endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge,
+                    boleto_unificado, tempo_pagamento_dias
+                )
+            `)
             .eq("lote_id", loteId);
 
         if (allInBatchErr) throw allInBatchErr;
@@ -180,7 +189,8 @@ export async function GET(req: NextRequest) {
             "Descricao", "Data_Competencia", "IBSCBS_Indicador_Operacao", "IBSCBS_Codigo_Classificacao", "NBS"
         ];
 
-        const dadosMapeados = records?.filter(rec => rec.valor_nf_emitida > 0).map((rec) => {
+        // NF Emitidas (Valor > 0)
+        const dadosEmitidos = records?.filter(rec => rec.valor_nf_emitida > 0).map((rec) => {
             const c = rec.clientes as any;
             const l = rec.lotes as any;
 
@@ -207,24 +217,30 @@ export async function GET(req: NextRequest) {
             };
         }) || [];
 
+        // NF Não Emitidas (Valor <= 0 ou Excluídos)
+        const dadosNaoEmitidos = [
+            ...(records?.filter(rec => rec.valor_nf_emitida <= 0).map(rec => ({
+                "Loja": (rec.clientes as any)?.razao_social || "S/N",
+                "CNPJ": (rec.clientes as any)?.cnpj || "S/N",
+                "Valor Base": rec.valor_bruto,
+                "Motivo": "Valor líquido zero ou negativo após descontos"
+            })) || []),
+            ...excludedList.map(ex => ({
+                "Loja": ex.NOME,
+                "CNPJ": ex.CNPJ,
+                "Valor Base": ex.VALOR_TENTADO,
+                "Motivo": ex.MOTIVO_EXCLUSAO
+            }))
+        ];
+
         // 4. Create XLSX with two sheets
         const workbook = xlsx.utils.book_new();
 
-        if (dadosMapeados.length > 0) {
-            // Force structure by passing header array
-            const worksheetNFE = xlsx.utils.json_to_sheet(dadosMapeados, { header: colunasNFE });
-            xlsx.utils.book_append_sheet(workbook, worksheetNFE, "LOTE NFE.io");
-        }
+        const worksheetEmitida = xlsx.utils.json_to_sheet(dadosEmitidos, { header: colunasNFE });
+        xlsx.utils.book_append_sheet(workbook, worksheetEmitida, "NF emitida");
 
-        if (excludedList.length > 0) {
-            const worksheetExcluded = xlsx.utils.json_to_sheet(excludedList);
-            xlsx.utils.book_append_sheet(workbook, worksheetExcluded, "Lojas EXCLUÍDAS");
-        }
-
-        // If no sheets were added, return an error
-        if (workbook.SheetNames.length === 0) {
-            return NextResponse.json({ error: "No data to export (no NFE records and no exclusions)" }, { status: 404 });
-        }
+        const worksheetNaoEmitida = xlsx.utils.json_to_sheet(dadosNaoEmitidos);
+        xlsx.utils.book_append_sheet(workbook, worksheetNaoEmitida, "NF não emitida");
 
         const buffer = xlsx.write(workbook, { bookType: "xlsx", type: "buffer" });
 
