@@ -1,3 +1,4 @@
+"use client";
 import Link from "next/link";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -74,6 +75,14 @@ interface Agendamento {
     isRemoved?: boolean;
     manualValue?: number;
     exclusionReason?: string;
+
+    // Suggestion fields (for CORREÇÃO items > 6h)
+    suggestedFracaoHora?: number;
+    suggestedValorIwof?: number;
+    suggestedTermino?: Date | null;
+    originalFracaoHora?: number;
+    originalValorIwof?: number;
+    originalTermino?: Date | null;
 }
 
 interface ConciliationResult {
@@ -360,23 +369,23 @@ export default function NovoFaturamento() {
                 let status: ValidationStatus = "OK";
                 if (fracaoHora < 0.16 && fracaoHora > 0) {
                     status = "CANCELAR";
+                } else if (fracaoHora > 6) {
+                    status = "CORREÇÃO";
                 } else if (inicio && pStart && pEnd) {
                     if (inicio < pStart || inicio > pEnd) {
                         status = "FORA_PERIODO";
                     }
                 }
 
-                /* --- Auto-cap at 6 hours --- */
-                let cappedFracaoHora = fracaoHora;
-                let cappedValorIwof = valorIwof;
-                let cappedTermino = termino;
+                /* --- Pre-compute suggestion for > 6h items --- */
+                let suggestedFracaoHora: number | undefined;
+                let suggestedValorIwof: number | undefined;
+                let suggestedTermino: Date | null | undefined;
                 if (fracaoHora > 6) {
                     const ratio = 6 / fracaoHora;
-                    cappedFracaoHora = 6;
-                    cappedValorIwof = Math.round(valorIwof * ratio * 100) / 100;
-                    if (inicio) {
-                        cappedTermino = new Date(inicio.getTime() + 6 * 60 * 60 * 1000);
-                    }
+                    suggestedFracaoHora = 6;
+                    suggestedValorIwof = Math.round(valorIwof * ratio * 100) / 100;
+                    suggestedTermino = inicio ? new Date(inicio.getTime() + 6 * 60 * 60 * 1000) : termino;
                 }
 
                 parsed.push({
@@ -384,16 +393,16 @@ export default function NovoFaturamento() {
                     nome,
                     telefone,
                     estado,
-                    loja: loja.toUpperCase(), // ALWAYS UPPERCASE
+                    loja: loja.toUpperCase(),
                     vaga,
                     inicio,
-                    termino: cappedTermino,
+                    termino,
                     refAgendamento,
                     agendadoEm,
                     iniciadoEm,
                     concluidoEm,
-                    valorIwof: cappedValorIwof,
-                    fracaoHora: cappedFracaoHora,
+                    valorIwof,
+                    fracaoHora,
                     statusAgendamento,
                     dataCancelamento,
                     motivoCancelamento,
@@ -402,6 +411,13 @@ export default function NovoFaturamento() {
                     clienteId: matched?.id ?? null,
                     cicloNome: matched?.ciclos_faturamento?.nome ?? null,
                     rawRow: row,
+                    // Suggestion fields for CORREÇÃO items
+                    suggestedFracaoHora,
+                    suggestedValorIwof,
+                    suggestedTermino,
+                    originalFracaoHora: fracaoHora > 6 ? fracaoHora : undefined,
+                    originalValorIwof: fracaoHora > 6 ? valorIwof : undefined,
+                    originalTermino: fracaoHora > 6 ? termino : undefined,
                 });
             }
 
@@ -580,15 +596,15 @@ export default function NovoFaturamento() {
     };
 
     const toggleSelectAll = (items: Agendamento[]) => {
-        const visibleRefs = items.filter(a => !a.isRemoved).map(a => a.refAgendamento);
-        const allSelected = visibleRefs.every(ref => selectedRefs.has(ref));
+        const visibleIds = items.filter(a => !a.isRemoved).map(a => a.id);
+        const allSelected = visibleIds.every(id => selectedRefs.has(id));
 
         setSelectedRefs(prev => {
             const next = new Set(prev);
             if (allSelected) {
-                visibleRefs.forEach(ref => next.delete(ref));
+                visibleIds.forEach(id => next.delete(id));
             } else {
-                visibleRefs.forEach(ref => next.add(ref));
+                visibleIds.forEach(id => next.add(id));
             }
             return next;
         });
@@ -635,6 +651,22 @@ export default function NovoFaturamento() {
             )
         );
         setEditingAgendamentoId(null);
+    };
+
+    /** Confirm the suggested 6h cap — updates termino, fracaoHora, valorIwof */
+    const confirmCorrection = (id: string) => {
+        setAgendamentos((prev) =>
+            prev.map((a) => {
+                if (a.id !== id) return a;
+                return {
+                    ...a,
+                    fracaoHora: a.suggestedFracaoHora ?? a.fracaoHora,
+                    valorIwof: a.suggestedValorIwof ?? a.valorIwof,
+                    termino: a.suggestedTermino ?? a.termino,
+                    status: "OK" as const,
+                };
+            })
+        );
     };
 
     /* ================================================================
@@ -1068,136 +1100,163 @@ export default function NovoFaturamento() {
                                 </p>
                             ) : (
                                 <>
-                                    {/* < 10 min and > 6h */}
-                                    {validacoes.length > 0 && (
-                                        <div className="mb-6">
-                                            <div className="flex items-center gap-2 mb-4">
-                                                <AlertTriangle size={18} className="text-[var(--danger)]" />
-                                                <h4 className="text-base font-semibold text-[var(--danger)]">
-                                                    Revisão Crítica ({validacoes.length})
-                                                </h4>
-                                            </div>
-
-                                            <div className="space-y-8">
-                                                {getGroupedByEstado(validacoes).map(([uf, items]) => (
-                                                    <div key={uf}>
-                                                        <div className="flex items-center gap-3 mb-4 bg-[var(--bg-card)] p-2 rounded-lg border-l-4 border-[var(--accent)]">
-                                                            <span className="text-xl font-bold text-[var(--accent)] ml-2">{uf}</span>
-                                                            <span className="text-xs text-[var(--fg-dim)] uppercase tracking-widest">{items.length} agendamentos</span>
-                                                        </div>
-
-                                                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                                                            {items.map((a, i) => (
-                                                                <div
-                                                                    key={i}
-                                                                    className={`card p-4 border-l-4 transition-all ${a.isRemoved ? "opacity-30 grayscale blur-[1px]" : ""} ${a.status === "CANCELAR" ? "border-[var(--danger)]" : "border-[#f59e0b]"}`}
-                                                                >
-                                                                    <div className="flex justify-between items-start mb-3">
-                                                                        <div className="flex-1 min-w-0 mr-2">
-                                                                            <h5 className="font-bold text-white text-sm leading-tight truncate">{a.loja}</h5>
-                                                                            <p className="text-[10px] text-[var(--fg-dim)] uppercase mt-0.5">{a.nome}</p>
-                                                                        </div>
-                                                                        <span className={`badge ${a.status === "CANCELAR" ? "badge-danger" : "badge-info"} text-[9px] px-1.5 py-0.5 h-auto`}>
-                                                                            {a.status}
-                                                                        </span>
-                                                                    </div>
-
-                                                                    <p className="text-[10px] font-medium mb-3" style={{ color: a.status === "CANCELAR" ? "var(--danger)" : "#f59e0b" }}>
-                                                                        MOTIVO: {a.status === "CANCELAR" ? "MENOS DE 10 MINUTOS" : "MAIS DE 6 HORAS"}
-                                                                    </p>
-
-                                                                    {editingAgendamentoId === a.id ? (
-                                                                        <div className="bg-[var(--bg-card-hover)] p-3 rounded mb-4">
-                                                                            <label className="text-[10px] text-[var(--fg-dim)] mb-1 block uppercase">Ajustar Valor Bruto</label>
-                                                                            <div className="flex gap-2">
-                                                                                <input
-                                                                                    type="number"
-                                                                                    className="input flex-1 h-8 text-sm"
-                                                                                    value={tempValue}
-                                                                                    onChange={(e) => setTempValue(e.target.value)}
-                                                                                    autoFocus
-                                                                                />
-                                                                                <button
-                                                                                    className="btn btn-primary btn-sm h-8"
-                                                                                    onClick={() => applyCorrection(a.id, parseFloat(tempValue) || 0)}
-                                                                                >
-                                                                                    Ok
-                                                                                </button>
-                                                                                <button
-                                                                                    className="btn btn-ghost btn-sm h-8"
-                                                                                    onClick={() => setEditingAgendamentoId(null)}
-                                                                                >
-                                                                                    X
-                                                                                </button>
+                                    {/* ====== CANCELAR section (< 10 min) — shown first ====== */}
+                                    {(() => {
+                                        const cancelarItems = validacoes.filter(a => a.status === "CANCELAR");
+                                        if (cancelarItems.length === 0) return null;
+                                        return (
+                                            <div className="mb-10">
+                                                <div className="flex items-center gap-2 mb-4">
+                                                    <AlertTriangle size={18} className="text-[var(--danger)]" />
+                                                    <h4 className="text-base font-semibold text-[var(--danger)]">
+                                                        Cancelamentos — Menos de 10 Minutos ({cancelarItems.length})
+                                                    </h4>
+                                                </div>
+                                                <div className="space-y-8">
+                                                    {getGroupedByEstado(cancelarItems).map(([uf, items]) => (
+                                                        <div key={uf}>
+                                                            <div className="flex items-center gap-3 mb-4 bg-[var(--bg-card)] p-2 rounded-lg border-l-4 border-[var(--danger)]">
+                                                                <span className="text-xl font-bold text-[var(--danger)] ml-2">{uf}</span>
+                                                                <span className="text-xs text-[var(--fg-dim)] uppercase tracking-widest">{items.length} agendamentos</span>
+                                                            </div>
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                                                                {items.map((a) => (
+                                                                    <div key={a.id} className={`card p-4 border-l-4 border-[var(--danger)] transition-all ${a.isRemoved ? "opacity-30 grayscale blur-[1px]" : ""}`}>
+                                                                        <div className="flex justify-between items-start mb-3">
+                                                                            <div className="flex-1 min-w-0 mr-2">
+                                                                                <h5 className="font-bold text-white text-sm leading-tight truncate">{a.loja}</h5>
+                                                                                <p className="text-[10px] text-[var(--fg-dim)] uppercase mt-0.5">{a.nome}</p>
                                                                             </div>
-                                                                            <p className="text-[9px] text-[var(--fg-dim)] mt-2">
-                                                                                Original: {fmtCurrency(a.valorIwof)} ({a.fracaoHora.toFixed(2)}h)
-                                                                            </p>
+                                                                            <span className="badge badge-danger text-[9px] px-1.5 py-0.5 h-auto">CANCELAR</span>
                                                                         </div>
-                                                                    ) : (
+                                                                        <p className="text-[10px] font-medium mb-3 text-[var(--danger)]">MOTIVO: MENOS DE 10 MINUTOS</p>
                                                                         <div className="grid grid-cols-2 gap-y-1.5 text-[10px] mb-4">
                                                                             <div className="text-[var(--fg-dim)] uppercase">Horário</div>
                                                                             <div className="text-right text-[var(--fg-muted)]">{fmtDate(a.inicio)} - {fmtDate(a.termino)}</div>
-
                                                                             <div className="text-[var(--fg-dim)] uppercase">Duração</div>
-                                                                            <div className="text-right font-mono font-bold" style={{ color: a.status === "CANCELAR" ? "var(--danger)" : "#f59e0b" }}>
-                                                                                {a.fracaoHora.toFixed(2)}h
-                                                                            </div>
-
+                                                                            <div className="text-right font-mono font-bold text-[var(--danger)]">{a.fracaoHora.toFixed(2)}h</div>
                                                                             <div className="text-[var(--fg-dim)] uppercase">Valor Bruto</div>
-                                                                            <div className="text-right font-mono text-white">
-                                                                                {a.manualValue ? (
-                                                                                    <span className="text-[var(--success)]">{fmtCurrency(a.manualValue)}*</span>
-                                                                                ) : fmtCurrency(a.valorIwof)}
-                                                                            </div>
-
-                                                                            <div className="text-[var(--fg-dim)] uppercase border-t border-[var(--border)] pt-1 mt-1">Custo/Hora</div>
-                                                                            <div className="text-right font-mono text-[var(--fg-dim)] border-t border-[var(--border)] pt-1 mt-1">
-                                                                                {a.fracaoHora > 0 ? fmtCurrency(a.valorIwof / a.fracaoHora) : "—"}
-                                                                            </div>
+                                                                            <div className="text-right font-mono text-white">{fmtCurrency(a.valorIwof)}</div>
                                                                         </div>
-                                                                    )}
-
-                                                                    <div className="pt-3 border-t border-[var(--border)] flex justify-between items-center gap-2">
-                                                                        <div className="flex items-center gap-1">
-                                                                            <button
-                                                                                className={`btn btn-sm h-7 px-2 text-[10px] ${a.isRemoved ? "btn-success" : "btn-danger"}`}
-                                                                                onClick={() => toggleRemoval(a.id)}
-                                                                            >
+                                                                        <div className="pt-3 border-t border-[var(--border)] flex justify-between items-center gap-2">
+                                                                            <button className={`btn btn-sm h-7 px-2 text-[10px] ${a.isRemoved ? "btn-success" : "btn-danger"}`} onClick={() => toggleRemoval(a.id)}>
                                                                                 {a.isRemoved ? "Restaurar" : "Remover"}
                                                                             </button>
+                                                                            <a href={`https://administrativo.iwof.com.br/workers/${a.refAgendamento}`} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm h-7 w-7 p-0 flex items-center justify-center text-[var(--fg-dim)] hover:text-white" title="Perfil Admin">
+                                                                                <ExternalLink size={12} />
+                                                                            </a>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
 
-                                                                            {!a.isRemoved && a.status === "CORREÇÃO" && editingAgendamentoId !== a.id && (
-                                                                                <button
-                                                                                    className="btn btn-ghost btn-sm h-7 px-2 text-[10px] border border-[var(--border)]"
-                                                                                    onClick={() => {
-                                                                                        setEditingAgendamentoId(a.id);
-                                                                                        setTempValue((a.manualValue ?? a.valorIwof).toString());
-                                                                                    }}
-                                                                                >
-                                                                                    Corrigir
-                                                                                </button>
-                                                                            )}
+                                    {/* ====== CORREÇÃO section (> 6h) — shown second ====== */}
+                                    {(() => {
+                                        const correcaoItems = validacoes.filter(a => a.status === "CORREÇÃO");
+                                        if (correcaoItems.length === 0) return null;
+                                        return (
+                                            <div className="mb-10">
+                                                <div className="flex items-center gap-2 mb-4">
+                                                    <Clock size={18} style={{ color: "#f59e0b" }} />
+                                                    <h4 className="text-base font-semibold" style={{ color: "#f59e0b" }}>
+                                                        Correções — Mais de 6 Horas ({correcaoItems.length})
+                                                    </h4>
+                                                </div>
+                                                <div className="space-y-8">
+                                                    {getGroupedByEstado(correcaoItems).map(([uf, items]) => (
+                                                        <div key={uf}>
+                                                            <div className="flex items-center gap-3 mb-4 bg-[var(--bg-card)] p-2 rounded-lg border-l-4 border-[#f59e0b]">
+                                                                <span className="text-xl font-bold ml-2" style={{ color: "#f59e0b" }}>{uf}</span>
+                                                                <span className="text-xs text-[var(--fg-dim)] uppercase tracking-widest">{items.length} agendamentos</span>
+                                                            </div>
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                                                                {items.map((a) => (
+                                                                    <div key={a.id} className={`card p-4 border-l-4 border-[#f59e0b] transition-all ${a.isRemoved ? "opacity-30 grayscale blur-[1px]" : ""}`}>
+                                                                        <div className="flex justify-between items-start mb-3">
+                                                                            <div className="flex-1 min-w-0 mr-2">
+                                                                                <h5 className="font-bold text-white text-sm leading-tight truncate">{a.loja}</h5>
+                                                                                <p className="text-[10px] text-[var(--fg-dim)] uppercase mt-0.5">{a.nome}</p>
+                                                                            </div>
+                                                                            <span className="badge badge-info text-[9px] px-1.5 py-0.5 h-auto">CORREÇÃO</span>
                                                                         </div>
 
-                                                                        <a
-                                                                            href={`https://administrativo.iwof.com.br/workers/${a.refAgendamento}`}
-                                                                            target="_blank"
-                                                                            rel="noopener noreferrer"
-                                                                            className="btn btn-ghost btn-sm h-7 w-7 p-0 flex items-center justify-center text-[var(--fg-dim)] hover:text-white"
-                                                                            title="Perfil Admin"
-                                                                        >
-                                                                            <ExternalLink size={12} />
-                                                                        </a>
+                                                                        <p className="text-[10px] font-medium mb-3" style={{ color: "#f59e0b" }}>
+                                                                            MOTIVO: MAIS DE 6 HORAS ({(a.originalFracaoHora ?? a.fracaoHora).toFixed(2)}h)
+                                                                        </p>
+
+                                                                        {/* Original values */}
+                                                                        <div className="grid grid-cols-2 gap-y-1.5 text-[10px] mb-3">
+                                                                            <div className="text-[var(--fg-dim)] uppercase">Horário Original</div>
+                                                                            <div className="text-right text-[var(--fg-muted)]">{fmtDate(a.inicio)} - {fmtDate(a.originalTermino ?? a.termino)}</div>
+                                                                            <div className="text-[var(--fg-dim)] uppercase">Duração Original</div>
+                                                                            <div className="text-right font-mono font-bold" style={{ color: "#f59e0b" }}>{(a.originalFracaoHora ?? a.fracaoHora).toFixed(2)}h</div>
+                                                                            <div className="text-[var(--fg-dim)] uppercase">Valor Original</div>
+                                                                            <div className="text-right font-mono text-white">{fmtCurrency(a.originalValorIwof ?? a.valorIwof)}</div>
+                                                                        </div>
+
+                                                                        {/* Suggested values (highlighted box) */}
+                                                                        {a.suggestedValorIwof != null && (
+                                                                            <div className="bg-[var(--bg-card-hover)] rounded-lg p-3 mb-3 border border-[#f59e0b33]">
+                                                                                <p className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "#f59e0b" }}>⚡ Sugestão (Cap 6h)</p>
+                                                                                <div className="grid grid-cols-2 gap-y-1.5 text-[10px]">
+                                                                                    <div className="text-[var(--fg-dim)] uppercase">Horário Sugerido</div>
+                                                                                    <div className="text-right font-mono text-[var(--success)]">{fmtDate(a.inicio)} - {fmtDate(a.suggestedTermino ?? null)}</div>
+                                                                                    <div className="text-[var(--fg-dim)] uppercase">Duração Sugerida</div>
+                                                                                    <div className="text-right font-mono font-bold text-[var(--success)]">{a.suggestedFracaoHora?.toFixed(2)}h</div>
+                                                                                    <div className="text-[var(--fg-dim)] uppercase">Valor Sugerido</div>
+                                                                                    <div className="text-right font-mono font-bold text-[var(--success)]">{fmtCurrency(a.suggestedValorIwof)}</div>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+
+                                                                        {/* Inline manual editor */}
+                                                                        {editingAgendamentoId === a.id && (
+                                                                            <div className="bg-[var(--bg-card-hover)] p-3 rounded mb-3">
+                                                                                <label className="text-[10px] text-[var(--fg-dim)] mb-1 block uppercase">Ajustar Valor Manualmente</label>
+                                                                                <div className="flex gap-2">
+                                                                                    <input type="number" className="input flex-1 h-8 text-sm" value={tempValue} onChange={(e) => setTempValue(e.target.value)} autoFocus />
+                                                                                    <button className="btn btn-primary btn-sm h-8" onClick={() => applyCorrection(a.id, parseFloat(tempValue) || 0)}>Ok</button>
+                                                                                    <button className="btn btn-ghost btn-sm h-8" onClick={() => setEditingAgendamentoId(null)}>X</button>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+
+                                                                        {/* Action buttons */}
+                                                                        <div className="pt-3 border-t border-[var(--border)] flex flex-wrap justify-between items-center gap-2">
+                                                                            <div className="flex items-center gap-1 flex-wrap">
+                                                                                {!a.isRemoved && a.suggestedValorIwof != null && editingAgendamentoId !== a.id && (
+                                                                                    <button className="btn btn-sm h-7 px-3 text-[10px]" style={{ background: "#22c55e", color: "#fff" }} onClick={() => confirmCorrection(a.id)}>
+                                                                                        ✓ Confirmar Sugestão
+                                                                                    </button>
+                                                                                )}
+                                                                                {!a.isRemoved && editingAgendamentoId !== a.id && (
+                                                                                    <button className="btn btn-ghost btn-sm h-7 px-2 text-[10px] border border-[var(--border)]" onClick={() => { setEditingAgendamentoId(a.id); setTempValue((a.suggestedValorIwof ?? a.valorIwof).toString()); }}>
+                                                                                        Editar Valor
+                                                                                    </button>
+                                                                                )}
+                                                                                <button className={`btn btn-sm h-7 px-2 text-[10px] ${a.isRemoved ? "btn-success" : "btn-danger"}`} onClick={() => toggleRemoval(a.id)}>
+                                                                                    {a.isRemoved ? "Restaurar" : "Remover"}
+                                                                                </button>
+                                                                            </div>
+                                                                            <a href={`https://administrativo.iwof.com.br/workers/${a.refAgendamento}`} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm h-7 w-7 p-0 flex items-center justify-center text-[var(--fg-dim)] hover:text-white" title="Perfil Admin">
+                                                                                <ExternalLink size={12} />
+                                                                            </a>
+                                                                        </div>
                                                                     </div>
-                                                                </div>
-                                                            ))}
+                                                                ))}
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                ))}
+                                                    ))}
+                                                </div>
                                             </div>
-                                        </div>
-                                    )}
+                                        );
+                                    })()}
 
                                     <div className="mt-12 pt-12 border-t border-[var(--border)]">
                                         <div className="flex items-center justify-between mb-4">
@@ -1224,7 +1283,7 @@ export default function NovoFaturamento() {
                                                             <input
                                                                 type="checkbox"
                                                                 className="checkbox"
-                                                                checked={foraPeriodo.length > 0 && foraPeriodo.filter(a => !a.isRemoved).every(a => selectedRefs.has(a.refAgendamento))}
+                                                                checked={foraPeriodo.length > 0 && foraPeriodo.filter(a => !a.isRemoved).every(a => selectedRefs.has(a.id))}
                                                                 onChange={() => toggleSelectAll(foraPeriodo)}
                                                             />
                                                         </th>
@@ -1243,8 +1302,8 @@ export default function NovoFaturamento() {
                                                                 <input
                                                                     type="checkbox"
                                                                     className="checkbox"
-                                                                    checked={selectedRefs.has(a.refAgendamento)}
-                                                                    onChange={() => toggleSelect(a.refAgendamento)}
+                                                                    checked={selectedRefs.has(a.id)}
+                                                                    onChange={() => toggleSelect(a.id)}
                                                                     disabled={a.isRemoved}
                                                                 />
                                                             </td>
@@ -1260,7 +1319,7 @@ export default function NovoFaturamento() {
                                                             <td className="text-right">
                                                                 <button
                                                                     className="btn btn-ghost btn-xs"
-                                                                    onClick={() => toggleRemoval(a.refAgendamento)}
+                                                                    onClick={() => toggleRemoval(a.id)}
                                                                 >
                                                                     {a.isRemoved ? "Restaurar" : "Remover"}
                                                                 </button>
