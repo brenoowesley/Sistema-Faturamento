@@ -321,9 +321,9 @@ export default function AjustesPage() {
             status_aplicacao: false
         };
 
-        const { error } = editingId
-            ? await supabase.from("ajustes_faturamento").update(payload).eq("id", editingId)
-            : await supabase.from("ajustes_faturamento").insert(payload);
+        const { error } = await supabase.from("ajustes_faturamento").upsert(payload, {
+            onConflict: editingId ? "id" : undefined // If editing, use ID for upsert, else let DB handle new insert
+        });
 
         if (error) {
             alert("Erro ao salvar desconto: " + error.message);
@@ -351,9 +351,7 @@ export default function AjustesPage() {
             status_aplicacao: false
         };
 
-        const { error } = editingId
-            ? await supabase.from("ajustes_faturamento").update(payload).eq("id", editingId)
-            : await supabase.from("ajustes_faturamento").insert(payload);
+        const { error } = await supabase.from("ajustes_faturamento").upsert(payload);
 
         if (error) {
             alert("Erro ao salvar acréscimo: " + error.message);
@@ -404,7 +402,6 @@ export default function AjustesPage() {
         if (ajuste.tipo === "DESCONTO") setShowModalDesconto(true);
         else setShowModalAcrescimo(true);
     };
-
     const handleBulkDelete = async () => {
         if (selectedIds.size === 0) return;
         if (!confirm(`Deseja realmente excluir os ${selectedIds.size} itens selecionados?`)) return;
@@ -598,15 +595,17 @@ export default function AjustesPage() {
                     <div className="flex gap-4">
                         <button
                             onClick={() => { resetForm(); setShowModalDesconto(true); }}
-                            className="btn btn-primary bg-amber-600 hover:bg-amber-700 border-none flex items-center gap-2"
+                            disabled={isSaving || isProcessingFile}
+                            className="btn btn-primary bg-amber-600 hover:bg-amber-700 border-none flex items-center gap-2 disabled:opacity-50"
                         >
-                            <Minus size={18} /> Lançar Novo Desconto
+                            {isSaving ? <span className="loading loading-spinner loading-xs"></span> : <Plus size={18} />} Novo Desconto
                         </button>
                         <button
                             onClick={() => { resetForm(); setShowModalAcrescimo(true); }}
-                            className="btn btn-primary flex items-center gap-2"
+                            disabled={isSaving || isProcessingFile}
+                            className="btn btn-primary bg-emerald-600 hover:bg-emerald-700 border-none flex items-center gap-2 disabled:opacity-50"
                         >
-                            <Plus size={18} /> Lançar Novo Acréscimo
+                            {isSaving ? <span className="loading loading-spinner loading-xs"></span> : <Plus size={18} />} Novo Acréscimo
                         </button>
                     </div>
                 </div>

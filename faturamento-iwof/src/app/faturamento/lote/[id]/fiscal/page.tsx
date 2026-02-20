@@ -357,7 +357,7 @@ export default function FiscalProcessingPage() {
             for (const item of conciliacao) {
                 const { error } = await supabase
                     .from("faturamento_consolidados")
-                    .insert({
+                    .upsert({
                         lote_id: loteId,
                         cliente_id: item.loja.id,
                         valor_bruto: item.loja.valorBruto,
@@ -367,6 +367,8 @@ export default function FiscalProcessingPage() {
                         valor_nf_emitida: ((item.loja.valorBruto + item.loja.acrescimos) - item.loja.descontos) * 0.115,
                         valor_nc_final: item.ncFinal,
                         valor_boleto_final: item.boletoFinal
+                    }, {
+                        onConflict: "lote_id, cliente_id"
                     });
 
                 if (error) throw error;
@@ -716,13 +718,15 @@ export default function FiscalProcessingPage() {
                             <div className="flex flex-col md:flex-row gap-3">
                                 <button
                                     onClick={handleExportarNFE}
-                                    className="btn btn-outline btn-success flex items-center gap-2 px-6 py-4 rounded-2xl font-bold uppercase tracking-tight transition-all hover:scale-105 active:scale-95"
+                                    disabled={isConsolidating || isDispatching}
+                                    className="btn btn-outline btn-success flex items-center gap-2 px-6 py-4 rounded-2xl font-bold uppercase tracking-tight transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
                                 >
                                     <FileSearch size={18} /> Exportar Planilha NFE.io (.xlsx)
                                 </button>
                                 <button
                                     onClick={() => router.push(`/faturamento/lote/${loteId}/conta-azul`)}
-                                    className="group relative overflow-hidden bg-[#3b82f6] text-white px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center justify-center gap-3 transition-all hover:scale-105 active:scale-95 shadow-[0_4px_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_30px_rgba(59,130,246,0.5)]"
+                                    disabled={isConsolidating || isDispatching}
+                                    className="group relative overflow-hidden bg-[#3b82f6] text-white px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center justify-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 shadow-[0_4px_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_30px_rgba(59,130,246,0.5)]"
                                 >
                                     Avançar para Conta Azul
                                     <ArrowRight className="transition-transform group-hover:translate-x-1" size={18} />
