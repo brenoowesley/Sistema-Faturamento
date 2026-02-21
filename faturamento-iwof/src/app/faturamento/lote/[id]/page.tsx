@@ -451,8 +451,10 @@ export default function LoteFechamentoPage() {
                                             </td>
                                             <td className="p-4">
                                                 <div className="flex flex-col">
-                                                    <span className="text-white font-bold text-sm tracking-tight">{loja.nome_conta_azul || loja.nome_fantasia || loja.razao_social}</span>
-                                                    <span className="text-[10px] text-[var(--fg-dim)] font-mono">{loja.cnpj}</span>
+                                                    <span className="text-white font-bold text-sm tracking-tight">{loja.nome_conta_azul}</span>
+                                                    <span className="text-[10px] text-[var(--fg-dim)] lowercase opacity-80 leading-tight">
+                                                        {loja.razao_social} • {loja.cnpj}
+                                                    </span>
                                                 </div>
                                             </td>
                                             <td className="p-4 text-center text-xs font-semibold text-[var(--fg-dim)] uppercase tracking-wider">{loja.ciclo}</td>

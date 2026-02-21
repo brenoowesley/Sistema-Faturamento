@@ -761,7 +761,14 @@ export default function FiscalProcessingPage() {
                                                 <tbody>
                                                     {lojas.map(l => (
                                                         <tr key={l.id} className="border-b border-[var(--border)]/50 last:border-0 hover:bg-white/[0.02]">
-                                                            <td className="py-3 text-sm text-white font-medium">{l.nome_conta_azul || l.nome_fantasia || l.razao_social}</td>
+                                                            <td className="py-3">
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-sm text-white font-medium">{l.nome_conta_azul}</span>
+                                                                    <span className="text-[10px] text-[var(--fg-dim)] lowercase opacity-80 leading-tight">
+                                                                        {l.razao_social} • {l.cnpj}
+                                                                    </span>
+                                                                </div>
+                                                            </td>
                                                             <td className="py-3 text-xs font-mono text-[var(--fg-dim)]">{l.cnpj}</td>
                                                             <td className="py-3 text-sm text-right font-bold text-[var(--primary)]">{fmtCurrency(l.valorBruto + l.acrescimos - l.descontos)}</td>
                                                         </tr>
@@ -938,10 +945,12 @@ export default function FiscalProcessingPage() {
                                                     <tr key={item.loja.id} className="border-b border-[var(--border)]/50 hover:bg-white/[0.02] transition-colors">
                                                         <td className="p-4">
                                                             <div className="flex flex-col">
-                                                                <span className="text-white font-bold text-sm" title={item.loja.razao_social}>
-                                                                    {item.loja.nome_conta_azul || item.loja.nome_fantasia || item.loja.razao_social}
+                                                                <span className="text-white font-bold text-sm">
+                                                                    {item.loja.nome_conta_azul}
                                                                 </span>
-                                                                <span className="text-[10px] text-[var(--fg-dim)] font-mono">{item.loja.cnpj}</span>
+                                                                <span className="text-[10px] text-[var(--fg-dim)] lowercase opacity-80 leading-tight">
+                                                                    {item.loja.razao_social} • {item.loja.cnpj}
+                                                                </span>
                                                             </div>
                                                         </td>
                                                         <td className="p-4">
@@ -990,7 +999,7 @@ export default function FiscalProcessingPage() {
             </main>
 
             {/* ACTION FOOTER */}
-            {conciliacao.length > 0 && (
+            {lojas.length > 0 && (
                 <footer className="fixed bottom-0 left-0 right-0 bg-[#0a0a0b]/90 backdrop-blur-2xl border-t border-[var(--border)] p-6 z-40 shadow-[0_-20px_50px_rgba(0,0,0,0.5)]">
                     <div className="max-w-7xl mx-auto flex justify-between items-center">
                         <div className="flex gap-8">
@@ -1008,15 +1017,31 @@ export default function FiscalProcessingPage() {
                             </div>
                         </div>
 
-                        {lote?.status === "CONSOLIDADO" ? (
-                            <div className="flex flex-col md:flex-row gap-3">
+                        <div className="flex flex-col md:flex-row gap-3">
+                            <button
+                                onClick={handleExportarNFE}
+                                className="btn btn-outline btn-success flex items-center gap-2 px-6 py-4 rounded-2xl font-bold uppercase tracking-tight transition-all hover:scale-105 active:scale-95 shadow-lg shadow-emerald-500/10"
+                            >
+                                <FileSearch size={18} /> Exportar Planilha NFE.io (.xlsx)
+                            </button>
+
+                            {lote?.status === "PENDENTE" || lote?.status === "AGUARDANDO_XML" ? (
                                 <button
-                                    onClick={handleExportarNFE}
-                                    disabled={isConsolidating || isDispatching}
-                                    className="btn btn-outline btn-success flex items-center gap-2 px-6 py-4 rounded-2xl font-bold uppercase tracking-tight transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
+                                    disabled={isConsolidating}
+                                    onClick={handleConsolidar}
+                                    className="group relative overflow-hidden bg-emerald-500 text-black px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 shadow-[0_4px_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_30_rgba(16,185,129,0.5)]"
                                 >
-                                    <FileSearch size={18} /> Exportar Planilha NFE.io (.xlsx)
+                                    {isConsolidating ? (
+                                        <div className="w-5 h-5 border-2 border-black/20 border-t-black rounded-full animate-spin"></div>
+                                    ) : (
+                                        <>
+                                            Confirmar e Consolidar Lote
+                                            <Save size={18} />
+                                        </>
+                                    )}
+                                    <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-12"></div>
                                 </button>
+                            ) : lote?.status === "CONSOLIDADO" ? (
                                 <button
                                     onClick={() => router.push(`/faturamento/lote/${loteId}/conta-azul`)}
                                     disabled={isConsolidating || isDispatching}
@@ -1026,28 +1051,12 @@ export default function FiscalProcessingPage() {
                                     <ArrowRight className="transition-transform group-hover:translate-x-1" size={18} />
                                     <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-12"></div>
                                 </button>
-                            </div>
-                        ) : lote?.status === "CONCLUÍDO" ? (
-                            <div className="flex items-center gap-2 text-emerald-500 font-black uppercase tracking-widest text-sm">
-                                <CheckCircle2 size={24} /> Lote Finalizado
-                            </div>
-                        ) : (
-                            <button
-                                disabled={isConsolidating}
-                                onClick={handleConsolidar}
-                                className="group relative overflow-hidden bg-emerald-500 text-black px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 shadow-[0_4px_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_30px_rgba(16,185,129,0.5)]"
-                            >
-                                {isConsolidating ? (
-                                    <div className="w-5 h-5 border-2 border-black/20 border-t-black rounded-full animate-spin"></div>
-                                ) : (
-                                    <>
-                                        Confirmar e Consolidar Lote
-                                        <Save size={18} />
-                                    </>
-                                )}
-                                <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-12"></div>
-                            </button>
-                        )}
+                            ) : (
+                                <div className="flex items-center gap-2 text-emerald-500 font-black uppercase tracking-widest text-sm">
+                                    <CheckCircle2 size={24} /> Lote Finalizado
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </footer>
             )}

@@ -72,6 +72,8 @@ interface Agendamento {
     // Processed fields
     status: ValidationStatus;
     clienteId: string | null;      // matched DB client id
+    razaoSocial?: string | null;
+    cnpj?: string | null;
     cicloNome: string | null;      // from DB join
     rawRow: Record<string, string>;
 
@@ -480,6 +482,8 @@ export default function NovoFaturamento() {
                     responsavelCancelamento,
                     status,
                     clienteId: matched?.id ?? null,
+                    razaoSocial: matched?.razao_social ?? null,
+                    cnpj: matched?.cnpj ?? null,
                     cicloNome: matched?.ciclos_faturamento?.nome ?? null,
                     rawRow: row,
                     // Suggestion fields for CORREÇÃO items
@@ -875,7 +879,8 @@ export default function NovoFaturamento() {
     const excluidos = agendamentos.filter((a) => a.isRemoved);
     const validacoes = agendamentos.filter((a) => !a.isRemoved && (a.status === "CANCELAR" || a.status === "CORREÇÃO"));
     const foraPeriodo = agendamentos.filter((a) => !a.isRemoved && a.status === "FORA_PERIODO");
-    const validados = agendamentos.filter((a) => !a.isRemoved && a.status === "OK");
+    const validados = agendamentos.filter((a) => !a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO") && a.clienteId);
+    const divergentes = agendamentos.filter((a) => !a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO") && !a.clienteId);
     const ciclosIncorretos = agendamentos.filter((a) => !a.isRemoved && a.status === "CICLO_INCORRETO");
     const selectedCicloNomes = ciclos.filter((c) => selectedCicloIds.includes(c.id)).map((c) => c.nome);
 
@@ -1108,6 +1113,7 @@ export default function NovoFaturamento() {
         },
         { key: "conciliacao", label: "Conciliação", count: conciliation.naoCadastrados.length + conciliation.ausentesNoLote.length },
         { key: "ciclos", label: "Ciclo Incorreto", count: ciclosIncorretos.length },
+        { key: "divergentes", label: "Divergentes", count: divergentes.length },
         { key: "excluidos", label: "Excluídos", count: excluidos.length },
         { key: "validados", label: "Validados", count: validados.length },
     ];
@@ -2122,7 +2128,12 @@ export default function NovoFaturamento() {
                                             {validados.map((a, i) => (
                                                 <tr key={i}>
                                                     <td>
-                                                        <span className="table-primary">{a.loja}</span>
+                                                        <div className="flex flex-col">
+                                                            <span className="table-primary">{a.loja}</span>
+                                                            <span className="text-[10px] text-[var(--fg-dim)] lowercase opacity-80 leading-tight">
+                                                                {a.razaoSocial} • {a.cnpj}
+                                                            </span>
+                                                        </div>
                                                     </td>
                                                     <td className="text-sm text-[var(--fg-muted)]">{a.nome}</td>
                                                     <td className="text-sm text-[var(--fg-muted)]">{fmtDate(a.inicio)}</td>

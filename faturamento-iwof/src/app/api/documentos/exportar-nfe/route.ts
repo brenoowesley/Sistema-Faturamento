@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
                 *,
                 lotes:faturamentos_lote (data_inicio_ciclo, data_fim_ciclo),
                 clientes (
-                    razao_social, cnpj, email_principal, emails_faturamento,
+                    razao_social, cnpj, email_principal, emails_faturamento, nome_conta_azul,
                     endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge
                 )
             `)
@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
                     loja_id, 
                     valor_iwof, 
                     clientes (
-                        razao_social, nome_fantasia, cnpj, email_principal, emails_faturamento,
+                        razao_social, nome_fantasia, cnpj, email_principal, emails_faturamento, nome_conta_azul,
                         endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge,
                         boleto_unificado, tempo_pagamento_dias
                     )

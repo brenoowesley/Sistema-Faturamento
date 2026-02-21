@@ -50,6 +50,7 @@ interface Ajuste {
         nome_fantasia: string;
         razao_social: string;
         nome_conta_azul: string | null;
+        cnpj: string;
     };
     observacao_interna?: string;
     repasse_profissional?: boolean;
@@ -281,7 +282,7 @@ export default function AjustesPage() {
         setLoading(true);
         const { data, error } = await supabase
             .from("ajustes_faturamento")
-            .select("*, clientes(nome_fantasia, razao_social, nome_conta_azul)")
+            .select("*, clientes(nome_fantasia, razao_social, nome_conta_azul, cnpj)")
             .order("created_at", { ascending: false });
 
         if (error) console.error("Error fetching ajustes:", error);
@@ -472,9 +473,7 @@ export default function AjustesPage() {
 
                     const normalizedSearch = (lojaNome || "").toUpperCase().trim();
                     clienteMatch = clientes.find(c =>
-                        (c.nome_conta_azul || "").toUpperCase().trim() === normalizedSearch ||
-                        (c.razao_social || "").toUpperCase().trim() === normalizedSearch ||
-                        (c.nome_fantasia || "").toUpperCase().trim() === normalizedSearch
+                        (c.nome_conta_azul || "").toUpperCase().trim() === normalizedSearch
                     );
                 } else {
                     // Descontos: Empresa, CNPJ, Valor, Motivo, Usuário, Aplicado, ...
@@ -489,15 +488,10 @@ export default function AjustesPage() {
                     valor = parseDinheiroBrasil(row["Valor"] || row["VALOR"]);
                     motivo = motivoRaw || "Desconto em Lote";
 
-                    if (cnpj) {
-                        clienteMatch = clientes.find(c => limparCNPJ(c.cnpj) === cnpj);
-                    }
                     if (!clienteMatch && empresa) {
                         const normalizedEmpresa = (empresa || "").toUpperCase().trim();
                         clienteMatch = clientes.find(c =>
-                            (c.nome_conta_azul || "").toUpperCase().trim() === normalizedEmpresa ||
-                            (c.razao_social || "").toUpperCase().trim() === normalizedEmpresa ||
-                            (c.nome_fantasia || "").toUpperCase().trim() === normalizedEmpresa
+                            (c.nome_conta_azul || "").toUpperCase().trim() === normalizedEmpresa
                         );
                     }
                 }
@@ -697,7 +691,14 @@ export default function AjustesPage() {
                                                                     onChange={() => toggleSelection(a.id)}
                                                                 />
                                                             </td>
-                                                            <td className="table-primary">{a.clientes?.nome_conta_azul || a.clientes?.nome_fantasia || a.clientes?.razao_social}</td>
+                                                            <td className="table-primary">
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-white font-bold">{a.clientes?.nome_conta_azul}</span>
+                                                                    <span className="text-[10px] text-[var(--fg-dim)] lowercase opacity-80 leading-tight">
+                                                                        {a.clientes?.razao_social} • {a.clientes?.cnpj}
+                                                                    </span>
+                                                                </div>
+                                                            </td>
                                                             <td className="text-sm">{a.nome_profissional}</td>
                                                             <td className="text-xs text-[var(--fg-dim)]">{a.motivo}</td>
                                                             <td className="table-mono">{fmtDate(a.data_ocorrencia)}</td>
@@ -784,7 +785,14 @@ export default function AjustesPage() {
                                                                     onChange={() => toggleSelection(a.id)}
                                                                 />
                                                             </td>
-                                                            <td className="table-primary">{a.clientes?.nome_conta_azul || a.clientes?.nome_fantasia || a.clientes?.razao_social}</td>
+                                                            <td className="table-primary">
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-white font-bold">{a.clientes?.nome_conta_azul}</span>
+                                                                    <span className="text-[10px] text-[var(--fg-dim)] lowercase opacity-80 leading-tight">
+                                                                        {a.clientes?.razao_social} • {a.clientes?.cnpj}
+                                                                    </span>
+                                                                </div>
+                                                            </td>
                                                             <td className="text-sm">{a.nome_profissional}</td>
                                                             <td className="text-xs text-[var(--fg-dim)]">{a.motivo}</td>
                                                             <td className="table-mono">{fmtDate(a.data_ocorrencia)}</td>
@@ -831,7 +839,14 @@ export default function AjustesPage() {
                                             <tbody>
                                                 {historico.map(a => (
                                                     <tr key={a.id}>
-                                                        <td className="table-primary">{a.clientes?.nome_conta_azul || a.clientes?.nome_fantasia || a.clientes?.razao_social}</td>
+                                                        <td className="table-primary">
+                                                            <div className="flex flex-col">
+                                                                <span className="text-white font-bold">{a.clientes?.nome_conta_azul}</span>
+                                                                <span className="text-[10px] text-[var(--fg-dim)] lowercase opacity-80 leading-tight">
+                                                                    {a.clientes?.razao_social} • {a.clientes?.cnpj}
+                                                                </span>
+                                                            </div>
+                                                        </td>
                                                         <td>
                                                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${a.tipo === 'DESCONTO' ? 'bg-amber-900/40 text-amber-500' : 'bg-primary/20 text-primary'}`}>
                                                                 {a.tipo}
@@ -1108,7 +1123,12 @@ export default function AjustesPage() {
                                     <Building2 size={12} /> Empresa / Loja
                                 </label>
                                 <div className="text-sm font-bold text-white bg-[var(--bg-main)] p-3 rounded-lg border border-[var(--border)]">
-                                    {selectedAjuste.clientes?.nome_conta_azul || selectedAjuste.clientes?.nome_fantasia || selectedAjuste.clientes?.razao_social}
+                                    <div className="flex flex-col">
+                                        <span className="text-white font-bold">{selectedAjuste.clientes?.nome_conta_azul}</span>
+                                        <span className="text-[10px] text-[var(--fg-dim)] lowercase opacity-80 leading-tight">
+                                            {selectedAjuste.clientes?.razao_social} • {selectedAjuste.clientes?.cnpj}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
                             <div className="space-y-1">
@@ -1233,9 +1253,18 @@ export default function AjustesPage() {
                                                     {item.cliente_nome}
                                                 </span>
                                                 {item.status === 'ERROR' && (
-                                                    <span className="text-[9px] text-red-500/80 font-medium uppercase tracking-tight">
-                                                        ⚠️ {item.warning}
-                                                    </span>
+                                                    <div className="flex items-center gap-2 mt-1">
+                                                        <span className="text-[9px] text-red-500/80 font-medium uppercase tracking-tight">
+                                                            ⚠️ {item.warning}
+                                                        </span>
+                                                        <a
+                                                            href="/clientes"
+                                                            target="_blank"
+                                                            className="text-[9px] bg-red-500/10 hover:bg-red-500/20 text-red-400 px-2 py-0.5 rounded border border-red-500/20 transition-colors flex items-center gap-1 font-bold no-underline"
+                                                        >
+                                                            Fix Cadastro <Pencil size={8} />
+                                                        </a>
+                                                    </div>
                                                 )}
                                             </div>
                                         </td>
