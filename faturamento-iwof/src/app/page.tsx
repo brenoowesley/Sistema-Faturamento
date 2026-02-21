@@ -39,7 +39,9 @@ interface CicloStats {
   total: number;
 }
 
-export default function DashboardPage() {
+import { Suspense } from "react";
+
+function DashboardContent() {
   const supabase = createClient();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Stats>({
@@ -435,5 +437,17 @@ export default function DashboardPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={
+      <div className="p-20 flex flex-col items-center justify-center gap-4">
+        <p className="text-[var(--fg-dim)]">Carregando painel...</p>
+      </div>
+    }>
+      <DashboardContent />
+    </Suspense>
   );
 }
