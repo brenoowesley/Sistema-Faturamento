@@ -89,10 +89,11 @@ interface Agendamento {
     originalFracaoHora?: number;
     originalValorIwof?: number;
     originalTermino?: Date | null;
+    suggestedClients?: ClienteDB[];
 }
 
 interface ConciliationResult {
-    naoCadastrados: { loja: string; cnpj: string }[];
+    naoCadastrados: { loja: string; cnpj: string; suggestions?: ClienteDB[] }[];
     ausentesNoLote: ClienteDB[];
 }
 
@@ -194,6 +195,14 @@ export default function NovoFaturamento() {
     const [newCicloName, setNewCicloName] = useState("");
     const [addingCiclo, setAddingCiclo] = useState(false);
     const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+
+    /* --- Queiroz Split State --- */
+    const [showQueirozModal, setShowQueirozModal] = useState(false);
+    const [queirozConfig, setQueirozConfig] = useState<{
+        splitDate: string;
+        compAnterior: string;
+        compAtual: string;
+    } | null>(null);
 
     /* --- Results state --- */
     const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
@@ -415,8 +424,18 @@ export default function NovoFaturamento() {
 
                 let matched: ClienteDB | undefined;
 
+                let suggestedClients: ClienteDB[] = [];
                 if (loja) {
                     matched = clienteByContaAzul.get(loja);
+
+                    // If no exact match, look for candidates (Substring)
+                    if (!matched) {
+                        suggestedClients = clientes.filter(c => {
+                            if (!c.nome_conta_azul) return false;
+                            const dbName = c.nome_conta_azul.toUpperCase().trim();
+                            return loja.includes(dbName) || dbName.includes(loja);
+                        });
+                    }
                 }
 
                 /* Track which clients appeared */
@@ -493,7 +512,39 @@ export default function NovoFaturamento() {
                     originalFracaoHora: fracaoHora > 6 ? fracaoHora : undefined,
                     originalValorIwof: fracaoHora > 6 ? valorIwof : undefined,
                     originalTermino: fracaoHora > 6 ? termino : undefined,
+                    suggestedClients: suggestedClients.length > 0 ? suggestedClients : undefined
                 });
+            }
+
+            /* --- Queiroz Split Logic --- */
+            let finalParsed: Agendamento[] = [];
+
+            // Check if we have a Queiroz split setup
+            const d1_check = periodoInicio ? new Date(periodoInicio + "T12:00:00") : null;
+            const d2_check = periodoFim ? new Date(periodoFim + "T12:00:00") : null;
+            const isCrossMonth = d1_check && d2_check && (d1_check.getMonth() !== d2_check.getMonth() || d1_check.getFullYear() !== d2_check.getFullYear());
+
+            if (isCrossMonth && queirozConfig) {
+                const splitDateVal = new Date(queirozConfig.splitDate + "T23:59:59").getTime();
+
+                for (const a of parsed) {
+                    if (a.cicloNome?.includes("QUEIROZ") && a.inicio) {
+                        const isAfterSplit = a.inicio.getTime() > splitDateVal;
+                        const comp = isAfterSplit ? queirozConfig.compAtual : queirozConfig.compAnterior;
+                        const monthSuffix = isAfterSplit ? "Mês Atual" : "Mês Anterior";
+
+                        finalParsed.push({
+                            ...a,
+                            // Injetamos a competência e alteramos o nome da loja para a visualização/agrupamento virtual
+                            loja: `${a.loja} (${monthSuffix})`,
+                            rawRow: { ...a.rawRow, data_competencia: comp }
+                        });
+                    } else {
+                        finalParsed.push(a);
+                    }
+                }
+            } else {
+                finalParsed = parsed;
             }
 
             /* --- Duplicate Detection --- */
@@ -501,8 +552,8 @@ export default function NovoFaturamento() {
             const suspiciousListResult: Agendamento[][] = [];
             const seenIndicesSet = new Set<number>();
 
-            for (let i = 0; i < parsed.length; i++) {
-                const a = parsed[i];
+            for (let i = 0; i < finalParsed.length; i++) {
+                const a = finalParsed[i];
                 // Exact key matching all core content
                 const key = `${a.nome.toLowerCase()}|${a.loja.toLowerCase()}|${a.inicio?.getTime()}|${a.termino?.getTime()}|${a.valorIwof}|${a.vaga.toLowerCase()}|${a.telefone}|${a.fracaoHora}`;
 
@@ -555,17 +606,21 @@ export default function NovoFaturamento() {
                 suspicious: suspiciousListResult
             });
 
-            console.log(`Processing complete. Total input: ${rawRows.length}, Validated: ${parsed.length}, Skipped: ${rawRows.length - parsed.length}`);
-            setAgendamentos(parsed);
+            console.log(`Processing complete. Total input: ${rawRows.length}, Validated: ${finalParsed.length}, Skipped: ${rawRows.length - rawRows.length}`);
+            setAgendamentos(finalParsed);
 
             /* --- Conciliation --- */
             // A) Lojas na planilha não cadastradas
-            const naoCadastrados = new Map<string, { loja: string; cnpj: string }>();
-            for (const a of parsed) {
+            const naoCadastrados = new Map<string, { loja: string; cnpj: string; suggestions?: ClienteDB[] }>();
+            for (const a of finalParsed) {
                 if (!a.clienteId) {
                     const key = a.loja.toLowerCase();
                     if (!naoCadastrados.has(key)) {
-                        naoCadastrados.set(key, { loja: a.loja, cnpj: a.refAgendamento });
+                        naoCadastrados.set(key, {
+                            loja: a.loja,
+                            cnpj: a.refAgendamento,
+                            suggestions: a.suggestedClients
+                        });
                     }
                 }
             }
@@ -580,6 +635,39 @@ export default function NovoFaturamento() {
         },
         [supabase, periodoInicio, periodoFim, selectedCicloIds]
     );
+
+    const handleManualStoreMatch = (lojaRawName: string, clienteId: string) => {
+        const cliente = dbClientes.find(c => c.id === clienteId);
+        if (!cliente) return;
+
+        setAgendamentos(prev => prev.map(a => {
+            if (a.loja === lojaRawName) {
+                // Re-validate status based on new cycle
+                let newStatus = a.status;
+                if (selectedCicloIds.length > 0) {
+                    if (!cliente.ciclo_faturamento_id || !selectedCicloIds.includes(cliente.ciclo_faturamento_id)) {
+                        newStatus = "CICLO_INCORRETO";
+                    } else if (newStatus === "CICLO_INCORRETO") {
+                        // If it was CICLO_INCORRETO before, maybe now it is OK
+                        newStatus = "OK";
+                        // Re-check technical validations
+                        if (a.fracaoHora < 0.16 && a.fracaoHora > 0) newStatus = "CANCELAR";
+                        else if (a.fracaoHora > 6) newStatus = "CORREÇÃO";
+                    }
+                }
+
+                return {
+                    ...a,
+                    clienteId: cliente.id,
+                    razaoSocial: cliente.razao_social,
+                    cnpj: cliente.cnpj,
+                    cicloNome: cliente.ciclos_faturamento?.nome ?? null,
+                    status: newStatus
+                };
+            }
+            return a;
+        }));
+    };
 
     /* ================================================================
        FILE HANDLER
@@ -796,6 +884,10 @@ export default function NovoFaturamento() {
                 data_fim_ciclo: periodoFim,
                 ciclo_faturamento_id: selectedCicloIds[0] || null,
                 status: "PENDENTE",
+                // Queiroz Rule Split
+                queiroz_split_date: queirozConfig?.splitDate || null,
+                queiroz_comp_anterior: queirozConfig?.compAnterior || null,
+                queiroz_comp_atual: queirozConfig?.compAtual || null
             })
             .select("id")
             .single();
@@ -849,6 +941,7 @@ export default function NovoFaturamento() {
                     valor_iwof: Number(parseFloat(String(a.manualValue ?? a.suggestedValorIwof ?? a.valorIwof)).toFixed(2)),
                     fracao_hora: a.fracaoHora,
                     status_validacao: finalStatus,
+                    data_competencia: a.rawRow.data_competencia || null
                 };
             });
 
@@ -861,7 +954,7 @@ export default function NovoFaturamento() {
             const chunk = rows.slice(i, i + CHUNK);
             const { error } = await supabase.from("agendamentos_brutos").insert(chunk);
             if (error) {
-                console.error("Upsert error batch", i, error);
+                console.error("Upsert error batch", i, error.message, error.details, error.hint);
                 err += chunk.length;
             } else {
                 ok += chunk.length;
@@ -959,6 +1052,68 @@ export default function NovoFaturamento() {
                                 />
                             </div>
                         </div>
+
+                        {/* Detect Queiroz Multi-month Split */}
+                        {(() => {
+                            if (!periodoInicio || !periodoFim) return null;
+                            const d1 = new Date(periodoInicio + "T12:00:00");
+                            const d2 = new Date(periodoFim + "T12:00:00");
+                            const isQueirozSelected = ciclos.some(c => selectedCicloIds.includes(c.id) && c.nome.includes("QUEIROZ"));
+                            const isCrossMonth = d1.getMonth() !== d2.getMonth() || d1.getFullYear() !== d2.getFullYear();
+
+                            if (isQueirozSelected && isCrossMonth && !queirozConfig) {
+                                return (
+                                    <div className="mb-6 p-4 rounded-xl border border-amber-500/30 bg-amber-500/5">
+                                        <div className="flex items-start gap-3">
+                                            <AlertTriangle className="text-amber-500 shrink-0" size={20} />
+                                            <div>
+                                                <h4 className="text-sm font-bold text-amber-500">Regra Queiroz: Virada de Mês Detectada</h4>
+                                                <p className="text-xs text-[var(--fg-dim)] mt-1">
+                                                    O período selecionado cruza dois meses. Conforme a regra de negócio, o faturamento do grupo Queiroz deve ser fatiado.
+                                                </p>
+                                                <button
+                                                    className="btn btn-sm mt-3 bg-amber-500 hover:bg-amber-600 text-white border-none"
+                                                    onClick={() => {
+                                                        const lastDayPrevMonth = new Date(d2.getFullYear(), d2.getMonth(), 0);
+                                                        const firstDayNextMonth = new Date(d2.getFullYear(), d2.getMonth(), 1);
+
+                                                        // Pre-fill suggestions
+                                                        setQueirozConfig({
+                                                            splitDate: lastDayPrevMonth.toISOString().split('T')[0],
+                                                            compAnterior: periodoInicio,
+                                                            compAtual: firstDayNextMonth.toISOString().split('T')[0]
+                                                        });
+                                                        setShowQueirozModal(true);
+                                                    }}
+                                                >
+                                                    Configurar Fatiamento
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            }
+
+                            if (queirozConfig) {
+                                return (
+                                    <div className="mb-6 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="flex items-start gap-3">
+                                                <CheckCircle2 className="text-emerald-500 shrink-0" size={20} />
+                                                <div>
+                                                    <h4 className="text-sm font-bold text-emerald-500">Fatiamento Configurado</h4>
+                                                    <p className="text-[10px] text-[var(--fg-dim)] mt-1 uppercase font-semibold">
+                                                        Queiroz será dividido em: {fmtDate(new Date(queirozConfig.compAnterior + "T12:00:00"))} e {fmtDate(new Date(queirozConfig.compAtual + "T12:00:00"))}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <button className="text-[10px] text-emerald-500 underline" onClick={() => setShowQueirozModal(true)}>Alterar</button>
+                                        </div>
+                                    </div>
+                                )
+                            }
+                            return null;
+                        })()}
 
                         {/* Ciclo multi-select */}
                         <p className="text-xs font-semibold uppercase tracking-wider text-[var(--fg-dim)] mb-2">
@@ -1090,6 +1245,62 @@ export default function NovoFaturamento() {
                         )}
                     </div>
                 </div>
+
+                {/* Queiroz Configuration Modal */}
+                {showQueirozModal && queirozConfig && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                        <div className="card max-w-md w-full shadow-2xl border-amber-500/20">
+                            <div className="flex items-center gap-3 mb-6">
+                                <div className="p-2 rounded-lg bg-amber-500/10">
+                                    <AlertTriangle className="text-amber-500" size={24} />
+                                </div>
+                                <h3 className="text-lg font-bold text-white">Configurar Fatiamento Queiroz</h3>
+                            </div>
+
+                            <p className="text-sm text-[var(--fg-dim)] mb-6 leading-relaxed">
+                                Detectamos que este lote cruza dois meses. Como existem lojas do grupo <strong>Queiroz</strong>, precisamos definir as datas de competência para cada período.
+                            </p>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-[10px] font-bold uppercase tracking-wider text-[var(--fg-dim)] mb-1.5 block">Data Final do 1º Mês</label>
+                                    <input
+                                        type="date"
+                                        className="input"
+                                        value={queirozConfig.splitDate}
+                                        onChange={e => setQueirozConfig(prev => prev ? { ...prev, splitDate: e.target.value } : null)}
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-[var(--border)]">
+                                    <div>
+                                        <label className="text-[10px] font-bold uppercase tracking-wider text-[var(--fg-dim)] mb-1.5 block">Competência 1 (Mês Ant.)</label>
+                                        <input
+                                            type="date"
+                                            className="input"
+                                            value={queirozConfig.compAnterior}
+                                            onChange={e => setQueirozConfig(prev => prev ? { ...prev, compAnterior: e.target.value } : null)}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold uppercase tracking-wider text-[var(--fg-dim)] mb-1.5 block">Competência 2 (Mês Atual)</label>
+                                        <input
+                                            type="date"
+                                            className="input"
+                                            value={queirozConfig.compAtual}
+                                            onChange={e => setQueirozConfig(prev => prev ? { ...prev, compAtual: e.target.value } : null)}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-end gap-3 mt-8">
+                                <button className="btn btn-ghost" onClick={() => { setShowQueirozModal(false); setQueirozConfig(null); }}>Cancelar</button>
+                                <button className="btn btn-primary" onClick={() => setShowQueirozModal(false)}>Confirmar Fatiamento</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         );
     }
@@ -1944,15 +2155,50 @@ export default function NovoFaturamento() {
                                                 <table className="data-table">
                                                     <thead>
                                                         <tr>
-                                                            <th>Loja</th>
-                                                            <th>Refs Detectadas</th>
+                                                            <th className="text-left py-2 px-3">Loja (Planilha)</th>
+                                                            <th className="text-left py-2 px-3">Refs Detectadas</th>
+                                                            <th className="text-right py-2 px-3">Ações / Sugestões</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody>
                                                         {conciliation.naoCadastrados.map((item, i) => (
-                                                            <tr key={i} className="row-invalid">
-                                                                <td className="table-primary">{item.loja}</td>
-                                                                <td className="table-mono text-sm">{item.cnpj || "—"}</td>
+                                                            <tr key={i} className="row-invalid border-t border-[var(--border)]">
+                                                                <td className="py-3 px-3">
+                                                                    <div className="flex flex-col">
+                                                                        <span className="table-primary">{item.loja}</span>
+                                                                        {item.suggestions && item.suggestions.length > 0 && (
+                                                                            <span className="text-[9px] text-amber-500 font-bold uppercase mt-1">
+                                                                                {item.suggestions.length} {item.suggestions.length === 1 ? 'Sugestão encontrada' : 'Sugestões encontradas'}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+                                                                <td className="table-mono text-xs py-3 px-3">{item.cnpj || "—"}</td>
+                                                                <td className="py-3 px-3 text-right">
+                                                                    {item.suggestions && item.suggestions.length > 0 ? (
+                                                                        <div className="flex flex-col gap-1 items-end">
+                                                                            {item.suggestions.map((s: ClienteDB) => (
+                                                                                <button
+                                                                                    key={s.id}
+                                                                                    className="btn btn-xs gap-1.5 py-1.5 h-auto bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/20 whitespace-normal text-left max-w-[200px]"
+                                                                                    onClick={() => handleManualStoreMatch(item.loja, s.id)}
+                                                                                    title={`Associar a ${s.nome_conta_azul}`}
+                                                                                >
+                                                                                    <Plus size={12} />
+                                                                                    <span className="truncate">Associar a: <strong>{s.nome_conta_azul}</strong></span>
+                                                                                </button>
+                                                                            ))}
+                                                                        </div>
+                                                                    ) : (
+                                                                        <Link
+                                                                            href={`/clientes?q=${encodeURIComponent(item.loja)}`}
+                                                                            className="btn btn-ghost btn-xs gap-1 py-1 h-auto text-[var(--danger)]"
+                                                                        >
+                                                                            <ExternalLink size={12} />
+                                                                            Fix Cadastro
+                                                                        </Link>
+                                                                    )}
+                                                                </td>
                                                             </tr>
                                                         ))}
                                                     </tbody>

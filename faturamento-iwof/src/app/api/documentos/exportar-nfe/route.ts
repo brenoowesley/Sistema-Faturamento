@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
             .from("faturamento_consolidados")
             .select(`
                 *,
+                data_competencia,
                 lotes:faturamentos_lote (data_inicio_ciclo, data_fim_ciclo),
                 clientes (
                     razao_social, cnpj, email_principal, emails_faturamento, nome_conta_azul,
@@ -61,7 +62,8 @@ export async function GET(req: NextRequest) {
                         razao_social, nome_fantasia, cnpj, email_principal, emails_faturamento, nome_conta_azul,
                         endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge,
                         lo_ja_mae_id:loja_mae_id, boleto_unificado, tempo_pagamento_dias
-                    )
+                    ),
+                    data_competencia
                 `)
                 .eq("lote_id", loteId)
                 .eq("status_validacao", "VALIDADO");
@@ -90,7 +92,8 @@ export async function GET(req: NextRequest) {
                         acrescimos: 0,
                         descontos: 0,
                         clientes: a.clientes,
-                        lotes: lote
+                        lotes: lote,
+                        data_competencia: a.data_competencia
                     });
                 }
                 const store = consolidatedMap.get(lojaId)!;
@@ -116,6 +119,9 @@ export async function GET(req: NextRequest) {
                     mother.valor_bruto += r.valor_bruto;
                     mother.acrescimos += r.acrescimos;
                     mother.descontos += r.descontos;
+                    // Se estiver agrupando por loja mãe, a competência pode variar, mas no fatiamento Queiroz 
+                    // trabalhamos com lojas virtuais (nomes diferentes), então o agrupamento de mãe deve respeitar isso.
+                    // Na simulação, mantemos a competência do primeiro registro.
                 }
             });
 
@@ -193,7 +199,7 @@ export async function GET(req: NextRequest) {
                 "Endereco_Cidade_Nome": c.cidade || "",
                 "Endereco_Estado": c.estado || "",
                 "Descricao": `Horas utilizadas: ${fmtDate(l?.data_inicio_ciclo)} À ${fmtDate(l?.data_fim_ciclo)}`,
-                "Data_Competencia": "",
+                "Data_Competencia": rec.data_competencia || "",
                 "IBSCBS_Indicador_Operacao": "100301",
                 "IBSCBS_Codigo_Classificacao": "000001",
                 "NBS": "109051200"
