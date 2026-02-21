@@ -41,7 +41,7 @@ export default function LoginPage() {
                 {/* Branding */}
                 <div className="login-brand">
                     <img
-                        src="https://i.imgur.com/MKGrpJX.png"
+                        src="https://i.imgur.com/ag93VEM.png"
                         alt="IWOF Logo"
                         className="login-logo-img"
                         style={{ height: "60px", width: "auto" }}
