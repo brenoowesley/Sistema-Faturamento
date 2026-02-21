@@ -12,7 +12,9 @@ import {
   CheckCircle2,
   ArrowRight,
   Loader2,
-  ShieldCheck
+  ShieldCheck,
+  Trash2,
+  MessageSquare
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -29,6 +31,7 @@ interface LoteRecente {
   data_competencia: string;
   status: string;
   created_at: string;
+  delete_request_status?: string | null;
 }
 
 interface CicloStats {
@@ -47,12 +50,23 @@ export default function DashboardPage() {
   });
   const [lotesRecentes, setLotesRecentes] = useState<LoteRecente[]>([]);
   const [cicloStats, setCicloStats] = useState<CicloStats[]>([]);
+  const [userRole, setUserRole] = useState<string | null>(null);
   const searchParams = useSearchParams();
   const authError = searchParams.get("auth_error");
 
   const fetchDashboardData = useCallback(async () => {
     setLoading(true);
     try {
+      // 0. User Role
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: perfil } = await supabase
+          .from("usuarios_perfis")
+          .select("cargo")
+          .eq("id", user.id)
+          .single();
+        setUserRole(perfil?.cargo || "USER");
+      }
       // 1. Clientes Ativos
       const { count: clientesCount } = await supabase
         .from("clientes")
@@ -97,7 +111,7 @@ export default function DashboardPage() {
       // 5. Lotes Recentes
       const { data: lotes } = await supabase
         .from("faturamentos_lote")
-        .select("id, data_competencia, status, created_at")
+        .select("id, data_competencia, status, created_at, delete_request_status")
         .order("created_at", { ascending: false })
         .limit(5);
 
@@ -141,6 +155,41 @@ export default function DashboardPage() {
 
   const maxCicloValor = Math.max(...cicloStats.map(s => s.total), 1);
 
+  const handleDeleteLote = async (loteId: string) => {
+    if (userRole === "ADMIN") {
+      if (!confirm("Tem certeza que deseja EXCLUIR este lote permanentemente? Isso resetará os ajustes vinculados.")) return;
+
+      const { error } = await supabase.rpc('safe_delete_lote', { target_lote_id: loteId });
+      if (error) {
+        alert("Erro ao excluir lote: " + error.message);
+      } else {
+        alert("Lote excluído com sucesso!");
+        fetchDashboardData();
+      }
+    } else {
+      const reason = prompt("Informe o motivo para a solicitação de exclusão:");
+      if (!reason) return;
+
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase
+        .from("faturamentos_lote")
+        .update({
+          delete_requested_at: new Date().toISOString(),
+          delete_requested_by: user?.id,
+          delete_reason: reason,
+          delete_request_status: 'PENDING'
+        })
+        .eq("id", loteId);
+
+      if (error) {
+        alert("Erro ao solicitar exclusão: " + error.message);
+      } else {
+        alert("Solicitação de exclusão enviada ao administrador.");
+        fetchDashboardData();
+      }
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-20 flex flex-col items-center justify-center gap-4">
@@ -171,6 +220,23 @@ export default function DashboardPage() {
             <p className="text-sm font-bold">Acesso Negado</p>
             <p className="text-xs opacity-80">Você não tem permissões de administrador para acessar a página solicitada.</p>
           </div>
+        </div>
+      )}
+
+      {userRole === "ADMIN" && lotesRecentes.some(l => l.delete_request_status === 'PENDING') && (
+        <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl flex items-center justify-between gap-4 text-amber-500 animate-in fade-in slide-in-from-top-4">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0">
+              <AlertCircle size={20} className="icon-high-contrast" />
+            </div>
+            <div>
+              <p className="text-sm font-bold">Solicitações de Exclusão Pendentes</p>
+              <p className="text-xs opacity-80">Existem lotes com pedidos de exclusão aguardando sua revisão.</p>
+            </div>
+          </div>
+          <Link href="/faturamentos" className="btn-icon bg-amber-500/20 hover:bg-amber-500/30 text-amber-500">
+            Revisar <ArrowRight size={14} />
+          </Link>
         </div>
       )}
 
@@ -332,13 +398,27 @@ export default function DashboardPage() {
                       </span>
                     </td>
                     <td className="p-4 text-right">
-                      <Link
-                        href={`/faturamento/lote/${lote.id}`}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-500/10 text-indigo-500 text-xs font-bold hover:bg-indigo-500 hover:text-white transition-all"
-                      >
-                        Acessar Lote
-                        <ArrowRight size={14} />
-                      </Link>
+                      <div className="flex items-center justify-end gap-2">
+                        {lote.delete_request_status === 'PENDING' && (
+                          <span className="flex items-center gap-1 text-[9px] font-bold text-amber-500 bg-amber-500/10 px-2 py-1 rounded-lg border border-amber-500/20">
+                            <Clock size={10} /> EXCLUSÃO PENDENTE
+                          </span>
+                        )}
+                        <button
+                          onClick={() => handleDeleteLote(lote.id)}
+                          className="p-2 hover:bg-red-500/10 text-[var(--fg-dim)] hover:text-red-500 rounded-lg transition-all"
+                          title={userRole === "ADMIN" ? "Excluir Lote" : "Solicitar Exclusão"}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                        <Link
+                          href={`/faturamento/lote/${lote.id}`}
+                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-500/10 text-indigo-500 text-xs font-bold hover:bg-indigo-500 hover:text-white transition-all"
+                        >
+                          Acessar Lote
+                          <ArrowRight size={14} />
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -20,11 +20,13 @@ export async function POST(req: NextRequest) {
             .from("faturamento_consolidados")
             .select(`
                 *,
+                observacao_report,
                 clientes (
                     nome_fantasia,
                     razao_social,
                     cnpj,
                     estado,
+                    loja_mae_id,
                     ciclos_faturamento (nome)
                 )
             `)
@@ -50,22 +52,46 @@ export async function POST(req: NextRequest) {
         // 3. Clear existing data in "Teste" (preserving header)
         await sheets.spreadsheets.values.clear({
             spreadsheetId,
-            range: "Teste!A2:I",
+            range: "Teste!A2:J",
         });
 
-        // 4. Format data for Sheets
-        const values = records.map((record) => {
+        // 4. Format data for Sheets with Mother Store Aggregation
+        const aggregatedMap = new Map<string, any>();
+
+        records.forEach((record) => {
+            const client = record.clientes as any;
+            const targetId = client.loja_mae_id || record.cliente_id;
+
+            if (!aggregatedMap.has(targetId)) {
+                aggregatedMap.set(targetId, {
+                    ...record,
+                    valor_boleto_final: Number(record.valor_boleto_final),
+                    valor_nf_emitida: Number(record.valor_nf_emitida),
+                    valor_nc_final: Number(record.valor_nc_final),
+                    descontos: Number(record.descontos)
+                });
+            } else {
+                const target = aggregatedMap.get(targetId)!;
+                target.valor_boleto_final += Number(record.valor_boleto_final);
+                target.valor_nf_emitida += Number(record.valor_nf_emitida);
+                target.valor_nc_final += Number(record.valor_nc_final);
+                target.descontos += Number(record.descontos);
+            }
+        });
+
+        const values = Array.from(aggregatedMap.values()).map((record) => {
             const client = record.clientes as any;
             return [
                 client.nome_fantasia || client.razao_social, // [0] LOJA
                 client.cnpj,                                // [1] CNPJ
                 client.estado || "",                        // [2] ESTADO
-                Number(record.valor_boleto_final),          // [3] BOLETO
-                Number(record.valor_nf_emitida),            // [4] NF
-                Number(record.valor_nc_final),              // [5] NC
+                record.valor_boleto_final,                  // [3] BOLETO
+                record.valor_nf_emitida,                    // [4] NF
+                record.valor_nc_final,                      // [5] NC
                 record.numero_nf || "0",                    // [6] Nº NF
-                Number(record.descontos),                   // [7] DESCONTO
+                record.descontos,                           // [7] DESCONTO
                 client.ciclos_faturamento?.nome || "GERAL", // [8] Faturamento
+                record.observacao_report || "",             // [9] Observação
             ];
         });
 

@@ -56,6 +56,8 @@ interface LojaConsolidada {
     acrescimos: number;
     descontos: number;
     ajustesDetalhes: AjusteItem[];
+    loja_mae_id?: string | null;
+    children?: any[];
 }
 
 interface XMLData {
@@ -277,7 +279,7 @@ export default function FiscalProcessingPage() {
             // 2. Fetch Raw Agendamentos (to get Lojas involved)
             const { data: agendamentos, error: agErr } = await supabase
                 .from("agendamentos_brutos")
-                .select("loja_id, cnpj_loja, valor_iwof, status_validacao, clientes(razao_social, nome_fantasia, nome_conta_azul, cnpj, ciclos_faturamento(nome))")
+                .select("loja_id, cnpj_loja, valor_iwof, status_validacao, clientes(razao_social, nome_fantasia, nome_conta_azul, cnpj, loja_mae_id, ciclos_faturamento(nome))")
                 .eq("lote_id", loteId)
                 .eq("status_validacao", "VALIDADO");
 
@@ -350,9 +352,10 @@ export default function FiscalProcessingPage() {
                         ajustesDetalhes: [],
                         active: true,
                         ciclo: client?.ciclos_faturamento?.nome || "-",
+                        loja_mae_id: client?.loja_mae_id || null,
                         // Add real loja_id for adjustment matching
                         loja_id_real: a.loja_id
-                    } as LojaConsolidada & { loja_id_real: string });
+                    } as LojaConsolidada & { loja_id_real: string; loja_mae_id: string | null; ciclo: string });
                 }
                 const store = consolidatedMap.get(uniqueKey)!;
                 store.valorBruto += Number(a.valor_iwof) || 0;
@@ -378,7 +381,26 @@ export default function FiscalProcessingPage() {
                 }
             });
 
-            const finalLojas = Array.from(consolidatedMap.values());
+            const finalMapping = new Map<string, any>();
+            Array.from(consolidatedMap.values()).forEach(st => {
+                const targetKey = st.loja_mae_id || st.id;
+
+                if (!finalMapping.has(targetKey)) {
+                    // Se for uma loja que é mãe de outras, o consolidatedMap pode não ter uma entrada pra ela se ela não teve agendamentos.
+                    // Mas assumimos que se há filiais, a mãe existe ou o ID da mãe é suficiente para criar a entrada.
+                    finalMapping.set(targetKey, { ...st, isMother: !!st.loja_mae_id, children: [] });
+                } else {
+                    const mother = finalMapping.get(targetKey)!;
+                    mother.valorBruto += st.valorBruto;
+                    mother.acrescimos += st.acrescimos;
+                    mother.descontos += st.descontos;
+                    mother.ajustesDetalhes.push(...st.ajustesDetalhes);
+                    if (!mother.children) mother.children = [];
+                    mother.children.push(st);
+                }
+            });
+
+            const finalLojas = Array.from(finalMapping.values());
             setLojas(finalLojas);
 
         } catch (err) {
@@ -470,12 +492,19 @@ export default function FiscalProcessingPage() {
                 const matchedXML = parsedXMLs.find(x => x.cnpj === cleanCNPJ);
 
                 const calcBase = (loja.valorBruto + loja.acrescimos) - loja.descontos;
-                const irrf = matchedXML ? matchedXML.valorIR : 0;
+
+                // Cálculo Nordestão: (Boleto * 0.115) * 0.015
+                let irrf = matchedXML ? matchedXML.valorIR : 0;
+                const isNordestao = (loja as any).ciclo === "NORDESTÃO";
+
+                if (isNordestao && irrf === 0) {
+                    irrf = Number(((calcBase * 0.115) * 0.015).toFixed(2));
+                }
 
                 return {
                     loja,
                     xml: matchedXML,
-                    status: matchedXML ? "MATCH" : "MISSING",
+                    status: matchedXML ? "MATCH" : (isNordestao ? "MATCH" : "MISSING"), // Nordestão não tem XML mas damos MATCH pelo cálculo
                     irrfCalculado: irrf,
                     boletoFinal: calcBase - irrf,
                     ncFinal: (calcBase * 0.885) - irrf
@@ -529,7 +558,8 @@ export default function FiscalProcessingPage() {
         setIsConsolidating(true);
         try {
             for (const item of conciliacao) {
-                const { error } = await supabase
+                // 1. Salvar ou Atualizar registro da Mãe (ou Loja Avulsa)
+                const { error: errorMother } = await supabase
                     .from("faturamento_consolidados")
                     .upsert({
                         lote_id: loteId,
@@ -540,12 +570,36 @@ export default function FiscalProcessingPage() {
                         valor_ir_xml: item.irrfCalculado,
                         valor_nf_emitida: ((item.loja.valorBruto + item.loja.acrescimos) - item.loja.descontos) * 0.115,
                         valor_nc_final: item.ncFinal,
-                        valor_boleto_final: item.boletoFinal
+                        valor_boleto_final: item.boletoFinal,
+                        observacao_report: (item.loja as any).ciclo === "NORDESTÃO" ? `Desconto IRRF: ${fmtCurrency(item.irrfCalculado)}` : null
                     }, {
                         onConflict: "lote_id, cliente_id"
                     });
 
-                if (error) throw error;
+                if (errorMother) throw errorMother;
+
+                // 2. Se houver filiais agrupadas, salvar registros individuais para relatórios (financeiro zerado para a filial)
+                if (item.loja.children && item.loja.children.length > 0) {
+                    for (const filial of item.loja.children) {
+                        const { error: errorFilial } = await supabase
+                            .from("faturamento_consolidados")
+                            .upsert({
+                                lote_id: loteId,
+                                cliente_id: filial.id,
+                                valor_bruto: filial.valorBruto,
+                                acrescimos: filial.acrescimos,
+                                descontos: filial.descontos,
+                                valor_ir_xml: 0,
+                                valor_nf_emitida: 0,
+                                valor_nc_final: 0,
+                                valor_boleto_final: 0,
+                                observacao_report: null
+                            }, {
+                                onConflict: "lote_id, cliente_id"
+                            });
+                        if (errorFilial) throw errorFilial;
+                    }
+                }
             }
 
             // Update lote status

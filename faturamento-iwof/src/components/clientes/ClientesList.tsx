@@ -38,6 +38,7 @@ interface Cliente {
     boleto_unificado: boolean;
     emails_faturamento: string | null;
     status: boolean;
+    loja_mae_id: string | null;
     ciclos_faturamento?: { nome: string } | null;
 }
 
@@ -82,6 +83,7 @@ interface ClienteForm {
     boleto_unificado: boolean;
     emails_faturamento: string;
     status: boolean;
+    loja_mae_id: string;
 }
 
 const EMPTY_FORM: ClienteForm = {
@@ -108,6 +110,7 @@ const EMPTY_FORM: ClienteForm = {
     boleto_unificado: false,
     emails_faturamento: "",
     status: true,
+    loja_mae_id: "",
 };
 
 const PAGE_SIZES = [25, 50, 100] as const;
@@ -269,6 +272,7 @@ function ClientesListContent() {
             boleto_unificado: c.boleto_unificado ?? false,
             emails_faturamento: c.emails_faturamento ?? "",
             status: c.status ?? true,
+            loja_mae_id: c.loja_mae_id ?? "",
         });
         setModalOpen(true);
     };
@@ -302,6 +306,7 @@ function ClientesListContent() {
             email_contato: form.email_contato || null,
             nome_conta_azul: form.nome_conta_azul || null,
             emails_faturamento: form.emails_faturamento || null,
+            loja_mae_id: form.loja_mae_id || null,
         };
 
         if (editingId) {
@@ -793,6 +798,20 @@ function ClientesListContent() {
                                 {ciclos.map((c) => (
                                     <option key={c.id} value={c.id}>{c.nome}</option>
                                 ))}
+                            </select>
+                        </div>
+                        <div className="input-group">
+                            <label className="input-label">Loja Mãe (Agrupador Financeiro)</label>
+                            <select className="input" style={{ paddingLeft: 14 }}
+                                value={form.loja_mae_id}
+                                onChange={(e) => setForm({ ...form, loja_mae_id: e.target.value })}
+                            >
+                                <option value="">Nenhuma (Loja Matriz)</option>
+                                {clientes
+                                    .filter(c => c.id !== editingId) // Evitar auto-referência
+                                    .map((c) => (
+                                        <option key={c.id} value={c.id}>{c.nome || c.razao_social} ({c.cnpj})</option>
+                                    ))}
                             </select>
                         </div>
                         <div className="input-group">

@@ -15,7 +15,8 @@ import {
     AlertCircle,
     FileText,
     Receipt,
-    FileSearch
+    FileSearch,
+    Trash2
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -83,11 +84,22 @@ export default function LoteFechamentoPage() {
     const [searchTerm, setSearchTerm] = useState("");
     const [isClosing, setIsClosing] = useState(false);
     const [rejeitados, setRejeitados] = useState<{ loja_id: string; razao_social: string; cnpj: string; motivo: string }[]>([]);
+    const [userRole, setUserRole] = useState<string | null>(null);
 
     // Initial Data Fetch
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
+            // 0. User Role
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (authUser) {
+                const { data: perfil } = await supabase
+                    .from("usuarios_perfis")
+                    .select("cargo")
+                    .eq("id", authUser.id)
+                    .single();
+                setUserRole(perfil?.cargo || "USER");
+            }
             // 1. Lote Details
             const { data: loteData, error: loteErr } = await supabase
                 .from("faturamentos_lote")
@@ -315,6 +327,41 @@ export default function LoteFechamentoPage() {
         }
     };
 
+    const handleDeleteLote = async () => {
+        if (userRole === "ADMIN") {
+            if (!confirm("Tem certeza que deseja EXCLUIR este lote permanentemente? Isso resetará os ajustes vinculados.")) return;
+
+            const { error } = await supabase.rpc('safe_delete_lote', { target_lote_id: loteId });
+            if (error) {
+                alert("Erro ao excluir lote: " + error.message);
+            } else {
+                alert("Lote excluído com sucesso!");
+                router.push("/");
+            }
+        } else {
+            const reason = prompt("Informe o motivo para a solicitação de exclusão:");
+            if (!reason) return;
+
+            const { data: { user } } = await supabase.auth.getUser();
+            const { error } = await supabase
+                .from("faturamentos_lote")
+                .update({
+                    delete_requested_at: new Date().toISOString(),
+                    delete_requested_by: user?.id,
+                    delete_reason: reason,
+                    delete_request_status: 'PENDING'
+                })
+                .eq("id", loteId);
+
+            if (error) {
+                alert("Erro ao solicitar exclusão: " + error.message);
+            } else {
+                alert("Solicitação de exclusão enviada ao administrador.");
+                fetchData();
+            }
+        }
+    };
+
     const handleExportarRejeitados = async () => {
         if (rejeitados.length === 0) {
             alert("Não há lojas de fora deste fechamento.");
@@ -355,6 +402,13 @@ export default function LoteFechamentoPage() {
                     <div className="flex items-center gap-4">
                         <button onClick={() => router.back()} className="btn-icon">
                             <ChevronLeft className="icon-high-contrast" size={24} />
+                        </button>
+                        <button
+                            onClick={handleDeleteLote}
+                            className="btn-icon text-red-500 hover:bg-red-500/10"
+                            title={userRole === "ADMIN" ? "Excluir Lote" : "Solicitar Exclusão"}
+                        >
+                            <Trash2 className="icon-high-contrast" size={24} />
                         </button>
                         <div>
                             <h1 className="text-xl font-black text-white uppercase tracking-tighter flex items-center gap-2">

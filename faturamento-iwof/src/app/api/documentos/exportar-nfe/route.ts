@@ -22,7 +22,8 @@ export async function GET(req: NextRequest) {
                 lotes:faturamentos_lote (data_inicio_ciclo, data_fim_ciclo),
                 clientes (
                     razao_social, cnpj, email_principal, emails_faturamento, nome_conta_azul,
-                    endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge
+                    endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge,
+                    loja_mae_id
                 )
             `)
             .eq("lote_id", loteId);
@@ -59,7 +60,7 @@ export async function GET(req: NextRequest) {
                     clientes (
                         razao_social, nome_fantasia, cnpj, email_principal, emails_faturamento, nome_conta_azul,
                         endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge,
-                        boleto_unificado, tempo_pagamento_dias
+                        lo_ja_mae_id:loja_mae_id, boleto_unificado, tempo_pagamento_dias
                     )
                 `)
                 .eq("lote_id", loteId)
@@ -104,7 +105,21 @@ export async function GET(req: NextRequest) {
                 }
             });
 
-            records = Array.from(consolidatedMap.values()).map(r => {
+            // Agrupar por Loja Mãe se existir
+            const finalAgrupado = new Map<string, any>();
+            Array.from(consolidatedMap.values()).forEach(r => {
+                const targetId = r.clientes?.loja_mae_id || r.cliente_id;
+                if (!finalAgrupado.has(targetId)) {
+                    finalAgrupado.set(targetId, { ...r });
+                } else {
+                    const mother = finalAgrupado.get(targetId)!;
+                    mother.valor_bruto += r.valor_bruto;
+                    mother.acrescimos += r.acrescimos;
+                    mother.descontos += r.descontos;
+                }
+            });
+
+            records = Array.from(finalAgrupado.values()).map(r => {
                 const baseResumo = (r.valor_bruto + r.acrescimos) - r.descontos;
                 return {
                     ...r,
@@ -112,6 +127,24 @@ export async function GET(req: NextRequest) {
                     valor_nf_emitida: Math.max(0, baseResumo * 0.115)
                 };
             });
+        }
+
+        // Apply Loja Mãe grouping for already consolidated records too
+        if (!simulationUsed) {
+            const finalAgrupado = new Map<string, any>();
+            records.forEach(rec => {
+                const targetId = rec.clientes?.loja_mae_id || rec.cliente_id;
+                if (!finalAgrupado.has(targetId)) {
+                    finalAgrupado.set(targetId, { ...rec });
+                } else {
+                    const mother = finalAgrupado.get(targetId)!;
+                    mother.valor_bruto += Number(rec.valor_bruto) || 0;
+                    mother.acrescimos += Number(rec.acrescimos) || 0;
+                    mother.descontos += Number(rec.descontos) || 0;
+                    mother.valor_nf_emitida += Number(rec.valor_nf_emitida) || 0;
+                }
+            });
+            records = Array.from(finalAgrupado.values());
         }
 
         if (!records || records.length === 0) {
