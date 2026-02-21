@@ -57,9 +57,10 @@ export default function Sidebar() {
             <div className="sidebar-brand">
                 <div className="sidebar-logo-container">
                     <img
-                        src="https://i.imgur.com/ag93VEM.png"
+                        src="https://i.imgur.com/MKGrpJX.png"
                         alt="IWOF Logo"
                         className="sidebar-logo-img"
+                        style={{ height: "45px", width: "auto" }}
                     />
                 </div>
             </div>

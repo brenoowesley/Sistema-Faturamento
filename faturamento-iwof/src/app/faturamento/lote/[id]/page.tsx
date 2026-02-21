@@ -353,8 +353,8 @@ export default function LoteFechamentoPage() {
             <div className="sticky top-0 z-30 bg-[var(--bg-main)]/80 backdrop-blur-md border-b border-[var(--border)] p-4 shadow-xl">
                 <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
                     <div className="flex items-center gap-4">
-                        <button onClick={() => router.back()} className="p-2 hover:bg-[var(--bg-card)] rounded-full transition-colors text-[var(--fg-dim)]">
-                            <ChevronLeft size={24} />
+                        <button onClick={() => router.back()} className="btn-icon">
+                            <ChevronLeft className="icon-high-contrast" size={24} />
                         </button>
                         <div>
                             <h1 className="text-xl font-black text-white uppercase tracking-tighter flex items-center gap-2">
@@ -370,7 +370,7 @@ export default function LoteFechamentoPage() {
                     </div>
 
                     <div className="relative w-full md:w-96">
-                        <Search className="absolute left-3 top-2.5 text-[var(--fg-dim)]" size={18} />
+                        <Search className="absolute left-3 top-2.5 text-white/90 stroke-[2.5px]" size={18} />
                         <input
                             type="text"
                             placeholder="Buscar loja, CNPJ ou razão social..."
@@ -463,7 +463,7 @@ export default function LoteFechamentoPage() {
                                             {/* ACRESCIMOS WITH TOOLTIP */}
                                             <td className="p-4 text-right text-sm font-bold text-[var(--primary)] group relative">
                                                 <div className="flex items-center justify-end gap-1">
-                                                    {loja.acrescimos > 0 && <Info size={12} className="opacity-40 group-hover:opacity-100 transition-opacity" />}
+                                                    {loja.acrescimos > 0 && <Info size={12} className="text-white ring-1 ring-white/20 rounded-full" />}
                                                     {fmtCurrency(loja.acrescimos)}
                                                 </div>
                                                 {loja.ajustesDetalhes.filter(aj => aj.tipo === "ACRESCIMO").length > 0 && (
@@ -486,7 +486,7 @@ export default function LoteFechamentoPage() {
                                             {/* DESCONTOS WITH TOOLTIP */}
                                             <td className="p-4 text-right text-sm font-bold text-amber-500 group relative">
                                                 <div className="flex items-center justify-end gap-1">
-                                                    {loja.descontos > 0 && <Info size={12} className="opacity-40 group-hover:opacity-100 transition-opacity" />}
+                                                    {loja.descontos > 0 && <Info size={12} className="text-white ring-1 ring-white/20 rounded-full" />}
                                                     {fmtCurrency(loja.descontos)}
                                                 </div>
                                                 {loja.ajustesDetalhes.filter(aj => aj.tipo === "DESCONTO").length > 0 && (

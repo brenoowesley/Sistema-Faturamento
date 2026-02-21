@@ -566,18 +566,18 @@ function ClientesListContent() {
                                     <td>
                                         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                                             <button
-                                                className="btn btn-ghost btn-sm"
+                                                className="btn-icon"
                                                 title="Editar"
                                                 onClick={() => openEditModal(c)}
                                             >
-                                                <Pencil size={14} />
+                                                <Pencil className="icon-high-contrast" size={14} />
                                             </button>
                                             <button
-                                                className="btn btn-ghost btn-sm text-[var(--danger)]"
+                                                className="btn-icon btn-icon-danger"
                                                 title="Excluir"
                                                 onClick={() => setDeleteTarget(c)}
                                             >
-                                                <Trash2 size={14} />
+                                                <Trash2 className="icon-high-contrast" size={14} />
                                             </button>
                                         </div>
                                     </td>

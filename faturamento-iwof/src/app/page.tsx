@@ -14,6 +14,7 @@ import {
   Loader2,
   ShieldCheck
 } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 interface Stats {
@@ -46,6 +47,8 @@ export default function DashboardPage() {
   });
   const [lotesRecentes, setLotesRecentes] = useState<LoteRecente[]>([]);
   const [cicloStats, setCicloStats] = useState<CicloStats[]>([]);
+  const searchParams = useSearchParams();
+  const authError = searchParams.get("auth_error");
 
   const fetchDashboardData = useCallback(async () => {
     setLoading(true);
@@ -158,6 +161,18 @@ export default function DashboardPage() {
           Visão estratégica do fluxo de faturamento e saúde financeira.
         </p>
       </div>
+
+      {authError === "unauthorized_role" && (
+        <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-center gap-4 text-red-500 animate-in fade-in slide-in-from-top-4">
+          <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center shrink-0">
+            <ShieldCheck size={20} className="icon-high-contrast" />
+          </div>
+          <div>
+            <p className="text-sm font-bold">Acesso Negado</p>
+            <p className="text-xs opacity-80">Você não tem permissões de administrador para acessar a página solicitada.</p>
+          </div>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

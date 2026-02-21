@@ -271,16 +271,16 @@ export default function UsuariosPage() {
                                                 <button
                                                     title="Alterar cargo"
                                                     onClick={() => handleToggleRole(user)}
-                                                    className="p-2 hover:bg-white/5 rounded-lg text-[var(--fg-dim)] hover:text-white transition-all"
+                                                    className="btn-icon"
                                                 >
-                                                    <Shield size={16} />
+                                                    <Shield className="icon-high-contrast" size={16} />
                                                 </button>
                                                 <button
                                                     title="Enviar e-mail de recuperação"
                                                     onClick={() => handleSendReset(user)}
-                                                    className="p-2 hover:bg-white/5 rounded-lg text-[var(--fg-dim)] hover:text-white transition-all"
+                                                    className="btn-icon"
                                                 >
-                                                    <Key size={16} />
+                                                    <Key className="icon-high-contrast" size={16} />
                                                 </button>
                                                 <button
                                                     title="Excluir usuário"
@@ -288,9 +288,9 @@ export default function UsuariosPage() {
                                                         setSelectedUser(user);
                                                         setShowDeleteModal(true);
                                                     }}
-                                                    className="p-2 hover:bg-red-500/10 rounded-lg text-red-500 transition-all"
+                                                    className="btn-icon btn-icon-danger"
                                                 >
-                                                    <Trash2 size={16} />
+                                                    <Trash2 className="icon-high-contrast" size={16} />
                                                 </button>
                                             </div>
                                         </td>

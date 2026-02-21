@@ -347,15 +347,22 @@ body {
 }
 
 .btn-ghost {
-  background: transparent;
-  color: var(--fg-muted);
-  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .btn-ghost:hover {
-  background: var(--bg-card);
-  border-color: var(--border-light);
-  color: var(--fg);
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.btn:disabled,
+.btn-icon:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(1);
 }
 
 /* ============================================================
@@ -872,24 +879,37 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: var(--radius-sm);
-  background: none;
-  border: none;
-  color: var(--fg-dim);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--fg);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .btn-icon:hover {
-  background: var(--bg-card-hover);
-  color: var(--fg);
+  background: rgba(129, 140, 248, 0.15);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn-icon-danger {
+  background: rgba(248, 113, 113, 0.05);
+  border: 1px solid rgba(248, 113, 113, 0.2);
+  color: var(--danger);
 }
 
 .btn-icon-danger:hover {
-  background: rgba(248, 113, 113, 0.1);
-  color: var(--danger);
+  background: var(--danger);
+  color: white;
+  border-color: var(--danger);
+}
+
+.icon-high-contrast {
+  stroke-width: 2.5px !important;
+  color: #fff !important;
 }
 
 select.input {

@@ -41,10 +41,10 @@ export default function LoginPage() {
                 {/* Branding */}
                 <div className="login-brand">
                     <img
-                        src="https://i.imgur.com/ag93VEM.png"
+                        src="https://i.imgur.com/MKGrpJX.png"
                         alt="IWOF Logo"
                         className="login-logo-img"
-                        style={{ height: "60px", width: "auto" }}
+                        style={{ height: "70px", width: "auto" }}
                     />
                 </div>
 
@@ -94,14 +94,14 @@ export default function LoginPage() {
 
                     <button
                         type="submit"
-                        className="btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="btn btn-primary w-full py-4 text-base shadow-[0_4px_20px_rgba(99,102,241,0.4)] hover:shadow-[0_4px_25px_rgba(99,102,241,0.6)]"
                         disabled={loading}
                     >
                         {loading ? (
                             <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
                         ) : (
                             <>
-                                Entrar
+                                Entrar no Sistema
                                 <ArrowRight size={18} />
                             </>
                         )}

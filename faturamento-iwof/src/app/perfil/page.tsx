@@ -143,15 +143,15 @@ export default function PerfilPage() {
                 {/* Lado Esquerdo: Info Resumo */}
                 <div className="space-y-6">
                     <div className="card p-6 flex flex-col items-center text-center space-y-4">
-                        <div className="w-24 h-24 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-500 border-4 border-indigo-500/20">
-                            <User size={48} />
+                        <div className="w-24 h-24 rounded-full bg-white/5 flex items-center justify-center text-white border-4 border-indigo-500/30">
+                            <User className="icon-high-contrast" size={48} />
                         </div>
                         <div>
                             <h2 className="text-lg font-bold text-white">{nome || "Usuário"}</h2>
                             <p className="text-xs text-[var(--fg-dim)]">{email}</p>
                         </div>
                         <div className="pt-2">
-                            <span className={`px-3 py-1 rounded-full text-[10px] font-black tracking-widest ${perfil?.cargo === "ADMIN" ? "bg-amber-500/10 text-amber-500" : "bg-indigo-500/10 text-indigo-500"
+                            <span className={`px-3 py-1 rounded-full text-[10px] font-black tracking-widest border ${perfil?.cargo === "ADMIN" ? "bg-amber-500/10 text-amber-500 border-amber-500/30" : "bg-indigo-500/10 text-indigo-500 border-indigo-500/30"
                                 }`}>
                                 <ShieldCheck size={12} className="inline mr-1" />
                                 {perfil?.cargo || "USER"}

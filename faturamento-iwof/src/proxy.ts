@@ -62,6 +62,7 @@ export async function proxy(request: NextRequest) {
         if (perfil?.cargo !== 'ADMIN') {
             const url = request.nextUrl.clone()
             url.pathname = '/'
+            url.searchParams.set('auth_error', 'unauthorized_role')
             return NextResponse.redirect(url)
         }
     }
