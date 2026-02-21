@@ -51,6 +51,21 @@ export async function proxy(request: NextRequest) {
         return NextResponse.redirect(url)
     }
 
+    // RBAC: Proteger rotas administrativas
+    if (user && request.nextUrl.pathname.startsWith('/usuarios')) {
+        const { data: perfil } = await supabase
+            .from('usuarios_perfis')
+            .select('cargo')
+            .eq('id', user.id)
+            .single()
+
+        if (perfil?.cargo !== 'ADMIN') {
+            const url = request.nextUrl.clone()
+            url.pathname = '/'
+            return NextResponse.redirect(url)
+        }
+    }
+
     return supabaseResponse
 }
 

@@ -10,7 +10,10 @@ import {
     SlidersHorizontal,
     Receipt,
     LogOut,
+    UserCircle,
+    ShieldAlert
 } from "lucide-react";
+import { useEffect, useState } from "react";
 
 const navItems = [
     { label: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -23,6 +26,22 @@ export default function Sidebar() {
     const pathname = usePathname();
     const router = useRouter();
     const supabase = createClient();
+    const [cargo, setCargo] = useState<string | null>(null);
+
+    useEffect(() => {
+        async function getRole() {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const { data } = await supabase
+                    .from("usuarios_perfis")
+                    .select("cargo")
+                    .eq("id", user.id)
+                    .single();
+                setCargo(data?.cargo || "USER");
+            }
+        }
+        getRole();
+    }, [supabase]);
 
     const handleLogout = async () => {
         await supabase.auth.signOut();
@@ -66,6 +85,30 @@ export default function Sidebar() {
                         </Link>
                     );
                 })}
+
+                <div className="mt-8">
+                    <span className="sidebar-section-label">Conta e Segurança</span>
+
+                    {cargo === "ADMIN" && (
+                        <Link
+                            href="/usuarios"
+                            className={`sidebar-link ${pathname.startsWith("/usuarios") ? "sidebar-link-active" : ""}`}
+                        >
+                            <ShieldAlert size={20} />
+                            <span>Gestão de Usuários</span>
+                            {pathname.startsWith("/usuarios") && <span className="sidebar-active-indicator" />}
+                        </Link>
+                    )}
+
+                    <Link
+                        href="/perfil"
+                        className={`sidebar-link ${pathname.startsWith("/perfil") ? "sidebar-link-active" : ""}`}
+                    >
+                        <UserCircle size={20} />
+                        <span>Meu Perfil</span>
+                        {pathname.startsWith("/perfil") && <span className="sidebar-active-indicator" />}
+                    </Link>
+                </div>
             </nav>
 
             {/* Footer */}
