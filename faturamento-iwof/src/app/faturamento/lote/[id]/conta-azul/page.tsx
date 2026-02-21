@@ -35,6 +35,7 @@ interface ContaAzulRow {
     cliente: string;
     razao_social: string;
     nome_fantasia: string;
+    nome_conta_azul: string;
     cnpj: string;
     centroCusto: string;
     observacoes: string;
@@ -153,11 +154,12 @@ export default function ContaAzulStagingPage() {
                     dataCompetencia: new Date().toISOString().split('T')[0],
                     dataVencimento: vencimentoISO,
                     dataPagamento: "",
-                    categoria: `FATURAMENTO ${currentLote.ciclo.toUpperCase()}`,
+                    categoria: `FATURAMENTO (${currentLote.ciclo.toUpperCase()})`,
                     descricao: `Horas consumidas de: ${fmtDate(currentLote.data_inicio_ciclo)} à ${fmtDate(currentLote.data_fim_ciclo)}`,
-                    cliente: c.nome_fantasia || c.razao_social,
+                    cliente: c.nome_conta_azul || c.razao_social,
                     nome_fantasia: c.nome_fantasia || "",
                     razao_social: c.razao_social || "",
+                    nome_conta_azul: c.nome_conta_azul || "",
                     cnpj: c.cnpj,
                     centroCusto: nomeEstado,
                     estado: siglaEstado
@@ -249,8 +251,6 @@ export default function ContaAzulStagingPage() {
         return data.filter(row => {
             const matchesSearch =
                 row.cliente.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                row.razao_social.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                row.nome_fantasia.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 row.cnpj.replace(/\D/g, "").includes(searchTerm.replace(/\D/g, ""));
 
             const matchesState = selectedState === "TODOS" || row.estado === selectedState;
@@ -442,10 +442,10 @@ export default function ContaAzulStagingPage() {
                             />
                         </div>
                         <div className="space-y-2">
-                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] ml-1">Categoria</label>
+                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] ml-1">Categoria (Planilha de Contas)</label>
                             <input
                                 type="text"
-                                placeholder="Ex: FATURAMENTO MENSAL"
+                                placeholder={`Ex: FATURAMENTO (${lote?.ciclo.toUpperCase()})`}
                                 value={bulkData.categoria}
                                 onChange={e => setBulkData({ ...bulkData, categoria: e.target.value.toUpperCase() })}
                                 className="w-full bg-[var(--bg-main)] border border-[var(--border)] rounded-xl py-3 px-4 text-white text-sm focus:border-[#3b82f6] outline-none transition-all"

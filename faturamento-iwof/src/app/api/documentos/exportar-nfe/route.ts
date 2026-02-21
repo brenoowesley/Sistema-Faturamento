@@ -14,39 +14,6 @@ export async function GET(req: NextRequest) {
 
         const supabase = await createClient();
 
-        // 1. Fetch ALL store data for this batch (not just validated) to identify exclusions
-        const { data: allInBatchRaw, error: allInBatchErr } = await supabase
-            .from("agendamentos_brutos")
-            .select(`
-                loja_id, 
-                status_validacao, 
-                valor_iwof, 
-                clientes (
-                    razao_social, nome_fantasia, cnpj, email_principal, emails_faturamento,
-                    endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge,
-                    boleto_unificado, tempo_pagamento_dias
-                )
-            `)
-            .eq("lote_id", loteId);
-
-        if (allInBatchErr) throw allInBatchErr;
-
-        // Group all batch attempts by store to see what they are trying to process
-        const allStoresInBatchMap = new Map<string, { cnpj: string; nome: string; status: Set<string>; totalTentado: number }>();
-        allInBatchRaw?.forEach(a => {
-            if (!allStoresInBatchMap.has(a.loja_id)) {
-                allStoresInBatchMap.set(a.loja_id, {
-                    cnpj: (a.clientes as any)?.cnpj || "S/N",
-                    nome: (a.clientes as any)?.razao_social || "S/N",
-                    status: new Set(),
-                    totalTentado: 0
-                });
-            }
-            const s = allStoresInBatchMap.get(a.loja_id)!;
-            s.status.add(a.status_validacao);
-            s.totalTentado += Number(a.valor_iwof) || 0;
-        });
-
         // 2. Fetch data to EXPORT (Consolidated or Simulated)
         let { data: records, error: recordsErr } = await supabase
             .from("faturamento_consolidados")
@@ -83,22 +50,41 @@ export async function GET(req: NextRequest) {
                 return NextResponse.json({ error: "Lote não encontrado no banco de dados." }, { status: 404 });
             }
 
+            // Fetch raw data only for validated stores directly
+            const { data: validatedRaw, error: valErr } = await supabase
+                .from("agendamentos_brutos")
+                .select(`
+                    loja_id, 
+                    valor_iwof, 
+                    clientes (
+                        razao_social, nome_fantasia, cnpj, email_principal, emails_faturamento,
+                        endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge,
+                        boleto_unificado, tempo_pagamento_dias
+                    )
+                `)
+                .eq("lote_id", loteId)
+                .eq("status_validacao", "VALIDADO");
+
+            if (valErr) throw valErr;
+
+            const validStoreIds = Array.from(new Set((validatedRaw || []).map(r => r.loja_id)));
+
             // Fetch ADJUSTMENTS for the simulated batch
             const { data: ajustes, error: ajErr } = await supabase
                 .from("ajustes_faturamento")
                 .select("*")
-                .in("cliente_id", Array.from(allStoresInBatchMap.keys()))
+                .in("cliente_id", validStoreIds)
                 .eq("status_aplicacao", false);
             if (ajErr) throw ajErr;
 
-            // Consolidate in memory
+            // Consolidate in memory strictly by client id
             const consolidatedMap = new Map<string, any>();
 
-            allInBatchRaw?.filter(a => a.status_validacao === "VALIDADO").forEach(a => {
+            validatedRaw?.forEach(a => {
                 const lojaId = a.loja_id;
                 if (!consolidatedMap.has(lojaId)) {
                     consolidatedMap.set(lojaId, {
-                        cliente_id: lojaId, // Store ID here for audit comparison
+                        cliente_id: lojaId,
                         valor_bruto: 0,
                         acrescimos: 0,
                         descontos: 0,
@@ -128,58 +114,8 @@ export async function GET(req: NextRequest) {
             });
         }
 
-        // --- AUDIT SECTION ---
-        const auditExport = {
-            loteId,
-            total_lojas_encontradas: allStoresInBatchMap.size,
-            total_lojas_exportadas: records?.length || 0,
-            simulation_used: simulationUsed,
-            excluded: [] as any[]
-        };
-
-        const recordsWithBase = records?.map(r => {
-            const base = r.valor_base_calculo ?? ((r.valor_bruto + (r.acrescimos || 0)) - (r.descontos || 0));
-            return {
-                ...r,
-                valor_base_calculo: base,
-                valor_nf_emitida: r.valor_nf_emitida ?? Math.max(0, base * 0.115)
-            };
-        });
-
-        allStoresInBatchMap.forEach((store, id) => {
-            const isExported = recordsWithBase?.some(r => r.cliente_id === id || (r.clientes as any)?.id === id);
-
-            if (!isExported) {
-                let motivo = "Desconhecido";
-                if (simulationUsed) {
-                    if (!store.status.has("VALIDADO")) {
-                        motivo = `Status: ${Array.from(store.status).join(", ")} (Nenhum como 'VALIDADO')`;
-                    } else {
-                        motivo = `Valor líquido <= 0 após ajustes.`;
-                    }
-                } else {
-                    motivo = "Não consolidado no fechamento (Status consolidado?)";
-                }
-                auditExport.excluded.push({ cnpj: store.cnpj, nome: store.nome, motivo });
-            }
-        });
-
-        console.log("[NFE EXPORT AUDIT]", JSON.stringify(auditExport, null, 2));
-        // --- END AUDIT SECTION ---
-
-        // NF Não Emitidas (Valor <= 0 ou Excluídos)
-        const excludedList: any[] = auditExport.excluded.map(ex => ({
-            "Loja": ex.nome,
-            "CNPJ": ex.cnpj,
-            "Motivo": ex.motivo
-        }));
-
         if (!records || records.length === 0) {
-            // If no records to export, but there might be exclusions, still generate a file with just exclusions
-            if (excludedList.length === 0) {
-                return NextResponse.json({ error: "No records found (none validated and no exclusions to report)" }, { status: 404 });
-            }
-            // If only exclusions, proceed to generate the file with just the exclusion sheet
+            return NextResponse.json({ error: "No consolidated records found to export" }, { status: 404 });
         }
 
         const fmtDate = (d: string) => {
@@ -205,14 +141,14 @@ export async function GET(req: NextRequest) {
 
         // NF Emitidas (Valor > 0)
         const dadosEmitidos = records?.filter(rec => rec.valor_nf_emitida > 0).map((rec) => {
-            const c = rec.clientes as any;
-            const l = rec.lotes as any;
+            const c = rec.clientes as any || {};
+            const l = rec.lotes as any || {};
 
             return {
                 "CPF_CNPJ": c.cnpj ? c.cnpj.replace(/\D/g, "") : "",
                 "Nome": c.razao_social || "",
                 "Email": c.email_principal || c.emails_faturamento || "",
-                "Valor": Number(rec.valor_nf_emitida.toFixed(2)),
+                "Valor": Number((rec.valor_nf_emitida || 0).toFixed(2)),
                 "Codigo_Servico": "100202",
                 "Endereco_Pais": "BRA",
                 "Endereco_Cep": c.cep ? c.cep.replace(/\D/g, "") : "",
@@ -231,23 +167,21 @@ export async function GET(req: NextRequest) {
             };
         }) || [];
 
-        // NF Não Emitidas (Valor <= 0 ou Excluídos)
-        const dadosNaoEmitidos = [
-            ...(records?.filter(rec => rec.valor_nf_emitida <= 0).map(rec => ({
-                "Loja": (rec.clientes as any)?.razao_social || "S/N",
-                "CNPJ": (rec.clientes as any)?.cnpj || "S/N",
-                "Valor Base": rec.valor_bruto,
-                "Motivo": "Valor líquido zero ou negativo após descontos"
-            })) || []),
-            ...excludedList.map(ex => ({
-                "Loja": ex.NOME,
-                "CNPJ": ex.CNPJ,
-                "Valor Base": ex.VALOR_TENTADO,
-                "Motivo": ex.MOTIVO_EXCLUSAO
-            }))
-        ];
+        // NF Não Emitidas (Valor <= 0)
+        const dadosNaoEmitidos = records?.filter(rec => rec.valor_nf_emitida <= 0).map(rec => ({
+            "Loja": (rec.clientes as any)?.razao_social || "S/N",
+            "CNPJ": (rec.clientes as any)?.cnpj || "S/N",
+            "Valor Base": rec.valor_bruto,
+            "Motivo": "Valor líquido zero ou negativo após descontos"
+        })) || [];
 
         // 4. Create XLSX with two sheets
+        console.log(`[DIAGNÓSTICO NFE] Lote ID processado.`);
+        console.log(`[DIAGNÓSTICO NFE] Total de registros puxados do banco para este lote: ${records?.length || 0}`);
+
+        const cnpjsUnicos = new Set(records?.map(r => (r.clientes as any)?.cnpj)).size;
+        console.log(`[DIAGNÓSTICO NFE] CNPJs únicos encontrados nos dados: ${cnpjsUnicos}`);
+
         const workbook = xlsx.utils.book_new();
 
         const worksheetEmitida = xlsx.utils.json_to_sheet(dadosEmitidos, { header: colunasNFE });

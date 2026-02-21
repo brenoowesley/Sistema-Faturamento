@@ -22,6 +22,7 @@ import {
     ChevronDown,
     ChevronRight,
     Copy,
+    AlertCircle,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -94,7 +95,7 @@ interface ConciliationResult {
 }
 
 type Step = "setup" | "results";
-type ResultTab = "validacoes" | "duplicatas" | "conciliacao" | "validados" | "excluidos" | "ciclos";
+type ResultTab = "validacoes" | "duplicatas" | "conciliacao" | "validados" | "excluidos" | "ciclos" | "divergentes";
 
 /* ================================================================
    COLUMN MAP — case-insensitive header → key
@@ -170,36 +171,7 @@ function fmtTime(d: Date | null): string {
     return d.toLocaleTimeString("pt-BR", { hour: '2-digit', minute: '2-digit' });
 }
 
-/* --- Similarity Helper --- */
-function getSimilarity(s1: string, s2: string): number {
-    const longer = s1.length < s2.length ? s2 : s1;
-    const shorter = s1.length < s2.length ? s1 : s2;
-    if (longer.length === 0) return 1.0;
-
-    // Simple Levenshtein-ish or token matching overlap
-    // For 95% proximity, we'll use a basic character-based distance
-    const l1 = longer.toLowerCase();
-    const l2 = shorter.toLowerCase();
-
-    let costs = new Array();
-    for (let i = 0; i <= l1.length; i++) {
-        let lastValue = i;
-        for (let j = 0; j <= l2.length; j++) {
-            if (i == 0) costs[j] = j;
-            else {
-                if (j > 0) {
-                    let newValue = costs[j - 1];
-                    if (l1.charAt(i - 1) != l2.charAt(j - 1)) newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
-                    costs[j - 1] = lastValue;
-                    lastValue = newValue;
-                }
-            }
-        }
-        if (i > 0) costs[l2.length] = lastValue;
-    }
-    const distance = costs[l2.length];
-    return (longer.length - distance) / longer.length;
-}
+// Remove função getSimilarity para evitar fallback frouxo
 
 /* ================================================================
    COMPONENT
@@ -225,20 +197,39 @@ export default function NovoFaturamento() {
     const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
     const [conciliation, setConciliation] = useState<ConciliationResult>({ naoCadastrados: [], ausentesNoLote: [] });
     const financialSummary = useMemo(() => {
-        if (agendamentos.length === 0) return [];
+        if (agendamentos.length === 0) return { summaryArr: [], globalFaturadas: 0, globalRejeitadas: 0 };
 
         const sumByCiclo = new Map<string, number>();
+        const companiesByCiclo = new Map<string, Set<string>>();
+        const globalFaturadas = new Set<string>();
+        const globalRejeitadas = new Set<string>();
+
         let originalBruto = 0;
         let totalLiquido = 0;
         let totalExcluido = 0;
         let totalPendenteCorrecao = 0;
         let totalGeralArquivo = 0;
 
+        const originalBrutoSet = new Set<string>();
+        const liquidoLoteSet = new Set<string>();
+        const pendentesCorrecaoSet = new Set<string>();
+        const excluidosSet = new Set<string>();
+        const geralArquivoSet = new Set<string>();
+
         for (const a of agendamentos) {
+            const companyKey = a.clienteId || String(a.refAgendamento) || a.loja;
+
             originalBruto += a.originalValorIwof ?? a.valorIwof;
+            originalBrutoSet.add(companyKey);
 
             if (!a.isRemoved) {
                 const isValuable = a.status === "OK" || a.status === "CORREÇÃO" || a.status === "CICLO_INCORRETO";
+
+                if (a.status === "OK" || a.status === "CORREÇÃO") {
+                    globalFaturadas.add(companyKey);
+                } else {
+                    globalRejeitadas.add(companyKey);
+                }
 
                 if (isValuable) {
                     const val = a.status === "CORREÇÃO"
@@ -246,29 +237,44 @@ export default function NovoFaturamento() {
                         : (a.manualValue ?? a.valorIwof);
 
                     totalGeralArquivo += val;
+                    geralArquivoSet.add(companyKey);
 
                     if (a.status !== "CICLO_INCORRETO") {
                         const ciclo = a.cicloNome || "Sem Ciclo";
                         sumByCiclo.set(ciclo, (sumByCiclo.get(ciclo) ?? 0) + val);
+                        if (!companiesByCiclo.has(ciclo)) companiesByCiclo.set(ciclo, new Set());
+                        companiesByCiclo.get(ciclo)!.add(companyKey);
+
                         totalLiquido += val;
-                        if (a.status === "CORREÇÃO") totalPendenteCorrecao += val;
+                        liquidoLoteSet.add(companyKey);
+
+                        if (a.status === "CORREÇÃO") {
+                            totalPendenteCorrecao += val;
+                            pendentesCorrecaoSet.add(companyKey);
+                        }
                     }
                 }
             } else {
                 totalExcluido += a.originalValorIwof ?? a.valorIwof;
+                excluidosSet.add(companyKey);
+                globalRejeitadas.add(companyKey);
             }
         }
 
-        const summaryArr = Array.from(sumByCiclo.entries()).map(([ciclo, total]) => ({ ciclo: ciclo as string, total: total as number }));
-        summaryArr.push({ ciclo: "FATURAMENTO GERAL (ARQUIVO)", total: totalGeralArquivo });
-        summaryArr.push({ ciclo: "BRUTO ORIGINAL", total: originalBruto });
-        summaryArr.push({ ciclo: "LÍQUIDO P/ LOTE", total: totalLiquido });
+        const summaryArr = Array.from(sumByCiclo.entries()).map(([ciclo, total]) => ({ ciclo: ciclo as string, total: total as number, empresasCount: companiesByCiclo.get(ciclo)?.size || 0 }));
+        summaryArr.push({ ciclo: "FATURAMENTO GERAL (ARQUIVO)", total: totalGeralArquivo, empresasCount: geralArquivoSet.size });
+        summaryArr.push({ ciclo: "BRUTO ORIGINAL", total: originalBruto, empresasCount: originalBrutoSet.size });
+        summaryArr.push({ ciclo: "LÍQUIDO P/ LOTE", total: totalLiquido, empresasCount: liquidoLoteSet.size });
         if (totalPendenteCorrecao > 0) {
-            summaryArr.push({ ciclo: "PENDENTES CORREÇÃO", total: totalPendenteCorrecao });
+            summaryArr.push({ ciclo: "PENDENTES CORREÇÃO", total: totalPendenteCorrecao, empresasCount: pendentesCorrecaoSet.size });
         }
-        summaryArr.push({ ciclo: "EXCLUÍDOS", total: totalExcluido });
+        summaryArr.push({ ciclo: "EXCLUÍDOS", total: totalExcluido, empresasCount: excluidosSet.size });
 
-        return summaryArr;
+        return {
+            summaryArr,
+            globalFaturadas: globalFaturadas.size,
+            globalRejeitadas: globalRejeitadas.size
+        };
     }, [agendamentos]);
 
     const agendamentosMap = useMemo(() => new Map(agendamentos.map(a => [a.id, a])), [agendamentos]);
@@ -370,18 +376,10 @@ export default function NovoFaturamento() {
             setDbClientes(clientes);
 
             /* Build lookup maps */
-            const clienteByCnpj = new Map<string, ClienteDB>();
-            const clienteByName = new Map<string, ClienteDB>();
+            const clienteByContaAzul = new Map<string, ClienteDB>();
             for (const c of clientes) {
-                clienteByCnpj.set(normalizeCnpj(c.cnpj), c);
-                // Populate name lookup with all name variants
-                const names = [c.razao_social, c.nome_fantasia, c.nome].filter(Boolean).map((n) => n!.toLowerCase().trim());
-                for (const n of names) {
-                    clienteByName.set(n, c);
-                }
-                // Prioritize nome_conta_azul — set LAST so it overwrites any previous entry with the same key
                 if (c.nome_conta_azul) {
-                    clienteByName.set(c.nome_conta_azul.toLowerCase().trim(), c);
+                    clienteByContaAzul.set(c.nome_conta_azul.toUpperCase().trim(), c);
                 }
             }
 
@@ -413,10 +411,10 @@ export default function NovoFaturamento() {
                     continue;
                 }
 
-                /* --- Match client --- */
                 let matched: ClienteDB | undefined;
+
                 if (loja) {
-                    matched = clienteByName.get(loja.toLowerCase().trim());
+                    matched = clienteByContaAzul.get(loja);
                 }
 
                 /* Track which clients appeared */
@@ -534,8 +532,8 @@ export default function NovoFaturamento() {
                     const sameLoja = a.loja === b.loja;
                     if (!sameInicio || !sameTermino || !sameLoja) return false;
 
-                    const nameSim = getSimilarity(a.nome, b.nome);
-                    return nameSim >= 0.99;
+                    const nameMatch = a.nome.toUpperCase().trim() === b.nome.toUpperCase().trim();
+                    return nameMatch;
                 });
 
                 if (suspicious.length > 0) {
@@ -813,7 +811,7 @@ export default function NovoFaturamento() {
 
         const rows = agendamentos
             .filter((a) => {
-                // Must have a client
+                // Apenas lojas COM vinculo no banco (Divergentes ficam de fora)
                 if (!a.clienteId) return false;
                 // Exclude removed items unless they are cancellations/duplicates we want to track (actually usually we just exclude them from billing)
                 // BUT the main issue is CICLO_INCORRETO and FORA_PERIODO.
@@ -1139,9 +1137,31 @@ export default function NovoFaturamento() {
                 </button>
             </div>
 
+            {/* ======== Novo Card de Resumo Global ======== */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div className="card" style={{ borderLeft: "3px solid #3b82f6" }}>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-xs font-medium uppercase tracking-wider text-[var(--fg-dim)]">Empresas Faturadas (Validadas)</p>
+                            <p className="text-2xl font-bold mt-1 text-white">{financialSummary.globalFaturadas} <span className="text-sm font-normal text-[var(--fg-muted)]">CNPJs Únicos</span></p>
+                        </div>
+                        <CheckCircle2 size={32} className="text-[#3b82f6] opacity-30" />
+                    </div>
+                </div>
+                <div className="card" style={{ borderLeft: "3px solid var(--danger)" }}>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-xs font-medium uppercase tracking-wider text-[var(--fg-dim)]">Não Inclusas / Rejeitadas</p>
+                            <p className="text-2xl font-bold mt-1 text-[var(--danger)]">{financialSummary.globalRejeitadas} <span className="text-sm font-normal text-[var(--fg-muted)]">CNPJs Únicos</span></p>
+                        </div>
+                        <XCircle size={32} className="text-[var(--danger)] opacity-30" />
+                    </div>
+                </div>
+            </div>
+
             {/* ======== KPI Financial Cards ======== */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                {financialSummary.map((fs) => (
+                {financialSummary.summaryArr.map((fs) => (
                     <div
                         key={fs.ciclo}
                         className="card"
@@ -1177,6 +1197,9 @@ export default function NovoFaturamento() {
                                     }}
                                 >
                                     {fmtCurrency(fs.total)}
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-1" style={{ color: "var(--fg-muted)" }}>
+                                    {fs.empresasCount} {fs.empresasCount === 1 ? "empresa" : "empresas"}
                                 </p>
                             </div>
                             <DollarSign
@@ -2100,9 +2123,6 @@ export default function NovoFaturamento() {
                                                 <tr key={i}>
                                                     <td>
                                                         <span className="table-primary">{a.loja}</span>
-                                                        {!a.clienteId && (
-                                                            <span className="text-xs text-[var(--danger)] ml-1">(não vinculado)</span>
-                                                        )}
                                                     </td>
                                                     <td className="text-sm text-[var(--fg-muted)]">{a.nome}</td>
                                                     <td className="text-sm text-[var(--fg-muted)]">{fmtDate(a.inicio)}</td>
@@ -2120,6 +2140,68 @@ export default function NovoFaturamento() {
                                             ))}
                                         </tbody>
                                     </table>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* ----------- TAB: DIVERGENTES ----------- */}
+                    {activeTab === "divergentes" && (
+                        <div>
+                            {divergentes.length === 0 ? (
+                                <p className="text-sm text-[var(--fg-dim)] py-8 text-center">
+                                    Nenhuma loja divergente encontrada. Todas as lojas da planilha bateram com o <strong>Nome Conta Azul</strong> de algum cliente no banco!
+                                </p>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="bg-amber-500/10 border border-amber-500/20 text-amber-500 px-4 py-3 rounded-xl text-sm flex items-start gap-3">
+                                        <AlertCircle size={20} className="shrink-0 mt-0.5" />
+                                        <div>
+                                            <p className="font-bold">Atenção! As seguintes linhas da planilha não encontraram par no banco de dados.</p>
+                                            <p className="opacity-90 mt-1">
+                                                A regra ESTRITA exige que a coluna <strong>"Loja"</strong> da planilha seja exatamente igual ao <strong>"Nome Conta Azul"</strong> do cliente.
+                                                Corrija os cadastros em Clientes para incluir este nome, e re importe a planilha.
+                                            </p>
+                                            <a href="/clientes" target="_blank" className="btn btn-xs btn-outline border-amber-500 text-amber-500 hover:bg-amber-500 hover:text-amber-950 mt-3">
+                                                Corrigir Cadastro de Clientes (Abre em Nova Aba)
+                                            </a>
+                                        </div>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <table className="data-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Loja na Planilha</th>
+                                                    <th>Profissional</th>
+                                                    <th>Data</th>
+                                                    <th>Valor</th>
+                                                    <th>Erro de Match</th>
+                                                    <th>Ação</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {divergentes.map((a: Agendamento, i: number) => (
+                                                    <tr key={i}>
+                                                        <td>
+                                                            <span className="table-primary text-amber-500">{a.loja}</span>
+                                                        </td>
+                                                        <td className="text-sm text-[var(--fg-muted)]">{a.nome}</td>
+                                                        <td className="text-sm text-[var(--fg-muted)]">{fmtDate(a.inicio)}</td>
+                                                        <td className="table-mono text-[var(--fg-muted)]">{fmtCurrency(a.valorIwof)}</td>
+                                                        <td className="text-xs text-amber-500">Nome Conta Azul divergente/ausente no banco</td>
+                                                        <td>
+                                                            <button
+                                                                className="btn btn-ghost btn-xs text-[var(--danger)] hover:bg-[var(--danger)]/10"
+                                                                onClick={() => toggleRemoval(a.refAgendamento)}
+                                                            >
+                                                                Descartar Linha
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -2144,7 +2226,7 @@ export default function NovoFaturamento() {
                 ) : (
                     <button
                         className="btn btn-primary"
-                        disabled={saving || validados.filter((a) => a.clienteId).length === 0}
+                        disabled={saving || validados.length === 0}
                         onClick={handleSave}
                     >
                         {saving ? (

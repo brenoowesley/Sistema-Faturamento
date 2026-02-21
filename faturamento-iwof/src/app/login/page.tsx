@@ -40,11 +40,12 @@ export default function LoginPage() {
             <div className="login-card card-glass">
                 {/* Branding */}
                 <div className="login-brand">
-                    <div className="login-logo">
-                        <Receipt size={30} strokeWidth={2.2} />
-                    </div>
-                    <h1 className="login-title">IWOF Faturamento</h1>
-                    <p className="login-subtitle">Acesse sua conta para continuar</p>
+                    <img
+                        src="https://i.imgur.com/MKGrpJX.png"
+                        alt="IWOF Logo"
+                        className="login-logo-img"
+                        style={{ height: "60px", width: "auto" }}
+                    />
                 </div>
 
                 {/* Form */}

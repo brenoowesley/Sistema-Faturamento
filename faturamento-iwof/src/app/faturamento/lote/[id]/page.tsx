@@ -14,7 +14,8 @@ import {
     Calculator,
     AlertCircle,
     FileText,
-    Receipt
+    Receipt,
+    FileSearch
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -81,6 +82,7 @@ export default function LoteFechamentoPage() {
     const [lojas, setLojas] = useState<LojaConsolidada[]>([]);
     const [searchTerm, setSearchTerm] = useState("");
     const [isClosing, setIsClosing] = useState(false);
+    const [rejeitados, setRejeitados] = useState<{ loja_id: string; razao_social: string; cnpj: string; motivo: string }[]>([]);
 
     // Initial Data Fetch
     const fetchData = useCallback(async () => {
@@ -128,6 +130,41 @@ export default function LoteFechamentoPage() {
             }
 
             const agendamentos = allAgendamentos;
+
+            // 2.5 Fetch missing/rejected records that couldn't be correctly billed
+            const { data: missingRecords, error: missingErr } = await supabase
+                .from("agendamentos_brutos")
+                .select("loja_id, status_validacao, cnpj_loja, clientes(razao_social, cnpj, endereco_rua, endereco_bairro, endereco_cidade, endereco_uf, endereco_cep)")
+                .eq("lote_id", loteId);
+
+            if (!missingErr && missingRecords) {
+                const missingMap = new Map<string, { loja_id: string; razao_social: string; cnpj: string; motivo: string }>();
+
+                missingRecords.forEach(rec => {
+                    const client = rec.clientes as any;
+                    const cnpj = client?.cnpj || rec.cnpj_loja || "Desconhecido";
+                    const razao = client?.razao_social || "Empresa Desconhecida";
+
+                    if (!client) {
+                        missingMap.set(cnpj, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: "Cliente não cadastrado no sistema" });
+                        return;
+                    }
+
+                    if (rec.status_validacao !== "VALIDADO") {
+                        missingMap.set(cnpj, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: `Status do agendamento: ${rec.status_validacao}` });
+                        return;
+                    }
+
+                    // Verifica se faltam dados fiscais cruciais (Endereço completo)
+                    const faltaEndereco = !client.endereco_rua || !client.endereco_bairro || !client.endereco_cidade || !client.endereco_uf || !client.endereco_cep;
+                    if (faltaEndereco) {
+                        missingMap.set(cnpj, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: "Dados de endereço incompletos (Rua, Bairro, Cidade, UF ou CEP)" });
+                        return;
+                    }
+                });
+
+                setRejeitados(Array.from(missingMap.values()));
+            }
 
             // 3. Get unique store IDs involved
             const storeIds = Array.from(new Set(agendamentos.map(a => a.loja_id)));
@@ -278,6 +315,30 @@ export default function LoteFechamentoPage() {
         }
     };
 
+    const handleExportarRejeitados = async () => {
+        if (rejeitados.length === 0) {
+            alert("Não há lojas de fora deste fechamento.");
+            return;
+        }
+
+        try {
+            const xlsx = await import("xlsx");
+            const dadosRejeitados = rejeitados.map(r => ({
+                "CNPJ": r.cnpj,
+                "Razão Social": r.razao_social,
+                "Motivo da Omissão": r.motivo
+            }));
+
+            const workbook = xlsx.utils.book_new();
+            const worksheet = xlsx.utils.json_to_sheet(dadosRejeitados);
+            xlsx.utils.book_append_sheet(workbook, worksheet, "Lojas Ausentes");
+            xlsx.writeFile(workbook, `lojas_ausentes_lote_${loteId.substring(0, 8)}.xlsx`);
+        } catch (error) {
+            console.error("Erro ao exportar rejeitados:", error);
+            alert("Erro ao gerar planilha de lojas ausentes.");
+        }
+    };
+
     if (loading) {
         return (
             <div className="min-h-screen bg-[var(--bg-main)] flex items-center justify-center">
@@ -322,6 +383,28 @@ export default function LoteFechamentoPage() {
             </div>
 
             <main className="max-w-7xl mx-auto p-6 space-y-6">
+
+                {/* ALERTA LOJAS REJEITADAS */}
+                {rejeitados.length > 0 && (
+                    <div className="bg-red-950/20 border border-red-900/30 p-5 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-4 text-red-400 text-sm shadow-xl relative overflow-hidden">
+                        <div className="absolute inset-0 bg-red-500/5 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000 skew-x-12"></div>
+                        <div className="flex gap-4 items-center z-10">
+                            <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 shrink-0">
+                                <XCircle size={24} />
+                            </div>
+                            <div>
+                                <h3 className="font-black text-red-400 text-base mb-1 uppercase tracking-tight">Lojas Ausentes do Fechamento</h3>
+                                <p className="text-red-300/80">Existem <strong>{rejeitados.length} lojas</strong> que não foram consolidadas por irregularidades na validação inicial ou falta de dados de cadastro (endereço incompleto).</p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={handleExportarRejeitados}
+                            className="shrink-0 btn px-6 py-3 rounded-2xl bg-red-900/20 border border-red-900/50 text-red-300 hover:bg-red-500 hover:text-white transition-all flex items-center gap-2 font-bold uppercase tracking-tight shadow-lg z-10"
+                        >
+                            <FileSearch size={18} /> Ver Detalhes (.xlsx)
+                        </button>
+                    </div>
+                )}
 
                 {/* Main calculation Table */}
                 <div className="bg-[var(--bg-card)] rounded-3xl border border-[var(--border)] shadow-2xl overflow-hidden">

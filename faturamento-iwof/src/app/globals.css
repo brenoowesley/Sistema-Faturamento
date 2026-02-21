@@ -218,6 +218,10 @@ body {
   padding: 32px 40px;
 }
 
+.main-content.no-sidebar {
+  margin-left: 0;
+}
+
 .page-header {
   margin-bottom: 32px;
 }

@@ -1,17 +1,8 @@
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+"use client";
+
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
-
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-});
-
-export const metadata: Metadata = {
-  title: "IWOF Faturamento",
-  description: "Sistema de Faturamento Interno — IWOF",
-};
+import { usePathname } from "next/navigation";
 
 export default function RootLayout({
   children,
@@ -20,7 +11,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR">
-      <body className={`${inter.variable} antialiased`}>
+      <body className="antialiased font-sans">
         <LayoutShell>{children}</LayoutShell>
       </body>
     </html>
@@ -28,10 +19,15 @@ export default function RootLayout({
 }
 
 function LayoutShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isLoginPage = pathname === "/login";
+
   return (
     <>
       <Sidebar />
-      <main className="main-content">{children}</main>
+      <main className={`main-content ${isLoginPage ? "no-sidebar" : ""}`}>
+        {children}
+      </main>
     </>
   );
 }

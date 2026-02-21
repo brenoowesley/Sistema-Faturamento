@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import {
     LayoutDashboard,
     Users,
@@ -20,17 +21,27 @@ const navItems = [
 
 export default function Sidebar() {
     const pathname = usePathname();
+    const router = useRouter();
+    const supabase = createClient();
+
+    const handleLogout = async () => {
+        await supabase.auth.signOut();
+        router.push('/login');
+        router.refresh();
+    };
+
+    if (pathname === "/login") return null;
 
     return (
         <aside className="sidebar">
             {/* Brand */}
             <div className="sidebar-brand">
-                <div className="sidebar-logo">
-                    <Receipt size={28} strokeWidth={2.2} />
-                </div>
-                <div>
-                    <h1 className="sidebar-title">IWOF</h1>
-                    <p className="sidebar-subtitle">Faturamento</p>
+                <div className="sidebar-logo-container">
+                    <img
+                        src="https://i.imgur.com/MKGrpJX.png"
+                        alt="IWOF Logo"
+                        className="sidebar-logo-img"
+                    />
                 </div>
             </div>
 
@@ -59,7 +70,10 @@ export default function Sidebar() {
 
             {/* Footer */}
             <div className="sidebar-footer">
-                <button className="sidebar-link sidebar-logout">
+                <button
+                    onClick={handleLogout}
+                    className="sidebar-link sidebar-logout"
+                >
                     <LogOut size={20} />
                     <span>Sair</span>
                 </button>

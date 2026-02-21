@@ -21,7 +21,10 @@ import {
     Search,
     RefreshCcw,
     FileSearch,
-    Receipt
+    Receipt,
+    ChevronDown,
+    ChevronUp,
+    Filter
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -46,6 +49,7 @@ interface LojaConsolidada {
     id: string;
     razao_social: string;
     nome_fantasia: string | null;
+    nome_conta_azul: string | null;
     cnpj: string;
     valorBruto: number;
     acrescimos: number;
@@ -82,6 +86,144 @@ const fmtDate = (dateStr: string) => {
     return d.toLocaleDateString("pt-BR");
 };
 
+// Advanced Monetary Filter Parser
+const checkMonetaryFilter = (filterStr: string, value: number): boolean => {
+    const raw = filterStr.trim().toLowerCase();
+    if (!raw) return true;
+
+    const extractNum = (s: string) => {
+        const clean = s.replace(/[^\d.,]/g, "").replace(",", ".");
+        const parsed = parseFloat(clean);
+        return isNaN(parsed) ? null : parsed;
+    };
+
+    if (raw.includes(" e ")) {
+        const parts = raw.split(" e ");
+        const min = extractNum(parts[0]);
+        const max = extractNum(parts[1]);
+        if (min !== null && max !== null) return value >= min && value <= max;
+    } else if (raw.includes(" ate ") || raw.includes(" até ")) {
+        const parts = raw.split(/ at[eé] /);
+        const min = extractNum(parts[0]);
+        const max = extractNum(parts[1]);
+        if (min !== null && max !== null) return value >= min && value <= max;
+    } else if (raw.includes("-")) {
+        const parts = raw.split("-");
+        const min = extractNum(parts[0]);
+        const max = extractNum(parts[1]);
+        if (min !== null && max !== null) return value >= min && value <= max;
+    }
+
+    if (raw.startsWith(">") || raw.startsWith("a partir de") || raw.startsWith("maior que")) {
+        const val = extractNum(raw);
+        if (val !== null) return value >= val;
+    }
+
+    if (raw.startsWith("<") || raw.startsWith("ate") || raw.startsWith("até") || raw.startsWith("menor que")) {
+        const val = extractNum(raw);
+        if (val !== null) return value <= val;
+    }
+
+    // Default string match (exact or partial string search on formatted value)
+    return fmtCurrency(value).toLowerCase().includes(raw);
+};
+
+/* ================================================================
+   MONETARY FILTER UI COMPONENT
+   ================================================================ */
+
+const MonetaryFilterDropdown = ({ value, onChange, placeholder }: { value: string, onChange: (val: string) => void, placeholder: string }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [op, setOp] = useState<"EXACT" | "GTE" | "LTE" | "BETWEEN">("EXACT");
+    const [v1, setV1] = useState("");
+    const [v2, setV2] = useState("");
+
+    const handleApply = () => {
+        if (!v1) {
+            onChange("");
+        } else {
+            if (op === "EXACT") onChange(v1);
+            if (op === "GTE") onChange(`a partir de ${v1}`);
+            if (op === "LTE") onChange(`até ${v1}`);
+            if (op === "BETWEEN") onChange(`${v1} e ${v2}`);
+        }
+        setIsOpen(false);
+    };
+
+    const handleClear = () => {
+        setV1(""); setV2(""); setOp("EXACT");
+        onChange("");
+        setIsOpen(false);
+    };
+
+    return (
+        <div className="relative">
+            <button
+                type="button"
+                onClick={() => setIsOpen(!isOpen)}
+                className={`w-28 flex items-center justify-between text-[10px] font-medium transition-all text-right rounded-lg px-2 py-1.5 border
+                    ${value ? 'border-amber-500/50 text-amber-500 bg-amber-500/10' : 'bg-[var(--bg-main)] border-[var(--border)] text-white hover:border-[var(--primary)]/50'}`}
+            >
+                <span className="truncate flex-1 text-right">{value || placeholder}</span>
+                <ChevronLeft size={12} className={`ml-1 transition-transform ${isOpen ? "rotate-90" : "-rotate-90"}`} />
+            </button>
+            {isOpen && (
+                <>
+                    <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)}></div>
+                    <div className="absolute top-full mt-2 right-0 w-52 bg-[#18181b] border border-[var(--border)] rounded-xl shadow-2xl p-3 z-50 flex flex-col gap-3 font-sans" onClick={e => e.stopPropagation()}>
+                        <div className="flex flex-col gap-1">
+                            <label className="text-[9px] uppercase font-black text-[var(--fg-dim)] tracking-widest">Filtrar por</label>
+                            <select
+                                value={op}
+                                onChange={(e) => setOp(e.target.value as any)}
+                                className="bg-[var(--bg-main)] border border-[var(--border)] rounded-md px-2 py-2 text-xs font-medium text-white outline-none cursor-pointer"
+                                style={{ colorScheme: "dark" }}
+                            >
+                                <option value="EXACT" className="bg-[#18181b] text-white">Igual a</option>
+                                <option value="GTE" className="bg-[#18181b] text-white">A partir de (≥)</option>
+                                <option value="LTE" className="bg-[#18181b] text-white">Até (≤)</option>
+                                <option value="BETWEEN" className="bg-[#18181b] text-white">Entre limites</option>
+                            </select>
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                            <input
+                                type="text"
+                                placeholder={op === "BETWEEN" ? "Valor Inicial..." : "Valor R$..."}
+                                value={v1}
+                                onChange={(e) => setV1(e.target.value)}
+                                className="w-full bg-[var(--bg-main)] border border-[var(--border)] rounded-md px-3 py-2 text-xs font-bold text-white outline-none focus:border-[var(--primary)]/50 transition-colors placeholder-[var(--fg-dim)]"
+                                onKeyDown={e => e.key === 'Enter' && handleApply()}
+                                autoFocus
+                            />
+
+                            {op === "BETWEEN" && (
+                                <input
+                                    type="text"
+                                    placeholder="Valor Final..."
+                                    value={v2}
+                                    onChange={(e) => setV2(e.target.value)}
+                                    className="w-full bg-[var(--bg-main)] border border-[var(--border)] rounded-md px-3 py-2 text-xs font-bold text-white outline-none focus:border-[var(--primary)]/50 transition-colors placeholder-[var(--fg-dim)]"
+                                    onKeyDown={e => e.key === 'Enter' && handleApply()}
+                                />
+                            )}
+                        </div>
+
+                        <div className="flex gap-2 mt-1">
+                            <button onClick={handleClear} className="flex-1 bg-transparent hover:bg-white/5 border border-[var(--border)] text-white rounded-md py-2 text-[10px] uppercase font-bold transition-all">
+                                Limpar
+                            </button>
+                            <button onClick={handleApply} className="flex-1 bg-[var(--primary)] hover:bg-[var(--primary)]/90 text-black rounded-md py-2 text-[10px] uppercase font-black transition-all">
+                                Aplicar
+                            </button>
+                        </div>
+                    </div>
+                </>
+            )}
+        </div>
+    );
+};
+
 /* ================================================================
    PAGE COMPONENT
    ================================================================ */
@@ -100,6 +242,9 @@ export default function FiscalProcessingPage() {
     const [isConsolidating, setIsConsolidating] = useState(false);
     const [isDispatching, setIsDispatching] = useState(false);
     const [processingZIP, setProcessingZIP] = useState(false);
+    const [rejeitados, setRejeitados] = useState<{ loja_id: string; razao_social: string; cnpj: string; motivo: string }[]>([]);
+    const [isSummaryExpanded, setIsSummaryExpanded] = useState(false);
+    const [summaryFilter, setSummaryFilter] = useState<"VALIDADAS" | "PENDENTES">("PENDENTES");
 
     // Filter State
     const [filters, setFilters] = useState({
@@ -128,82 +273,112 @@ export default function FiscalProcessingPage() {
             }
             setLote(loteData);
 
-            // Fetch validated appointments (Paginated)
-            let allAgendamentos: any[] = [];
-            let from = 0;
-            const step = 1000;
-            let hasMore = true;
+            // 2. Fetch Raw Agendamentos (to get Lojas involved)
+            const { data: agendamentos, error: agErr } = await supabase
+                .from("agendamentos_brutos")
+                .select("loja_id, cnpj_loja, valor_iwof, status_validacao, clientes(razao_social, nome_fantasia, nome_conta_azul, cnpj, ciclos_faturamento(nome))")
+                .eq("lote_id", loteId)
+                .eq("status_validacao", "VALIDADO");
 
-            while (hasMore) {
-                const { data: chunk, error } = await supabase
-                    .from("agendamentos_brutos")
-                    .select("loja_id, valor_iwof, clientes(*)")
-                    .eq("lote_id", loteId)
-                    .eq("status_validacao", "VALIDADO")
-                    .range(from, from + step - 1);
+            if (agErr) throw agErr;
 
-                if (error) {
-                    console.error("Erro ao buscar agendamentos:", error);
-                    break;
-                }
+            // Fetch missing/rejected records that couldn't be correctly billed for NFE export
+            const { data: missingRecords, error: missingErr } = await supabase
+                .from("agendamentos_brutos")
+                .select("loja_id, status_validacao, cnpj_loja, clientes(razao_social, cnpj, endereco_rua, endereco_bairro, endereco_cidade, endereco_uf, endereco_cep)")
+                .eq("lote_id", loteId);
 
-                if (chunk && chunk.length > 0) {
-                    allAgendamentos = [...allAgendamentos, ...chunk];
-                    from += step;
-                } else {
-                    hasMore = false;
-                }
+            if (!missingErr && missingRecords) {
+                const missingMap = new Map<string, { loja_id: string; razao_social: string; cnpj: string; motivo: string }>();
 
-                if (chunk && chunk.length < step) {
-                    hasMore = false;
-                }
+                missingRecords.forEach(rec => {
+                    const client = rec.clientes as any;
+                    const cnpj = client?.cnpj || rec.cnpj_loja || "Desconhecido";
+                    const razao = client?.razao_social || "Empresa Desconhecida";
+
+                    if (!client) {
+                        missingMap.set(cnpj, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: "Cliente não cadastrado no sistema" });
+                        return;
+                    }
+
+                    if (rec.status_validacao !== "VALIDADO") {
+                        missingMap.set(cnpj, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: `Status do agendamento: ${rec.status_validacao}` });
+                        return;
+                    }
+
+                    // Verifica se faltam dados fiscais cruciais para a Conta Azul (Endereço completo)
+                    const faltaEndereco = !client.endereco_rua || !client.endereco_bairro || !client.endereco_cidade || !client.endereco_uf || !client.endereco_cep;
+                    if (faltaEndereco) {
+                        missingMap.set(cnpj, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: "Dados de endereço incompletos (Rua, Bairro, Cidade, UF ou CEP)" });
+                        return;
+                    }
+                });
+
+                setRejeitados(Array.from(missingMap.values()));
             }
 
-            const agendamentos = allAgendamentos;
+            // 3. Get unique store IDs involved
+            const storeIds = Array.from(new Set((agendamentos || []).map(a => a.loja_id)));
 
-            // Fetch adjustments ALREADY applied to this batch (marked in previous step)
+            // 4. Fetch Pending Adjustments for these stores
             const { data: ajustes, error: ajErr } = await supabase
                 .from("ajustes_faturamento")
                 .select("*")
-                .eq("lote_aplicado_id", loteId);
+                .in("cliente_id", storeIds)
+                .eq("status_aplicacao", false);
 
             if (ajErr) throw ajErr;
 
+            // 5. Group and Consolidate strictly by spreadsheet CNPJ (or fallback to lojaId)
             const consolidatedMap = new Map<string, LojaConsolidada>();
 
-            agendamentos.forEach(a => {
+            (agendamentos || []).forEach(a => {
                 const client = a.clientes as any;
-                if (!consolidatedMap.has(a.loja_id)) {
-                    consolidatedMap.set(a.loja_id, {
-                        id: a.loja_id,
-                        razao_social: client.razao_social,
-                        nome_fantasia: client.nome_fantasia,
-                        cnpj: client.cnpj,
+                const uniqueKey = a.cnpj_loja || a.loja_id;
+
+                if (!consolidatedMap.has(uniqueKey)) {
+                    consolidatedMap.set(uniqueKey, {
+                        id: uniqueKey, // use the unique key so they stay distinct
+                        razao_social: client?.razao_social || "S/N",
+                        nome_fantasia: client?.nome_fantasia || null,
+                        nome_conta_azul: client?.nome_conta_azul || null,
+                        cnpj: a.cnpj_loja || client?.cnpj || "00000000000000",
                         valorBruto: 0,
                         acrescimos: 0,
                         descontos: 0,
-                        ajustesDetalhes: []
-                    });
+                        ajustesDetalhes: [],
+                        active: true,
+                        ciclo: client?.ciclos_faturamento?.nome || "-",
+                        // Add real loja_id for adjustment matching
+                        loja_id_real: a.loja_id
+                    } as LojaConsolidada & { loja_id_real: string });
                 }
-                const store = consolidatedMap.get(a.loja_id)!;
-                store.valorBruto += Number(a.valor_iwof);
+                const store = consolidatedMap.get(uniqueKey)!;
+                store.valorBruto += Number(a.valor_iwof) || 0;
             });
 
-            ajustes.forEach(aj => {
-                const store = consolidatedMap.get(aj.cliente_id);
-                if (store) {
-                    if (aj.tipo === "ACRESCIMO") store.acrescimos += Number(aj.valor);
-                    if (aj.tipo === "DESCONTO") store.descontos += Number(aj.valor);
+            (ajustes || []).forEach(aj => {
+                // Find all stores in our map that belong to this cliente_id
+                const matchingStores = Array.from(consolidatedMap.values()).filter(st => {
+                    return (st as any).loja_id_real === aj.cliente_id;
+                });
+
+                if (matchingStores.length > 0) {
+                    const store = matchingStores[0]; // Apply to the first one only, to avoid cloning the monetary value
+                    if (aj.tipo === "ACRESCIMO") store.acrescimos += Number(aj.valor) || 0;
+                    if (aj.tipo === "DESCONTO") store.descontos += Number(aj.valor) || 0;
                     store.ajustesDetalhes.push({
                         id: aj.id,
                         tipo: aj.tipo,
-                        valor: aj.valor,
-                        motivo: aj.motivo
+                        valor: Number(aj.valor) || 0,
+                        motivo: aj.motivo,
+                        cliente_id: aj.cliente_id
                     });
                 }
             });
 
-            setLojas(Array.from(consolidatedMap.values()));
+            const finalLojas = Array.from(consolidatedMap.values());
+            setLojas(finalLojas);
 
         } catch (err) {
             console.error("Error fetching data:", err);
@@ -319,24 +494,22 @@ export default function FiscalProcessingPage() {
     // Computed Filtered Data
     const filteredConciliacao = useMemo(() => {
         return conciliacao.filter(item => {
-            const matchesLoja = (item.loja.nome_fantasia || item.loja.razao_social || "").toLowerCase().includes(filters.loja.toLowerCase()) ||
+            const matchesLoja =
+                (item.loja.nome_conta_azul || "").toLowerCase().includes(filters.loja.toLowerCase()) ||
+                (item.loja.nome_fantasia || "").toLowerCase().includes(filters.loja.toLowerCase()) ||
+                (item.loja.razao_social || "").toLowerCase().includes(filters.loja.toLowerCase()) ||
                 item.loja.cnpj.includes(filters.loja.replace(/\D/g, ""));
 
             const matchesStatus = filters.status === "TODOS" || item.status === filters.status;
 
             const matchesNota = (item.xml?.numeroNF || "-").toLowerCase().includes(filters.nota.toLowerCase());
 
-            const matchesCalculoBase = filters.calculoBase === "" ||
-                fmtCurrency((item.loja.valorBruto + item.loja.acrescimos) - item.loja.descontos).includes(filters.calculoBase);
+            const calcBaseReal = (item.loja.valorBruto + item.loja.acrescimos) - item.loja.descontos;
 
-            const matchesIrrf = filters.irrf === "" ||
-                fmtCurrency(item.irrfCalculado).includes(filters.irrf);
-
-            const matchesNcFinal = filters.ncFinal === "" ||
-                fmtCurrency(item.ncFinal).includes(filters.ncFinal);
-
-            const matchesBoletoFinal = filters.boletoFinal === "" ||
-                fmtCurrency(item.boletoFinal).includes(filters.boletoFinal);
+            const matchesCalculoBase = checkMonetaryFilter(filters.calculoBase, calcBaseReal);
+            const matchesIrrf = checkMonetaryFilter(filters.irrf, item.irrfCalculado);
+            const matchesNcFinal = checkMonetaryFilter(filters.ncFinal, item.ncFinal);
+            const matchesBoletoFinal = checkMonetaryFilter(filters.boletoFinal, item.boletoFinal);
 
             return matchesLoja && matchesStatus && matchesNota && matchesCalculoBase && matchesIrrf && matchesNcFinal && matchesBoletoFinal;
         });
@@ -425,6 +598,30 @@ export default function FiscalProcessingPage() {
         window.open(url, "_blank");
     };
 
+    const handleExportarRejeitados = async () => {
+        if (rejeitados.length === 0) {
+            alert("Não há lojas de fora deste fechamento.");
+            return;
+        }
+
+        try {
+            const xlsx = await import("xlsx");
+            const dadosRejeitados = rejeitados.map(r => ({
+                "CNPJ": r.cnpj,
+                "Razão Social": r.razao_social,
+                "Motivo da Omissão": r.motivo
+            }));
+
+            const workbook = xlsx.utils.book_new();
+            const worksheet = xlsx.utils.json_to_sheet(dadosRejeitados);
+            xlsx.utils.book_append_sheet(workbook, worksheet, "Lojas Ausentes");
+            xlsx.writeFile(workbook, `lojas_ausentes_lote_${loteId.substring(0, 8)}.xlsx`);
+        } catch (error) {
+            console.error("Erro ao exportar rejeitados:", error);
+            alert("Erro ao gerar planilha de lojas ausentes.");
+        }
+    };
+
     if (loading) {
         return (
             <div className="min-h-screen bg-[var(--bg-main)] flex items-center justify-center">
@@ -511,6 +708,108 @@ export default function FiscalProcessingPage() {
                             </div>
                         </div>
 
+                        {/* VALIDATION SUMMARY (Collapsible) */}
+                        <div className="mt-8 bg-[#18181b] rounded-3xl border border-[var(--border)] overflow-hidden shadow-xl">
+                            <div
+                                onClick={() => setIsSummaryExpanded(!isSummaryExpanded)}
+                                className="flex items-center justify-between p-6 cursor-pointer hover:bg-white/[0.02] transition-colors"
+                            >
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-500">
+                                        <Filter size={24} />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-white font-bold text-lg">Resumo de Validação do Lote</h4>
+                                        <div className="flex gap-4 mt-1 text-sm">
+                                            <span className="text-emerald-500 font-medium">{lojas.length} Lojas Validadas</span>
+                                            <span className="text-red-400 font-medium">{rejeitados.length} Pendências / Omissões</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="text-[var(--fg-dim)]">
+                                    {isSummaryExpanded ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
+                                </div>
+                            </div>
+
+                            {isSummaryExpanded && (
+                                <div className="border-t border-[var(--border)] p-6 animate-in slide-in-from-top-4 fade-in duration-300">
+                                    <div className="flex gap-2 mb-6 border-b border-[var(--border)] pb-4">
+                                        <button
+                                            onClick={() => setSummaryFilter("VALIDADAS")}
+                                            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${summaryFilter === "VALIDADAS" ? "bg-emerald-500/20 text-emerald-500 border border-emerald-500/50" : "bg-transparent text-[var(--fg-dim)] hover:bg-white/5"}`}
+                                        >
+                                            Validadas ({lojas.length})
+                                        </button>
+                                        <button
+                                            onClick={() => setSummaryFilter("PENDENTES")}
+                                            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${summaryFilter === "PENDENTES" ? "bg-red-500/20 text-red-500 border border-red-500/50" : "bg-transparent text-[var(--fg-dim)] hover:bg-white/5"}`}
+                                        >
+                                            Pendentes ({rejeitados.length})
+                                        </button>
+                                    </div>
+
+                                    <div className="max-h-96 overflow-y-auto custom-scrollbar pr-2">
+                                        {summaryFilter === "VALIDADAS" ? (
+                                            <table className="w-full text-left border-collapse">
+                                                <thead>
+                                                    <tr className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest border-b border-[var(--border)]">
+                                                        <th className="pb-3 text-emerald-500 font-black">Cliente / Conta Azul</th>
+                                                        <th className="pb-3 text-emerald-500 font-black">CNPJ</th>
+                                                        <th className="pb-3 text-right text-emerald-500 font-black">Valor Base</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {lojas.map(l => (
+                                                        <tr key={l.id} className="border-b border-[var(--border)]/50 last:border-0 hover:bg-white/[0.02]">
+                                                            <td className="py-3 text-sm text-white font-medium">{l.nome_conta_azul || l.nome_fantasia || l.razao_social}</td>
+                                                            <td className="py-3 text-xs font-mono text-[var(--fg-dim)]">{l.cnpj}</td>
+                                                            <td className="py-3 text-sm text-right font-bold text-[var(--primary)]">{fmtCurrency(l.valorBruto + l.acrescimos - l.descontos)}</td>
+                                                        </tr>
+                                                    ))}
+                                                    {lojas.length === 0 && (
+                                                        <tr><td colSpan={3} className="py-8 text-center text-[var(--fg-dim)]">Nenhuma loja validada.</td></tr>
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        ) : (
+                                            <table className="w-full text-left border-collapse">
+                                                <thead>
+                                                    <tr className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest border-b border-[var(--border)]">
+                                                        <th className="pb-3 text-red-500 font-black">Razão Social</th>
+                                                        <th className="pb-3 text-red-500 font-black">CNPJ</th>
+                                                        <th className="pb-3 text-red-500 font-black">Motivo da Exclusão</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {rejeitados.map((r, i) => (
+                                                        <tr key={i} className="border-b border-[var(--border)]/50 last:border-0 hover:bg-red-500/5">
+                                                            <td className="py-3 text-sm text-white font-medium">{r.razao_social}</td>
+                                                            <td className="py-3 text-xs font-mono text-[var(--fg-dim)]">{r.cnpj}</td>
+                                                            <td className="py-3 text-xs font-semibold text-red-400">{r.motivo}</td>
+                                                        </tr>
+                                                    ))}
+                                                    {rejeitados.length === 0 && (
+                                                        <tr><td colSpan={3} className="py-8 text-center text-[var(--fg-dim)]">Nenhuma loja pendente.</td></tr>
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        )}
+                                    </div>
+
+                                    {summaryFilter === "PENDENTES" && rejeitados.length > 0 && (
+                                        <div className="mt-4 pt-4 border-t border-[var(--border)] flex justify-end">
+                                            <button
+                                                onClick={handleExportarRejeitados}
+                                                className="btn btn-sm btn-outline border-red-900/50 text-red-400 hover:bg-red-900/40 hover:text-white flex items-center gap-2"
+                                            >
+                                                <FileSearch size={14} /> Exportar Pendentes (.xlsx)
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
                         {processingZIP && (
                             <div className="mt-8 flex flex-col items-center gap-4">
                                 <div className="w-full h-1 bg-[var(--border)] rounded-full overflow-hidden">
@@ -563,10 +862,11 @@ export default function FiscalProcessingPage() {
                                                         value={filters.status}
                                                         onChange={e => setFilters({ ...filters, status: e.target.value as any })}
                                                         className="bg-[var(--bg-main)] border border-[var(--border)] rounded-lg px-2 py-1 text-[10px] font-medium text-white outline-none focus:border-[var(--primary)]/50 transition-all cursor-pointer"
+                                                        style={{ colorScheme: "dark" }}
                                                     >
-                                                        <option value="TODOS">TODOS</option>
-                                                        <option value="MATCH">XML OK</option>
-                                                        <option value="MISSING">XML AUSENTE</option>
+                                                        <option value="TODOS" className="bg-[#18181b] text-white">TODOS</option>
+                                                        <option value="MATCH" className="bg-[#18181b] text-white">XML OK</option>
+                                                        <option value="MISSING" className="bg-[#18181b] text-white">XML AUSENTE</option>
                                                     </select>
                                                 </div>
                                             </th>
@@ -585,48 +885,40 @@ export default function FiscalProcessingPage() {
                                             <th className="p-4 text-right">
                                                 <div className="flex flex-col gap-2 items-end">
                                                     Cálculo Base
-                                                    <input
-                                                        type="text"
+                                                    <MonetaryFilterDropdown
                                                         placeholder="Valor..."
                                                         value={filters.calculoBase}
-                                                        onChange={e => setFilters({ ...filters, calculoBase: e.target.value })}
-                                                        className="w-20 bg-[var(--bg-main)] border border-[var(--border)] rounded-lg px-2 py-1 text-[10px] font-medium text-white outline-none focus:border-[var(--primary)]/50 transition-all text-right"
+                                                        onChange={val => setFilters({ ...filters, calculoBase: val })}
                                                     />
                                                 </div>
                                             </th>
                                             <th className="p-4 text-right text-amber-500">
                                                 <div className="flex flex-col gap-2 items-end">
                                                     IRRF (XML)
-                                                    <input
-                                                        type="text"
+                                                    <MonetaryFilterDropdown
                                                         placeholder="IR..."
                                                         value={filters.irrf}
-                                                        onChange={e => setFilters({ ...filters, irrf: e.target.value })}
-                                                        className="w-20 bg-[var(--bg-main)] border border-[var(--border)] rounded-lg px-2 py-1 text-[10px] font-medium text-white outline-none focus:border-[var(--primary)]/50 transition-all text-right"
+                                                        onChange={val => setFilters({ ...filters, irrf: val })}
                                                     />
                                                 </div>
                                             </th>
                                             <th className="p-4 text-right text-[var(--primary)]">
                                                 <div className="flex flex-col gap-2 items-end">
                                                     NC Final
-                                                    <input
-                                                        type="text"
+                                                    <MonetaryFilterDropdown
                                                         placeholder="NC..."
                                                         value={filters.ncFinal}
-                                                        onChange={e => setFilters({ ...filters, ncFinal: e.target.value })}
-                                                        className="w-20 bg-[var(--bg-main)] border border-[var(--border)] rounded-lg px-2 py-1 text-[10px] font-medium text-white outline-none focus:border-[var(--primary)]/50 transition-all text-right"
+                                                        onChange={val => setFilters({ ...filters, ncFinal: val })}
                                                     />
                                                 </div>
                                             </th>
                                             <th className="p-4 text-right text-white">
                                                 <div className="flex flex-col gap-2 items-end">
                                                     Boleto Final
-                                                    <input
-                                                        type="text"
+                                                    <MonetaryFilterDropdown
                                                         placeholder="Boleto..."
                                                         value={filters.boletoFinal}
-                                                        onChange={e => setFilters({ ...filters, boletoFinal: e.target.value })}
-                                                        className="w-20 bg-[var(--bg-main)] border border-[var(--border)] rounded-lg px-2 py-1 text-[10px] font-medium text-white outline-none focus:border-[var(--primary)]/50 transition-all text-right"
+                                                        onChange={val => setFilters({ ...filters, boletoFinal: val })}
                                                     />
                                                 </div>
                                             </th>
@@ -646,7 +938,9 @@ export default function FiscalProcessingPage() {
                                                     <tr key={item.loja.id} className="border-b border-[var(--border)]/50 hover:bg-white/[0.02] transition-colors">
                                                         <td className="p-4">
                                                             <div className="flex flex-col">
-                                                                <span className="text-white font-bold text-sm">{item.loja.nome_fantasia || item.loja.razao_social}</span>
+                                                                <span className="text-white font-bold text-sm" title={item.loja.razao_social}>
+                                                                    {item.loja.nome_conta_azul || item.loja.nome_fantasia || item.loja.razao_social}
+                                                                </span>
                                                                 <span className="text-[10px] text-[var(--fg-dim)] font-mono">{item.loja.cnpj}</span>
                                                             </div>
                                                         </td>
@@ -686,7 +980,7 @@ export default function FiscalProcessingPage() {
                         </div>
 
                         {conciliacao.some(i => i.status === "MISSING") && (
-                            <div className="bg-amber-950/20 border border-amber-900/30 p-4 rounded-2xl flex gap-3 text-amber-500 text-sm">
+                            <div className="bg-amber-950/20 border border-amber-900/30 p-4 rounded-2xl flex gap-3 text-amber-500 text-sm mt-4">
                                 <AlertTriangle className="shrink-0" size={18} />
                                 <p>Atenção: Algumas lojas não tiveram o XML correspondente no ZIP. O IRRF será considerado zero para estas lojas.</p>
                             </div>
