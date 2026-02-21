@@ -43,6 +43,7 @@ interface AjusteItem {
     tipo: "ACRESCIMO" | "DESCONTO" | "IRRF";
     valor: number;
     motivo: string;
+    cliente_id?: string;
 }
 
 interface LojaConsolidada {
