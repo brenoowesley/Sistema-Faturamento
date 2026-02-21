@@ -337,7 +337,7 @@ export default function FiscalProcessingPage() {
 
             (agendamentos || []).forEach(a => {
                 const client = a.clientes as any;
-                const uniqueKey = a.cnpj_loja || a.loja_id;
+                const uniqueKey = a.loja_id;
 
                 if (!consolidatedMap.has(uniqueKey)) {
                     consolidatedMap.set(uniqueKey, {
@@ -345,7 +345,7 @@ export default function FiscalProcessingPage() {
                         razao_social: client?.razao_social || "S/N",
                         nome_fantasia: client?.nome_fantasia || null,
                         nome_conta_azul: client?.nome_conta_azul || null,
-                        cnpj: a.cnpj_loja || client?.cnpj || "00000000000000",
+                        cnpj: client?.cnpj || a.cnpj_loja || "00000000000000",
                         valorBruto: 0,
                         acrescimos: 0,
                         descontos: 0,

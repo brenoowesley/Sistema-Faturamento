@@ -417,8 +417,8 @@ export default function NovoFaturamento() {
                 const motivoCancelamento = colMotivo ? String(row[colMotivo] ?? "").trim() : "";
                 const responsavelCancelamento = colRespCanc ? String(row[colRespCanc] ?? "").trim() : "";
 
-                if (!loja && !refAgendamento) {
-                    console.warn("Row skipped: no loja and no refAgendamento", row);
+                if (!loja) {
+                    console.warn("Row skipped: no loja column found", row);
                     continue;
                 }
 
@@ -618,7 +618,6 @@ export default function NovoFaturamento() {
                     if (!naoCadastrados.has(key)) {
                         naoCadastrados.set(key, {
                             loja: a.loja,
-                            cnpj: a.refAgendamento,
                             suggestions: a.suggestedClients
                         });
                     }
@@ -935,7 +934,7 @@ export default function NovoFaturamento() {
                     lote_id: lote.id,
                     nome_profissional: a.nome || "N/A",
                     loja_id: a.clienteId!,
-                    cnpj_loja: a.refAgendamento || null,
+                    cnpj_loja: a.cnpj || null,
                     data_inicio: a.inicio?.toISOString() ?? periodoInicio,
                     data_fim: a.termino?.toISOString() ?? periodoFim,
                     valor_iwof: Number(parseFloat(String(a.manualValue ?? a.suggestedValorIwof ?? a.valorIwof)).toFixed(2)),
