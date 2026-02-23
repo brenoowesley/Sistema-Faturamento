@@ -139,7 +139,14 @@ export async function GET(req: NextRequest) {
         if (!simulationUsed) {
             const finalAgrupado = new Map<string, any>();
             records.forEach(rec => {
-                const targetId = rec.clientes?.loja_mae_id || rec.cliente_id;
+                // Modificação CRÍTICA para a NFE.io: As Lojas (Mesmo filiais Leta com loja_mae_id)
+                // DEVERIAM ser exportadas independentemente de terem matriz ou não se o valor é independente?
+                // O cliente diz "Garanta que cada CNPJ único gera a sua própria linha".
+                // Então devemos agrupar por CNPJ e não por Loja Mãe para efeitos Fiscais.
+
+                const recCnpj = rec.clientes?.cnpj;
+                const targetId = recCnpj || rec.cliente_id; // Agrupa por CNPJ ao invés de Mãe ID
+
                 if (!finalAgrupado.has(targetId)) {
                     finalAgrupado.set(targetId, { ...rec });
                 } else {

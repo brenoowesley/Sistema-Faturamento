@@ -102,17 +102,7 @@ body {
   margin-bottom: 24px;
 }
 
-/* Força ícones de calendário (Chrome/Safari) a ficarem claros */
-input[type="date"]::-webkit-calendar-picker-indicator {
-  filter: invert(1);
-  opacity: 0.6;
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
 
-input[type="date"]::-webkit-calendar-picker-indicator:hover {
-  opacity: 1;
-}
 
 .sidebar-logo {
   width: 44px;
@@ -314,6 +304,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
   font-size: 14px;
   transition: all 0.2s ease;
   outline: none;
+  color-scheme: dark;
+  /* Força que as setas, o calendário e select defaults fiquem visíveis no fundo escuro */
 }
 
 .input:focus {

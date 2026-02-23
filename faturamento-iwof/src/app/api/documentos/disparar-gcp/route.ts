@@ -286,8 +286,8 @@ export async function POST(req: NextRequest) {
                 } else {
                     // TODAS AS OUTRAS LOJAS E NORDESTÃO (Não-LETA)
                     const brutoNormal = agsDaLoja.reduce((acc, curr) => acc + curr.valor, 0);
-                    // O valorIRRF é declarado na linha 129
-                    const valorIrRegra = isNordestao ? Number(valorIRRF || 0) : 0;
+                    // O valorIRRF é declarado na linha 129. Sempre aplica pra todos os padroes
+                    const valorIrRegra = Number(valorIRRF || 0);
                     const baseNormalVirtual = brutoNormal + totalAcrescimo - totalDesconto - valorIrRegra;
 
                     payloadHC.push({
@@ -327,47 +327,36 @@ export async function POST(req: NextRequest) {
         const dInicio = formatDataSegura(lote.data_inicio_ciclo);
         const dFim = formatDataSegura(lote.data_fim_ciclo);
 
-        const finalNCPayload = {
-            nome_pasta_ciclo: lote.nome_pasta ? lote.nome_pasta : (cicloLote?.nome || `Lote_${lote.id.substring(0, 8)}`),
-            lojas: payloadNC
-        };
+        const cycleNameStr = lote.nome_pasta ? lote.nome_pasta : (cicloLote?.nome || `Lote_${lote.id.substring(0, 8)}`);
+        const cyclePeriodStr = `${dInicio} à ${dFim}`;
 
-        const finalHCPayload = {
-            nome_pasta_ciclo: lote.nome_pasta ? lote.nome_pasta : (cicloLote?.nome || `Lote_${lote.id.substring(0, 8)}`),
-            ciclo_mensal: `${dInicio} à ${dFim}`,
-            lojas: payloadHC
-        };
+        const gcpRequests: Promise<Response>[] = [];
 
-        const pubNCUrl = process.env.GCP_PUB_NC_URL;
-        const pubHCUrl = process.env.GCP_PUB_HC_URL;
-        const gcpToken = process.env.GCP_AUTH_TOKEN;
-
-        if (!pubNCUrl || !pubHCUrl) {
-            console.warn("URLs do Pub/Sub faltantes. Simulando sucesso para UI.");
-            return NextResponse.json({
-                success: true,
-                message: "Ambiente local: Disparos seriam enviados para o Pub/Sub do GCP.",
-                payloads: { NC: finalNCPayload, HC: finalHCPayload }
-            });
+        // LOOP HC: Disparar MENSAGEM INDIVIDUAL p/ CADA LOJA
+        for (const lojaHC of payloadHC) {
+            const envioHCLoja = {
+                nome_pasta_ciclo: cycleNameStr,
+                ciclo_mensal: cyclePeriodStr,
+                ...lojaHC // info_loja, lista_acrescimos, itens_faturados_rows... at raiz
+            };
+            gcpRequests.push(fetch(pubHCUrl, { method: "POST", headers, body: JSON.stringify(envioHCLoja) }));
         }
 
-        const headers: HeadersInit = { "Content-Type": "application/json" };
-        if (gcpToken) {
-            headers["Authorization"] = `Bearer ${gcpToken}`;
+        // LOOP NC: Disparar MENSAGEM INDIVIDUAL p/ CADA LOJA
+        for (const lojaNC of payloadNC) {
+            const envioNCLoja = {
+                nome_pasta_ciclo: cycleNameStr,
+                ...lojaNC // 'LOJA', 'CNPJ', 'NC'... at raiz
+            };
+            gcpRequests.push(fetch(pubNCUrl, { method: "POST", headers, body: JSON.stringify(envioNCLoja) }));
         }
 
-        // Debug Payload Estrito p/ Validação
-        console.log("RAIO-X DO PAYLOAD HC ENVIADO AO GCP:", JSON.stringify(finalHCPayload, null, 2));
-        console.log("RAIO-X DO PAYLOAD NC ENVIADO AO GCP:", JSON.stringify(finalNCPayload, null, 2));
+        // Debug Payload p/ loggar a quantidade de disparos individuais (Apenas Exemplo Length)
+        console.log(`RAIO-X: Disparando ${payloadHC.length} payloads HC e ${payloadNC.length} payloads NC individualmente.`);
 
-        // 5. Fire parallel POSTs to GCP Pub/Sub triggers
+        // 5. Fire parallel POSTs to GCP Pub/Sub triggers per Store Object
         try {
-            const requests = [
-                fetch(pubNCUrl, { method: "POST", headers, body: JSON.stringify(finalNCPayload) }),
-                fetch(pubHCUrl, { method: "POST", headers, body: JSON.stringify(finalHCPayload) })
-            ];
-
-            await Promise.all(requests);
+            await Promise.all(gcpRequests);
         } catch (fetchErr: any) {
             console.error("ERRO FATAL NO DISPARO FETCH (PUB/SUB):", fetchErr);
             throw new Error(`Falha no disparo ao GCP: ${fetchErr.message}`);
