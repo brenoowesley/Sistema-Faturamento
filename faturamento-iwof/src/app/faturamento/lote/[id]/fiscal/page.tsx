@@ -1111,21 +1111,31 @@ export default function FiscalProcessingPage() {
                                     <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-12"></div>
                                 </button>
                             ) : lote?.status === "CONSOLIDADO" ? (
-                                <button
-                                    onClick={handleDispararGCP}
-                                    disabled={isConsolidating || isDispatching}
-                                    className="group relative overflow-hidden bg-[#3b82f6] text-white px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center justify-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 shadow-[0_4px_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_30px_rgba(59,130,246,0.5)]"
-                                >
-                                    {isDispatching ? (
-                                        <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                                    ) : (
-                                        <>
-                                            Disparar Geração de PDFs (Drive)
-                                            <Upload className="transition-transform group-hover:-translate-y-1" size={18} />
-                                        </>
-                                    )}
-                                    <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-12"></div>
-                                </button>
+                                <>
+                                    <button
+                                        onClick={() => router.push(`/faturamento/lote/${loteId}/conta-azul`)}
+                                        className="group relative overflow-hidden bg-transparent border border-[#3b82f6] text-[#3b82f6] px-8 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center justify-center gap-3 transition-all hover:bg-[#3b82f6]/5 hover:scale-105 active:scale-95 shadow-lg shadow-[#3b82f6]/5"
+                                    >
+                                        Seguir para emissão de boletos
+                                        <ArrowRight className="transition-transform group-hover:translate-x-1" size={18} />
+                                    </button>
+
+                                    <button
+                                        onClick={handleDispararGCP}
+                                        disabled={isConsolidating || isDispatching}
+                                        className="group relative overflow-hidden bg-[#3b82f6] text-white px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center justify-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 shadow-[0_4px_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_30px_rgba(59,130,246,0.5)]"
+                                    >
+                                        {isDispatching ? (
+                                            <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                                        ) : (
+                                            <>
+                                                Disparar Geração de PDFs (Drive)
+                                                <Upload className="transition-transform group-hover:-translate-y-1" size={18} />
+                                            </>
+                                        )}
+                                        <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-12"></div>
+                                    </button>
+                                </>
                             ) : (
                                 <div className="flex items-center gap-2 text-emerald-500 font-black uppercase tracking-widest text-sm">
                                     <CheckCircle2 size={24} /> Lote Finalizado
