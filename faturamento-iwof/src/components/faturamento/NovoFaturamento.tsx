@@ -972,6 +972,29 @@ export default function NovoFaturamento() {
                 };
             });
 
+        // --- INÍCIO BLOCO DE AUDITORIA FISCAL (CONSOLE.LOG) ---
+        // Extrai as lojas únicas do array original (`agendamentos`) usando clienteId ou nome
+        const todasAsLojas = Array.from(new Map(agendamentos.map(a => [a.clienteId || a.loja, a])).values());
+
+        // Extrai as lojas únicas do array final que vai pro banco (`rows`)
+        const lojasValidadas = Array.from(new Map(rows.map(r => [r.loja_id, r])).values());
+
+        const lojasBarradas = todasAsLojas.filter(original =>
+            !lojasValidadas.some(validada =>
+                (original.clienteId && validada.loja_id === original.clienteId) ||
+                (original.cnpj && validada.cnpj_loja === original.cnpj)
+            )
+        );
+
+        console.log(`🚨 [RADAR FISCAL] Lojas Originais (Únicas): ${todasAsLojas.length} | Validadas (Únicas): ${lojasValidadas.length}`);
+        console.log("🕵️ Lojas que ficaram de fora:", lojasBarradas.map(loja => ({
+            nome: loja.razaoSocial || loja.loja,
+            cnpj: loja.cnpj || "SEM CNPJ",
+            motivoProvavel: !loja.clienteId ? "Falta Vínculo (Divergente)" : (loja.isRemoved ? "Removida manualmente (ou Duplicata)" : (loja.status === "CICLO_INCORRETO" ? "Ciclo Incorreto" : (loja.status === "FORA_PERIODO" ? "Fora do Período" : "Outro motivo (ex: Valor Zerado)"))),
+            statusOriginal: loja.status
+        })));
+        // --- FIM BLOCO DE AUDITORIA FISCAL ---
+
         let ok = 0;
         let err = 0;
 
