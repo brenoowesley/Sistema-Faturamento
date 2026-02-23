@@ -619,6 +619,7 @@ export default function NovoFaturamento() {
                     if (!naoCadastrados.has(key)) {
                         naoCadastrados.set(key, {
                             loja: a.loja,
+                            cnpj: a.cnpj || "",
                             suggestions: a.suggestedClients
                         });
                     }

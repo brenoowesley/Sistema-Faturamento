@@ -374,7 +374,15 @@ export async function POST(req: NextRequest) {
 
         // 5. Fire parallel POSTs to GCP Pub/Sub triggers per Store Object
         try {
-            await Promise.all(gcpRequests);
+            const responses = await Promise.all(gcpRequests);
+            for (let i = 0; i < responses.length; i++) {
+                const res = responses[i];
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    console.error(`[ERRO GCP (Requisição ${i + 1})]: Status ${res.status} ->`, errorText);
+                    throw new Error(`Falha no Google Cloud (Status ${res.status}). Verifique o terminal para detalhes.`);
+                }
+            }
         } catch (fetchErr: any) {
             console.error("ERRO FATAL NO DISPARO FETCH (PUB/SUB):", fetchErr);
             throw new Error(`Falha no disparo ao GCP: ${fetchErr.message}`);
