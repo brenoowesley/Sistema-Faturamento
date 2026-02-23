@@ -191,6 +191,7 @@ export default function NovoFaturamento() {
     const [selectedCicloIds, setSelectedCicloIds] = useState<string[]>([]);
     const [periodoInicio, setPeriodoInicio] = useState("");
     const [periodoFim, setPeriodoFim] = useState("");
+    const [nomePasta, setNomePasta] = useState("");
     const [fileName, setFileName] = useState("");
     const [newCicloName, setNewCicloName] = useState("");
     const [addingCiclo, setAddingCiclo] = useState(false);
@@ -882,6 +883,7 @@ export default function NovoFaturamento() {
                 data_inicio_ciclo: periodoInicio,
                 data_fim_ciclo: periodoFim,
                 ciclo_faturamento_id: selectedCicloIds[0] || null,
+                nome_pasta: nomePasta.trim() || null,
                 status: "PENDENTE",
                 // Queiroz Rule Split
                 queiroz_split_date: queirozConfig?.splitDate || null,
@@ -1035,7 +1037,7 @@ export default function NovoFaturamento() {
                                 <input
                                     type="date"
                                     className="input"
-                                    style={{ paddingLeft: 14 }}
+                                    style={{ paddingLeft: 14, colorScheme: "dark" }}
                                     value={periodoInicio}
                                     onChange={(e) => setPeriodoInicio(e.target.value)}
                                 />
@@ -1045,7 +1047,7 @@ export default function NovoFaturamento() {
                                 <input
                                     type="date"
                                     className="input"
-                                    style={{ paddingLeft: 14 }}
+                                    style={{ paddingLeft: 14, colorScheme: "dark" }}
                                     value={periodoFim}
                                     onChange={(e) => setPeriodoFim(e.target.value)}
                                 />
@@ -1113,6 +1115,21 @@ export default function NovoFaturamento() {
                             }
                             return null;
                         })()}
+
+                        {/* Nome da Pasta Drive */}
+                        <div className="mb-6">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--fg-dim)] mb-2">
+                                Nome da Pasta no Google Drive
+                            </p>
+                            <input
+                                type="text"
+                                className="input"
+                                style={{ paddingLeft: 14 }}
+                                placeholder="Ex: Ciclo 01, Fev_Mensal, etc."
+                                value={nomePasta}
+                                onChange={(e) => setNomePasta(e.target.value)}
+                            />
+                        </div>
 
                         {/* Ciclo multi-select */}
                         <p className="text-xs font-semibold uppercase tracking-wider text-[var(--fg-dim)] mb-2">

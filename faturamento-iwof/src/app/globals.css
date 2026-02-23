@@ -102,6 +102,18 @@ body {
   margin-bottom: 24px;
 }
 
+/* Força ícones de calendário (Chrome/Safari) a ficarem claros */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 0.6;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
 .sidebar-logo {
   width: 44px;
   height: 44px;

@@ -146,7 +146,7 @@ export default function LoteFechamentoPage() {
             // 2.5 Fetch missing/rejected records that couldn't be correctly billed
             const { data: missingRecords, error: missingErr } = await supabase
                 .from("agendamentos_brutos")
-                .select("loja_id, status_validacao, cnpj_loja, clientes(razao_social, cnpj, endereco_rua, endereco_bairro, endereco_cidade, endereco_uf, endereco_cep)")
+                .select("loja_id, status_validacao, cnpj_loja, clientes(razao_social, cnpj, endereco, bairro, cidade, estado, cep)")
                 .eq("lote_id", loteId);
 
             if (!missingErr && missingRecords) {
@@ -168,7 +168,7 @@ export default function LoteFechamentoPage() {
                     }
 
                     // Verifica se faltam dados fiscais cruciais (Endereço completo)
-                    const faltaEndereco = !client.endereco_rua || !client.endereco_bairro || !client.endereco_cidade || !client.endereco_uf || !client.endereco_cep;
+                    const faltaEndereco = !client.endereco || !client.bairro || !client.cidade || !client.estado || !client.cep;
                     if (faltaEndereco) {
                         missingMap.set(cnpj, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: "Dados de endereço incompletos (Rua, Bairro, Cidade, UF ou CEP)" });
                         return;
@@ -569,17 +569,19 @@ export default function LoteFechamentoPage() {
                             </tbody>
                         </table>
                     </div>
-                    {filteredLojas.length === 0 && (
-                        <div className="flex flex-col items-center justify-center py-20 bg-white/5">
-                            <AlertCircle size={48} className="text-[var(--fg-dim)] opacity-20 mb-4" />
-                            <p className="text-[var(--fg-dim)] font-medium">Nenhuma loja encontrada neste lote ou filtro.</p>
-                        </div>
-                    )}
-                </div>
-            </main>
+                    {
+                        filteredLojas.length === 0 && (
+                            <div className="flex flex-col items-center justify-center py-20 bg-white/5">
+                                <AlertCircle size={48} className="text-[var(--fg-dim)] opacity-20 mb-4" />
+                                <p className="text-[var(--fg-dim)] font-medium">Nenhuma loja encontrada neste lote ou filtro.</p>
+                            </div>
+                        )
+                    }
+                </div >
+            </main >
 
             {/* FIXED FOOTER TOTALS */}
-            <footer className="fixed bottom-0 left-0 right-0 bg-[#0a0a0b]/90 backdrop-blur-2xl border-t border-[var(--border)] p-6 z-40 shadow-[0_-20px_50px_rgba(0,0,0,0.5)]">
+            < footer className="fixed bottom-0 left-0 right-0 bg-[#0a0a0b]/90 backdrop-blur-2xl border-t border-[var(--border)] p-6 z-40 shadow-[0_-20px_50px_rgba(0,0,0,0.5)]" >
                 <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
 
                     {/* Totals Grid */}
@@ -639,7 +641,7 @@ export default function LoteFechamentoPage() {
                         </button>
                     </div>
                 </div>
-            </footer>
+            </footer >
 
             <style jsx>{`
                 .custom-scrollbar::-webkit-scrollbar {
@@ -656,6 +658,6 @@ export default function LoteFechamentoPage() {
                     background: rgba(255, 255, 255, 0.2);
                 }
             `}</style>
-        </div>
+        </div >
     );
 }

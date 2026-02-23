@@ -288,7 +288,7 @@ export default function FiscalProcessingPage() {
             // Fetch missing/rejected records that couldn't be correctly billed for NFE export
             const { data: missingRecords, error: missingErr } = await supabase
                 .from("agendamentos_brutos")
-                .select("loja_id, status_validacao, cnpj_loja, clientes(razao_social, cnpj, endereco_rua, endereco_bairro, endereco_cidade, endereco_uf, endereco_cep)")
+                .select("loja_id, status_validacao, cnpj_loja, clientes(razao_social, cnpj, endereco, bairro, cidade, estado, cep)")
                 .eq("lote_id", loteId);
 
             if (!missingErr && missingRecords) {
@@ -310,7 +310,7 @@ export default function FiscalProcessingPage() {
                     }
 
                     // Verifica se faltam dados fiscais cruciais para a Conta Azul (Endereço completo)
-                    const faltaEndereco = !client.endereco_rua || !client.endereco_bairro || !client.endereco_cidade || !client.endereco_uf || !client.endereco_cep;
+                    const faltaEndereco = !client.endereco || !client.bairro || !client.cidade || !client.estado || !client.cep;
                     if (faltaEndereco) {
                         missingMap.set(cnpj, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: "Dados de endereço incompletos (Rua, Bairro, Cidade, UF ou CEP)" });
                         return;
@@ -424,7 +424,11 @@ export default function FiscalProcessingPage() {
         try {
             const zip = new JSZip();
             const contents = await zip.loadAsync(file);
-            const parser = new XMLParser({ ignoreAttributes: false });
+            // Ignorar attributes mas EVITAR transformar strings totalmente númericas (CNPJ/CPF com zeros a esquerda) em Numbers base
+            const parser = new XMLParser({
+                ignoreAttributes: false,
+                parseTagValue: false
+            });
 
             const parsedXMLs: XMLData[] = [];
 
@@ -564,6 +568,7 @@ export default function FiscalProcessingPage() {
                     .upsert({
                         lote_id: loteId,
                         cliente_id: item.loja.id,
+                        cnpj_filial: null, // Assegura a compatibilidade com a key
                         valor_bruto: item.loja.valorBruto,
                         acrescimos: item.loja.acrescimos,
                         descontos: item.loja.descontos,
@@ -571,9 +576,10 @@ export default function FiscalProcessingPage() {
                         valor_nf_emitida: ((item.loja.valorBruto + item.loja.acrescimos) - item.loja.descontos) * 0.115,
                         valor_nc_final: item.ncFinal,
                         valor_boleto_final: item.boletoFinal,
+                        numero_nf: item.xml ? String(item.xml.numeroNF) : null,
                         observacao_report: (item.loja as any).ciclo === "NORDESTÃO" ? `Desconto IRRF: ${fmtCurrency(item.irrfCalculado)}` : null
                     }, {
-                        onConflict: "lote_id, cliente_id"
+                        onConflict: "lote_id, cliente_id, cnpj_filial"
                     });
 
                 if (errorMother) throw errorMother;
@@ -586,6 +592,7 @@ export default function FiscalProcessingPage() {
                             .upsert({
                                 lote_id: loteId,
                                 cliente_id: filial.id,
+                                cnpj_filial: filial.cnpj, // Mapeia o CNPJ da filial
                                 valor_bruto: filial.valorBruto,
                                 acrescimos: filial.acrescimos,
                                 descontos: filial.descontos,
@@ -595,7 +602,7 @@ export default function FiscalProcessingPage() {
                                 valor_boleto_final: 0,
                                 observacao_report: null
                             }, {
-                                onConflict: "lote_id, cliente_id"
+                                onConflict: "lote_id, cliente_id, cnpj_filial"
                             });
                         if (errorFilial) throw errorFilial;
                     }
@@ -621,12 +628,12 @@ export default function FiscalProcessingPage() {
         }
     };
 
-    const handleDisparar = async () => {
-        if (!confirm("Deseja disparar as tarefas de geração de documentos para o Google Cloud?")) return;
+    const handleDispararGCP = async () => {
+        if (!confirm("Deseja disparar as tarefas de geração de documentos (PDFs) no Google Cloud Platform?")) return;
 
         setIsDispatching(true);
         try {
-            const response = await fetch("/api/documentos/disparar-legado", {
+            const response = await fetch("/api/documentos/disparar-gcp", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ loteId })
@@ -634,14 +641,21 @@ export default function FiscalProcessingPage() {
 
             const result = await response.json();
 
-            if (!response.ok) throw new Error(result.error || "Erro ao disparar tarefas.");
+            if (!response.ok) throw new Error(result.error || "Erro ao disparar gerador GCP.");
 
-            alert("Tarefas enviadas com sucesso! Os PDFs aparecerão no Google Drive em poucos minutos.");
-            fetchData(); // Refresh to show CONCLUÍDO status
+            alert("Processamento iniciado no servidor! Os documentos estarão disponíveis no Drive em instantes.");
+
+            // Mostrar botão de ir para o drive. Se o backend mandou a drive_url na simulação ou se já temos no env local
+            const driveUrl = result.data?.drive_url || process.env.NEXT_PUBLIC_DRIVE_FOLDER_URL || "https://drive.google.com/drive/my-drive";
+
+            // Setar estado temporario na window para simplificar ou usar hook de estado caso decida expandir
+            window.open(driveUrl, "_blank");
+
+            fetchData(); // Refresh to show CONCLUÍDO status ou similar
 
         } catch (err: any) {
-            console.error("Error dispatching:", err);
-            alert("Erro ao disparar: " + err.message);
+            console.error("Error dispatching GCP:", err);
+            alert("Erro na integração com GCP: " + err.message);
         } finally {
             setIsDispatching(false);
         }
@@ -1098,12 +1112,18 @@ export default function FiscalProcessingPage() {
                                 </button>
                             ) : lote?.status === "CONSOLIDADO" ? (
                                 <button
-                                    onClick={() => router.push(`/faturamento/lote/${loteId}/conta-azul`)}
+                                    onClick={handleDispararGCP}
                                     disabled={isConsolidating || isDispatching}
                                     className="group relative overflow-hidden bg-[#3b82f6] text-white px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center justify-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 shadow-[0_4px_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_30px_rgba(59,130,246,0.5)]"
                                 >
-                                    Avançar para Conta Azul
-                                    <ArrowRight className="transition-transform group-hover:translate-x-1" size={18} />
+                                    {isDispatching ? (
+                                        <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                                    ) : (
+                                        <>
+                                            Disparar Geração de PDFs (Drive)
+                                            <Upload className="transition-transform group-hover:-translate-y-1" size={18} />
+                                        </>
+                                    )}
                                     <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-12"></div>
                                 </button>
                             ) : (

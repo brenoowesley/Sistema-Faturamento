@@ -310,7 +310,7 @@ export default function AjustesPage() {
         e.preventDefault();
         setIsSaving(true);
 
-        const payload = {
+        const payload: any = {
             cliente_id: formData.clienteId,
             tipo: "DESCONTO",
             valor: parseBRL(formData.valor),
@@ -321,6 +321,10 @@ export default function AjustesPage() {
             repasse_profissional: formData.repasseProfissional,
             status_aplicacao: false
         };
+
+        if (editingId) {
+            payload.id = editingId;
+        }
 
         const { error } = await supabase.from("ajustes_faturamento").upsert(payload, {
             onConflict: editingId ? "id" : undefined // If editing, use ID for upsert, else let DB handle new insert
@@ -340,7 +344,7 @@ export default function AjustesPage() {
         e.preventDefault();
         setIsSaving(true);
 
-        const payload = {
+        const payload: any = {
             cliente_id: formData.clienteId,
             tipo: "ACRESCIMO",
             valor: parseBRL(formData.valor),
@@ -351,6 +355,10 @@ export default function AjustesPage() {
             repasse_profissional: formData.repasseProfissional,
             status_aplicacao: false
         };
+
+        if (editingId) {
+            payload.id = editingId;
+        }
 
         const { error } = await supabase.from("ajustes_faturamento").upsert(payload);
 
