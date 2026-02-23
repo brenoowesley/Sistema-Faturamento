@@ -175,7 +175,18 @@ export default function LoteFechamentoPage() {
                     }
                 });
 
-                setRejeitados(Array.from(missingMap.values()));
+                const rejeitadosList = Array.from(missingMap.values());
+                setRejeitados(rejeitadosList);
+
+                if (rejeitadosList.length > 0) {
+                    console.group("%c🚨 Lojas Afastadas do Fechamento Fiscal", "color: white; background: #e11d48; font-weight: bold; border-radius: 4px; padding: 2px 6px;");
+                    console.table(rejeitadosList.map(r => ({
+                        "Empresa": r.razao_social,
+                        "CNPJ": r.cnpj,
+                        "Motivo do Bloqueio": r.motivo
+                    })));
+                    console.groupEnd();
+                }
             }
 
             // 3. Get unique store IDs involved

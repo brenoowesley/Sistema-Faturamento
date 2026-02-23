@@ -42,6 +42,12 @@ interface ClienteDB {
     nome: string | null;
     nome_conta_azul: string | null;
     cnpj: string;
+    cep?: string | null;
+    endereco?: string | null;
+    numero?: string | null;
+    bairro?: string | null;
+    cidade?: string | null;
+    estado?: string | null;
     ciclo_faturamento_id: string | null;
     ciclos_faturamento?: { nome: string } | null;
     status: boolean;
@@ -372,7 +378,7 @@ export default function NovoFaturamento() {
             while (hasMore) {
                 const { data: chunk, error } = await supabase
                     .from("clientes")
-                    .select("id, razao_social, nome_fantasia, nome, nome_conta_azul, cnpj, ciclo_faturamento_id, ciclos_faturamento(nome), status")
+                    .select("id, razao_social, nome_fantasia, nome, nome_conta_azul, cnpj, cep, endereco, numero, bairro, cidade, estado, ciclo_faturamento_id, ciclos_faturamento(nome), status")
                     .eq("status", true)
                     .range(from, from + step - 1);
 
@@ -437,14 +443,34 @@ export default function NovoFaturamento() {
                 let suggestedClients: ClienteDB[] = [];
                 if (loja) {
                     const lojaNormalizada = normalizarNome(loja);
+
+                    // 1. Tenta achar direto no Map otimizado (Conta Azul)
                     matched = clienteByContaAzul.get(lojaNormalizada);
 
-                    // If no exact match, look for candidates (Substring)
+                    // 2. Se não achou na Conta Azul, faz busca exata ampla no banco todo (Razão, Fantasia, Nome)
+                    if (!matched) {
+                        matched = clientes.find(c =>
+                            normalizarNome(c.razao_social) === lojaNormalizada ||
+                            normalizarNome(c.nome_fantasia || "") === lojaNormalizada ||
+                            normalizarNome(c.nome || "") === lojaNormalizada ||
+                            normalizarNome(c.nome_conta_azul || "") === lojaNormalizada
+                        );
+                    }
+
+                    // 3. Se ainda não tem correspondência exata, busca candidatos parciais (Substring)
                     if (!matched) {
                         suggestedClients = clientes.filter(c => {
-                            if (!c.nome_conta_azul) return false;
-                            const dbName = normalizarNome(c.nome_conta_azul);
-                            return lojaNormalizada.includes(dbName) || dbName.includes(lojaNormalizada);
+                            const nomesDb = [
+                                normalizarNome(c.nome_conta_azul || ""),
+                                normalizarNome(c.razao_social),
+                                normalizarNome(c.nome_fantasia || ""),
+                                normalizarNome(c.nome || "")
+                            ].filter(n => n.length > 0);
+
+                            // Se a loja da planilha está contida no nome do BD ou vice-versa
+                            return nomesDb.some(dbName =>
+                                lojaNormalizada.includes(dbName) || dbName.includes(lojaNormalizada)
+                            );
                         });
                     }
                 }
@@ -563,10 +589,14 @@ export default function NovoFaturamento() {
             const suspiciousListResult: Agendamento[][] = [];
             const seenIndicesSet = new Set<number>();
 
+            const normalizarCNPJ = (cnpj?: string | null) => cnpj ? cnpj.replace(/\D/g, "") : "";
+
             for (let i = 0; i < finalParsed.length; i++) {
                 const a = finalParsed[i];
                 // Exact key matching all core content
-                const key = `${a.nome.toLowerCase()}|${a.loja.toLowerCase()}|${a.inicio?.getTime()}|${a.termino?.getTime()}|${a.valorIwof}|${a.vaga.toLowerCase()}|${a.telefone}|${a.fracaoHora}`;
+                // USA O CNPJ COMO CHAVE PRIMÁRIA DE AGRUPAMENTO (EVITA EMPRESAS HOMÔNIMAS COMO DUPLICATAS)
+                const targetLojaHash = normalizarCNPJ(a.cnpj) || a.loja.toLowerCase();
+                const key = `${a.nome.toLowerCase()}|${targetLojaHash}|${a.inicio?.getTime()}|${a.termino?.getTime()}|${a.valorIwof}|${a.vaga.toLowerCase()}|${a.telefone}|${a.fracaoHora}`;
 
                 if (!identicalMap.has(key)) {
                     identicalMap.set(key, []);
@@ -595,7 +625,12 @@ export default function NovoFaturamento() {
 
                     const sameInicio = a.inicio?.getTime() === b.inicio?.getTime();
                     const sameTermino = a.termino?.getTime() === b.termino?.getTime();
-                    const sameLoja = a.loja === b.loja;
+
+                    // Match primário por CNPJ (se houver), ou por nome da loja como fallback
+                    const aCnpj = normalizarCNPJ(a.cnpj);
+                    const bCnpj = normalizarCNPJ(b.cnpj);
+                    const sameLoja = (aCnpj && bCnpj) ? (aCnpj === bCnpj) : (a.loja === b.loja);
+
                     if (!sameInicio || !sameTermino || !sameLoja) return false;
 
                     const nameMatch = a.nome.toUpperCase().trim() === b.nome.toUpperCase().trim();
@@ -912,29 +947,75 @@ export default function NovoFaturamento() {
         }
 
         /* 2) Bulk insert agendamentos */
+        /* 2) Bulk insert agendamentos */
         const allDuplicateIds = new Set([
             ...duplicates.identical.flat().map(d => d.id),
             ...duplicates.suspicious.flat().map(d => d.id)
         ]);
 
-        const rows = agendamentos
-            .filter((a) => {
+        // === ETAPA 1: Agrupamento Prévio (Foco Estrito na Planilha) ===
+        // O cliente definiu a regra sequencial: O validador primário para somar agendamentos DEVE SER o nome literal da loja enviado na planilha.
+        // Assim se vierem três "NORDESTÃO - SANTA CATARINA", eles primeiro viram um só montante antes de consultar o banco.
+
+        type AgrupamentoPlanilha = {
+            nomeLojaPlanilha: string;
+            agendamentoBase: Agendamento;   // Guarda a ref do primeiro pra usar os metadados
+            valorSoma: number;
+            fracaoHoraSoma: number;
+            allIds: string[];               // Todos os IDs rastreados para logs
+        };
+
+        const lojasAgrupadasPlanilha = agendamentos.reduce<AgrupamentoPlanilha[]>((acc, current) => {
+            // Ignora agendamentos problemáticos desde a raiz para evitar somá-los ao montante da loja
+            if (current.status === "CICLO_INCORRETO" || current.status === "FORA_PERIODO") return acc;
+
+            const nomeLoja = normalizarNome(current.loja); // usa o nome *da planilha*
+            const existente = acc.find(item => item.nomeLojaPlanilha === nomeLoja);
+
+            const valorAtual = current.manualValue ?? current.suggestedValorIwof ?? current.valorIwof;
+
+            if (existente) {
+                existente.valorSoma += valorAtual;
+                existente.fracaoHoraSoma += current.fracaoHora;
+                existente.allIds.push(current.id);
+            } else {
+                acc.push({
+                    nomeLojaPlanilha: nomeLoja,
+                    agendamentoBase: current,
+                    valorSoma: valorAtual,
+                    fracaoHoraSoma: current.fracaoHora,
+                    allIds: [current.id]
+                });
+            }
+            return acc;
+        }, []);
+
+        // === ETAPA 2: Mapeamento, Validação Fiscal no Banco e Preparação do Payload ===
+        const rows = lojasAgrupadasPlanilha
+            .filter((grupo) => {
+                const a = grupo.agendamentoBase;
+
                 // Apenas lojas COM vinculo no banco (Divergentes ficam de fora)
                 if (!a.clienteId) return false;
-                // Exclude removed items unless they are cancellations/duplicates we want to track (actually usually we just exclude them from billing)
-                // BUT the main issue is CICLO_INCORRETO and FORA_PERIODO.
-                // We ONLY want to bill: OK, CORREÇÃO, or REMOVED (as explicit status)
-                // If it is CICLO_INCORRETO or FORA_PERIODO, it MUST NOT enter the lote.
-                if (a.status === "CICLO_INCORRETO" || a.status === "FORA_PERIODO") return false;
+
+                // Validação de Dados Fiscais Mínimos para não travar a NFSe
+                const dbClient = dbClientes.find(c => c.id === a.clienteId);
+                if (!dbClient || !dbClient.cnpj || !dbClient.cep || !dbClient.endereco) {
+                    return false;
+                }
+
+                // Filtrar faturamento zero ou negativo
+                if (grupo.valorSoma <= 0) return false;
 
                 return true;
             })
-            .map((a) => {
+            .map((grupo) => {
+                const a = grupo.agendamentoBase;
                 let finalStatus = a.status as string;
 
                 if (a.isRemoved) {
                     if (a.status === "CANCELAR") finalStatus = "CANCELADO";
-                    else if (allDuplicateIds.has(a.id)) {
+                    else if (grupo.allIds.some(id => allDuplicateIds.has(id))) {
                         finalStatus = "DUPLICATA";
                     } else {
                         finalStatus = "EXCLUIDO";
@@ -950,32 +1031,32 @@ export default function NovoFaturamento() {
                     cnpj_loja: a.cnpj || null,
                     data_inicio: a.inicio?.toISOString() ?? periodoInicio,
                     data_fim: a.termino?.toISOString() ?? periodoFim,
-                    valor_iwof: Number(parseFloat(String(a.manualValue ?? a.suggestedValorIwof ?? a.valorIwof)).toFixed(2)),
-                    fracao_hora: a.fracaoHora,
+                    valor_iwof: Number(parseFloat(String(grupo.valorSoma)).toFixed(2)),
+                    fracao_hora: grupo.fracaoHoraSoma,
                     status_validacao: finalStatus,
                     data_competencia: a.rawRow.data_competencia || null
                 };
             });
 
         // --- INÍCIO DA AUDITORIA DE PERDAS ---
-        // Extrai lojas brutas (únicas)
-        const dadosPlanilhaBruta = Array.from(new Map(agendamentos.map(a => [a.clienteId || a.loja, a])).values());
+        // Extrai lojas brutas (únicas pós Etapa 1)
+        const dadosPlanilhaBruta = lojasAgrupadasPlanilha;
 
         // Extrai lojas validadas que irão para o banco
         const lojasValidadas = Array.from(new Map(rows.map(r => [r.loja_id, r])).values());
 
         // Cruzamento: O que tem na planilha bruta que NÃO entrou nas validadas?
         const lojasPerdidas = dadosPlanilhaBruta.filter(bruta =>
-            !lojasValidadas.some(validada => validada.cnpj_loja === bruta.cnpj || (bruta.clienteId && validada.loja_id === bruta.clienteId))
+            !lojasValidadas.some(validada => validada.cnpj_loja === bruta.agendamentoBase.cnpj || (bruta.agendamentoBase.clienteId && validada.loja_id === bruta.agendamentoBase.clienteId))
         );
 
         const relatorioPerdas = lojasPerdidas.map(loja => ({
-            "Nome na Planilha": loja.nome || loja.loja || "N/A",
-            "Ciclo da Planilha": loja.cicloNome || "N/A",
-            "CNPJ Disponível": loja.cnpj ? "Sim" : "Não",
-            "Valor Planilha": loja.originalValorIwof ?? loja.valorIwof ?? 0,
-            "Status Original": loja.status,
-            "Rejeição Provável": (!loja.cnpj && !loja.clienteId ? "Falta Vínculo / Divergente" : loja.isRemoved ? "Removida manualmente (ou Duplicata)" : (loja.status === "CICLO_INCORRETO" ? "Ciclo Incorreto" : (loja.status === "FORA_PERIODO" ? "Fora do Período" : "Faturamento Zerado/Outro")))
+            "Nome na Planilha": loja.nomeLojaPlanilha || "N/A",
+            "Ciclo da Planilha": loja.agendamentoBase.cicloNome || "N/A",
+            "CNPJ Disponível": loja.agendamentoBase.cnpj ? "Sim" : "Não",
+            "Valor Planilha": loja.valorSoma ?? 0,
+            "Status Original": loja.agendamentoBase.status,
+            "Rejeição Provável": (!loja.agendamentoBase.cnpj && !loja.agendamentoBase.clienteId ? "Falta Vínculo / Divergente" : loja.agendamentoBase.isRemoved ? "Removida manualmente (ou Duplicata)" : (loja.agendamentoBase.status === "CICLO_INCORRETO" ? "Ciclo Incorreto" : (loja.agendamentoBase.status === "FORA_PERIODO" ? "Fora do Período" : "Faturamento Zerado/Outro")))
         }));
 
         // Exibe uma tabela bonita e fácil de ler no Console do Navegador
@@ -987,6 +1068,35 @@ export default function NovoFaturamento() {
             console.log("Copie o JSON abaixo se precisar de um arquivo:", JSON.stringify(relatorioPerdas, null, 2));
         }
         // --- FIM DA AUDITORIA DE PERDAS ---
+
+        // --- INÍCIO DA AUDITORIA FISCAL DETALHADA ---
+        const lojasRejeitadas = dadosPlanilhaBruta.filter(bruta => !lojasValidadas.some(v => v.cnpj_loja === bruta.agendamentoBase.cnpj || (bruta.agendamentoBase.clienteId && v.loja_id === bruta.agendamentoBase.clienteId)));
+
+        console.log(`🚨 [AUDITORIA FINAL FISCAL] ${lojasRejeitadas.length} Lojas rejeitadas. Motivos:`);
+        lojasRejeitadas.forEach(lojaObj => {
+            const loja = lojaObj.agendamentoBase;
+            // Tenta achar no BD para ver o que faltou nela
+            const dbMatch = dbClientes.find(db =>
+                normalizarNome(db.razao_social) === normalizarNome(loja.loja) ||
+                normalizarNome(db.nome_fantasia || "") === normalizarNome(loja.loja) ||
+                normalizarNome(db.nome_conta_azul || "") === normalizarNome(loja.loja)
+            );
+
+            if (!dbMatch) {
+                console.warn(`❌ ${loja.loja} (${loja.nome}): NOME NÃO ENCONTRADO NO BANCO DE DADOS (Nem como Razão Social, Fantasia ou Conta Azul).`);
+            } else {
+                const motivos = [];
+                if (!dbMatch.cnpj) motivos.push("Sem CNPJ");
+                if (!dbMatch.cep || !dbMatch.endereco) motivos.push("Endereço Incompleto (CEP/Rua)");
+                if ((lojaObj.valorSoma || 0) <= 0) motivos.push("Faturamento <= 0");
+                if (loja.status === "CICLO_INCORRETO") motivos.push("Ciclo Incorreto");
+                if (loja.status === "FORA_PERIODO") motivos.push("Fora do Período");
+                if (loja.isRemoved) motivos.push("Removida Manualmente/Duplicata");
+
+                console.warn(`⚠️ ${loja.loja} (Encontrada no BD como ${dbMatch.razao_social}): Rejeitada no fechamento -> ${motivos.join(" | ") || "Motivo Desconhecido"}`);
+            }
+        });
+        // --- FIM DA AUDITORIA FISCAL DETALHADA ---
 
         let ok = 0;
         let err = 0;

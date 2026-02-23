@@ -542,13 +542,20 @@ export default function FiscalProcessingPage() {
                     irrf = Number(((calcBase * 0.115) * 0.015).toFixed(2));
                 }
 
+                // O cliente definiu literalmente:
+                // 1. Soma do valor = Boleto
+                // 2. NC = 88.5% do Boleto
+                // 3. NF = 11.5% do Boleto
+                const boleto = calcBase;
+                const nc = calcBase * 0.885;
+
                 return {
                     loja,
                     xml: matchedXML,
-                    status: matchedXML ? "MATCH" : (isNordestao ? "MATCH" : "MISSING"), // Nordestão não tem XML mas damos MATCH pelo cálculo
+                    status: matchedXML ? "MATCH" : (isNordestao ? "MATCH" : "MISSING"),
                     irrfCalculado: irrf,
-                    boletoFinal: calcBase - irrf,
-                    ncFinal: (calcBase * 0.885) - irrf
+                    boletoFinal: boleto,
+                    ncFinal: nc
                 };
             });
 
