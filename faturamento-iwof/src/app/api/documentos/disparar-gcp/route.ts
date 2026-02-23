@@ -40,6 +40,12 @@ export async function POST(req: NextRequest) {
 
         if (consErr) throw consErr;
 
+        if (!consolidados || consolidados.length === 0) {
+            return NextResponse.json({
+                error: "Não há dados consolidados para este lote. Realize o processamento fiscal (ZIP) novamente."
+            }, { status: 400 });
+        }
+
         // 3. Fetch Raw Agendamentos (Para os Descritivos)
         const { data: agendamentos, error: agErr } = await supabase
             .from("agendamentos_brutos")

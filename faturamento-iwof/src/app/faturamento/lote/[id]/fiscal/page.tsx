@@ -601,6 +601,10 @@ export default function FiscalProcessingPage() {
 
     // 4. Final Consolidation
     const handleConsolidar = async () => {
+        if (conciliacao.length === 0) {
+            alert("A reconciliação está vazia. Por favor, faça o upload do ZIP com os XMLs novamente.");
+            return;
+        }
         if (!confirm("Confirmar valores e consolidar lote? Esta ação encerrará o faturamento deste lote.")) return;
 
         setIsConsolidating(true);
@@ -1140,15 +1144,17 @@ export default function FiscalProcessingPage() {
 
                             {lote?.status === "PENDENTE" || lote?.status === "AGUARDANDO_XML" ? (
                                 <button
-                                    disabled={isConsolidating}
+                                    disabled={isConsolidating || (lojas.length > 0 && conciliacao.length === 0)}
                                     onClick={handleConsolidar}
-                                    className="group relative overflow-hidden bg-emerald-500 text-black px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 shadow-[0_4px_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_30_rgba(16,185,129,0.5)]"
+                                    className={`group relative overflow-hidden px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center gap-3 transition-all enabled:hover:scale-105 enabled:active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_4px_20px_rgba(16,185,129,0.3)] 
+                                        ${lojas.length > 0 && conciliacao.length === 0 ? 'bg-amber-500 text-black' : 'bg-emerald-500 text-black'} 
+                                        hover:shadow-[0_0_30_rgba(16,185,129,0.5)]`}
                                 >
                                     {isConsolidating ? (
                                         <div className="w-5 h-5 border-2 border-black/20 border-t-black rounded-full animate-spin"></div>
                                     ) : (
                                         <>
-                                            Confirmar e Consolidar Lote
+                                            {lojas.length > 0 && conciliacao.length === 0 ? "Aguardando XML (ZIP)" : "Confirmar e Consolidar Lote"}
                                             <Save size={18} />
                                         </>
                                     )}
