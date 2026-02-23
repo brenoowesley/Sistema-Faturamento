@@ -330,6 +330,24 @@ export async function POST(req: NextRequest) {
         const cycleNameStr = lote.nome_pasta ? lote.nome_pasta : (cicloLote?.nome || `Lote_${lote.id.substring(0, 8)}`);
         const cyclePeriodStr = `${dInicio} à ${dFim}`;
 
+        const pubNCUrl = process.env.GCP_PUB_NC_URL;
+        const pubHCUrl = process.env.GCP_PUB_HC_URL;
+        const gcpToken = process.env.GCP_AUTH_TOKEN;
+
+        if (!pubNCUrl || !pubHCUrl) {
+            console.warn("URLs do Pub/Sub faltantes. Simulando sucesso para UI.");
+            return NextResponse.json({
+                success: true,
+                message: "Ambiente local: Disparos seriam enviados para o Pub/Sub do GCP.",
+                payloads: { NC: "PAYLOAD_NC_OMITIDO_SIMULACAO", HC: "PAYLOAD_HC_OMITIDO_SIMULACAO" }
+            });
+        }
+
+        const headers: HeadersInit = { "Content-Type": "application/json" };
+        if (gcpToken) {
+            headers["Authorization"] = `Bearer ${gcpToken}`;
+        }
+
         const gcpRequests: Promise<Response>[] = [];
 
         // LOOP HC: Disparar MENSAGEM INDIVIDUAL p/ CADA LOJA
