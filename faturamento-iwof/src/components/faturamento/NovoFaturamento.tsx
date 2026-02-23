@@ -320,6 +320,31 @@ export default function NovoFaturamento() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    /* --- Log Ignored Stores --- */
+    useEffect(() => {
+        if (step !== "setup" && agendamentos.length > 0) {
+            const ignored = agendamentos.filter(a => {
+                const isValidated = !a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO") && a.clienteId;
+                return !isValidated;
+            });
+
+            if (ignored.length > 0) {
+                console.group("%c Lojas Ignoradas no Lote Final ", "color: white; background: #e11d48; font-weight: bold; border-radius: 4px; padding: 2px 6px;");
+                ignored.forEach(a => {
+                    let reason = "Desconhecido";
+                    if (a.isRemoved) reason = "Removido/Duplicata";
+                    else if (a.status === "FORA_PERIODO") reason = "Fora do Período";
+                    else if (a.status === "CICLO_INCORRETO") reason = "Ciclo Incorreto";
+                    else if (!a.clienteId) reason = "Divergente (Nome Conta Azul não encontrado)";
+                    else if (a.status === "CANCELAR") reason = "Cancelamento (Duração insuficiente)";
+
+                    console.log(`%c[${reason}]%c ${a.loja} %c(${a.nome})`, "color: #fbbf24; font-weight: bold;", "color: white;", "color: #94a3b8;");
+                });
+                console.groupEnd();
+            }
+        }
+    }, [agendamentos, step]);
+
     /* ================================================================
        PROCESSING PIPELINE
        ================================================================ */

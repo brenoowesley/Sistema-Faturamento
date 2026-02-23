@@ -296,23 +296,23 @@ export default function FiscalProcessingPage() {
 
                 missingRecords.forEach(rec => {
                     const client = rec.clientes as any;
-                    const cnpj = client?.cnpj || rec.cnpj_loja || "Desconhecido";
                     const razao = client?.razao_social || "Empresa Desconhecida";
+                    const cnpj = client?.cnpj || rec.cnpj_loja || "Desconhecido";
 
                     if (!client) {
-                        missingMap.set(cnpj, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: "Cliente não cadastrado no sistema" });
+                        missingMap.set(rec.loja_id, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: "Cliente não cadastrado no sistema" });
                         return;
                     }
 
                     if (rec.status_validacao !== "VALIDADO") {
-                        missingMap.set(cnpj, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: `Status do agendamento: ${rec.status_validacao}` });
+                        missingMap.set(rec.loja_id, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: `Status do agendamento: ${rec.status_validacao}` });
                         return;
                     }
 
                     // Verifica se faltam dados fiscais cruciais para a Conta Azul (Endereço completo)
                     const faltaEndereco = !client.endereco || !client.bairro || !client.cidade || !client.estado || !client.cep;
                     if (faltaEndereco) {
-                        missingMap.set(cnpj, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: "Dados de endereço incompletos (Rua, Bairro, Cidade, UF ou CEP)" });
+                        missingMap.set(rec.loja_id, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: "Dados de endereço incompletos (Rua, Bairro, Cidade, UF ou CEP)" });
                         return;
                     }
                 });
@@ -414,6 +414,43 @@ export default function FiscalProcessingPage() {
     useEffect(() => {
         fetchData();
     }, [fetchData]);
+
+    // Audit Log for Fiscal Discrepancies
+    useEffect(() => {
+        if (!loading && (lojas.length > 0 || rejeitados.length > 0)) {
+            console.group("%c Auditoria Fiscal: Consolidação do Lote ", "color: white; background: #3b82f6; font-weight: bold; border-radius: 4px; padding: 2px 6px;");
+
+            const totalChildren = lojas.reduce((acc, current) => acc + (current.children?.length || 0), 0);
+            const totalDistinctStoresOnLote = lojas.length + totalChildren + rejeitados.length;
+
+            console.log(`%cTotal de Lojas Únicas no Banco (para este lote):%c ${totalDistinctStoresOnLote}`, "font-weight: bold;", "color: #3b82f6; font-weight: bold;");
+            console.log(`%cLojas Mãe (Visíveis na Tabela):%c ${lojas.length}`, "font-weight: bold;", "color: #10b981; font-weight: bold;");
+            console.log(`%cFiliais Agrupadas (Ocultas):%c ${totalChildren}`, "font-weight: bold;", "color: #fbbf24; font-weight: bold;");
+            console.log(`%cLojas Rejeitadas/Omissas:%c ${rejeitados.length}`, "font-weight: bold;", "color: #ef4444; font-weight: bold;");
+
+            if (lojas.some(l => l.children && l.children.length > 0)) {
+                console.groupCollapsed("%c Detalhes do Agrupamento (Mothers & Filiais) ", "color: #fbbf24; font-weight: bold;");
+                lojas.filter(l => l.children && l.children.length > 0).forEach(m => {
+                    console.group(`%cMãe: ${m.razao_social} (%c${m.children?.length} filiais%c)`, "color: white; font-weight: bold;", "color: #fbbf24;", "color: white;");
+                    m.children?.forEach(c => {
+                        console.log(`%cFilial:%c ${c.razao_social} %c(${c.cnpj || "Sem CNPJ"})`, "color: #94a3b8;", "color: white;", "color: #64748b;");
+                    });
+                    console.groupEnd();
+                });
+                console.groupEnd();
+            }
+
+            if (rejeitados.length > 0) {
+                console.groupCollapsed("%c Detalhes das Lojas Rejeitadas (NÃO entraram na consolidação) ", "color: #ef4444; font-weight: bold;");
+                rejeitados.forEach(r => {
+                    console.log(`%c[${r.motivo}]%c ${r.razao_social} %c(${r.cnpj})`, "color: #f87171; font-weight: bold;", "color: white;", "color: #94a3b8;");
+                });
+                console.groupEnd();
+            }
+
+            console.groupEnd();
+        }
+    }, [loading, lojas, rejeitados]);
 
     // 2. ZIP Processing
     const onDrop = useCallback(async (acceptedFiles: File[]) => {
