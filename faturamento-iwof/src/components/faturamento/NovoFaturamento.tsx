@@ -594,9 +594,7 @@ export default function NovoFaturamento() {
             for (let i = 0; i < finalParsed.length; i++) {
                 const a = finalParsed[i];
                 // Exact key matching all core content
-                // USA O CNPJ COMO CHAVE PRIMÁRIA DE AGRUPAMENTO (EVITA EMPRESAS HOMÔNIMAS COMO DUPLICATAS)
-                const targetLojaHash = normalizarCNPJ(a.cnpj) || a.loja.toLowerCase();
-                const key = `${a.nome.toLowerCase()}|${targetLojaHash}|${a.inicio?.getTime()}|${a.termino?.getTime()}|${a.valorIwof}|${a.vaga.toLowerCase()}|${a.telefone}|${a.fracaoHora}`;
+                const key = `${a.nome.toLowerCase()}|${a.loja.toLowerCase()}|${a.inicio?.getTime()}|${a.termino?.getTime()}|${a.valorIwof}|${a.vaga.toLowerCase()}|${a.telefone}|${a.fracaoHora}`;
 
                 if (!identicalMap.has(key)) {
                     identicalMap.set(key, []);
@@ -625,11 +623,7 @@ export default function NovoFaturamento() {
 
                     const sameInicio = a.inicio?.getTime() === b.inicio?.getTime();
                     const sameTermino = a.termino?.getTime() === b.termino?.getTime();
-
-                    // Match primário por CNPJ (se houver), ou por nome da loja como fallback
-                    const aCnpj = normalizarCNPJ(a.cnpj);
-                    const bCnpj = normalizarCNPJ(b.cnpj);
-                    const sameLoja = (aCnpj && bCnpj) ? (aCnpj === bCnpj) : (a.loja === b.loja);
+                    const sameLoja = a.loja === b.loja;
 
                     if (!sameInicio || !sameTermino || !sameLoja) return false;
 
@@ -958,8 +952,8 @@ export default function NovoFaturamento() {
         const invalidRowsForAudit: Agendamento[] = [];
 
         agendamentos.forEach(a => {
-            // Se o agendamento foi removido manualmente, cravado como fora de período/ciclo, cancelar, ou é duplicata -> Vai pro lixo/auditoria
-            if (a.status === "CICLO_INCORRETO" || a.status === "FORA_PERIODO" || a.isRemoved || allDuplicateIds.has(a.id) || a.status === "CANCELAR") {
+            // Se o agendamento foi removido manualmente, cravado como fora de período/ciclo, ou status cancelar -> Vai pro lixo/auditoria e Não Soma no Boleto
+            if (a.status === "CICLO_INCORRETO" || a.status === "FORA_PERIODO" || a.isRemoved || a.status === "CANCELAR") {
                 invalidRowsForAudit.push(a);
             } else {
                 validRowsToGroup.push(a);
@@ -1012,8 +1006,8 @@ export default function NovoFaturamento() {
 
             // Validação de Dados Fiscais Mínimos para não travar a NFSe
             const dbClient = dbClientes.find(c => c.id === a.clienteId);
-            if (!dbClient || !dbClient.cnpj || !dbClient.cep || !dbClient.endereco) {
-                invalidRowsForAudit.push(a); // Envia pra tela de bloqueio com motivo de db incompleto
+            if (!dbClient || !dbClient.cnpj) {
+                invalidRowsForAudit.push(a); // Envia pra tela de bloqueio apenas se não tiver CNPJ (Mandatório Básico)
                 return;
             }
 
