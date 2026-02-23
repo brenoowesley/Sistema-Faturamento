@@ -953,23 +953,30 @@ export default function NovoFaturamento() {
             ...duplicates.suspicious.flat().map(d => d.id)
         ]);
 
-        // === ETAPA 1: Agrupamento Prévio (Foco Estrito na Planilha) ===
-        // O cliente definiu a regra sequencial: O validador primário para somar agendamentos DEVE SER o nome literal da loja enviado na planilha.
-        // Assim se vierem três "NORDESTÃO - SANTA CATARINA", eles primeiro viram um só montante antes de consultar o banco.
+        // === ETAPA 1: Separar Válidos para Agrupar vs Inválidos para Auditoria ===
+        const validRowsToGroup: Agendamento[] = [];
+        const invalidRowsForAudit: Agendamento[] = [];
 
+        agendamentos.forEach(a => {
+            // Se o agendamento foi removido manualmente, cravado como fora de período/ciclo, cancelar, ou é duplicata -> Vai pro lixo/auditoria
+            if (a.status === "CICLO_INCORRETO" || a.status === "FORA_PERIODO" || a.isRemoved || allDuplicateIds.has(a.id) || a.status === "CANCELAR") {
+                invalidRowsForAudit.push(a);
+            } else {
+                validRowsToGroup.push(a);
+            }
+        });
+
+        // O cliente definiu a regra sequencial: O validador primário para somar agendamentos DEVE SER o nome literal da loja enviado na planilha.
         type AgrupamentoPlanilha = {
             nomeLojaPlanilha: string;
-            agendamentoBase: Agendamento;   // Guarda a ref do primeiro pra usar os metadados
+            agendamentoBase: Agendamento;
             valorSoma: number;
             fracaoHoraSoma: number;
-            allIds: string[];               // Todos os IDs rastreados para logs
+            allIds: string[];
         };
 
-        const lojasAgrupadasPlanilha = agendamentos.reduce<AgrupamentoPlanilha[]>((acc, current) => {
-            // Ignora agendamentos problemáticos desde a raiz para evitar somá-los ao montante da loja
-            if (current.status === "CICLO_INCORRETO" || current.status === "FORA_PERIODO") return acc;
-
-            const nomeLoja = normalizarNome(current.loja); // usa o nome *da planilha*
+        const lojasAgrupadasValidas = validRowsToGroup.reduce<AgrupamentoPlanilha[]>((acc, current) => {
+            const nomeLoja = normalizarNome(current.loja);
             const existente = acc.find(item => item.nomeLojaPlanilha === nomeLoja);
 
             const valorAtual = current.manualValue ?? current.suggestedValorIwof ?? current.valorIwof;
@@ -991,59 +998,85 @@ export default function NovoFaturamento() {
         }, []);
 
         // === ETAPA 2: Mapeamento, Validação Fiscal no Banco e Preparação do Payload ===
-        const rows = lojasAgrupadasPlanilha
-            .filter((grupo) => {
-                const a = grupo.agendamentoBase;
+        const payloadRows: any[] = [];
 
-                // Apenas lojas COM vinculo no banco (Divergentes ficam de fora)
-                if (!a.clienteId) return false;
+        // 2A: Empacota os Grupos de Lojas Válidas (1 Linha Consolidada por Loja)
+        lojasAgrupadasValidas.forEach((grupo) => {
+            const a = grupo.agendamentoBase;
 
-                // Validação de Dados Fiscais Mínimos para não travar a NFSe
-                const dbClient = dbClientes.find(c => c.id === a.clienteId);
-                if (!dbClient || !dbClient.cnpj || !dbClient.cep || !dbClient.endereco) {
-                    return false;
-                }
+            // Se for divergente ou sem vínculo, rebaixa para auditoria
+            if (!a.clienteId) {
+                invalidRowsForAudit.push(a);
+                return;
+            }
 
-                // Filtrar faturamento zero ou negativo
-                if (grupo.valorSoma <= 0) return false;
+            // Validação de Dados Fiscais Mínimos para não travar a NFSe
+            const dbClient = dbClientes.find(c => c.id === a.clienteId);
+            if (!dbClient || !dbClient.cnpj || !dbClient.cep || !dbClient.endereco) {
+                invalidRowsForAudit.push(a); // Envia pra tela de bloqueio com motivo de db incompleto
+                return;
+            }
 
-                return true;
-            })
-            .map((grupo) => {
-                const a = grupo.agendamentoBase;
-                let finalStatus = a.status as string;
+            // Filtrar faturamento zero ou negativo (não emite NF)
+            if (grupo.valorSoma <= 0) {
+                invalidRowsForAudit.push(a);
+                return;
+            }
 
-                if (a.isRemoved) {
-                    if (a.status === "CANCELAR") finalStatus = "CANCELADO";
-                    else if (grupo.allIds.some(id => allDuplicateIds.has(id))) {
-                        finalStatus = "DUPLICATA";
-                    } else {
-                        finalStatus = "EXCLUIDO";
-                    }
-                } else if (a.status === "OK" || a.status === "CORREÇÃO") {
-                    finalStatus = "VALIDADO";
-                }
-
-                return {
-                    lote_id: lote.id,
-                    nome_profissional: a.nome || "N/A",
-                    loja_id: a.clienteId!,
-                    cnpj_loja: a.cnpj || null,
-                    data_inicio: a.inicio?.toISOString() ?? periodoInicio,
-                    data_fim: a.termino?.toISOString() ?? periodoFim,
-                    valor_iwof: Number(parseFloat(String(grupo.valorSoma)).toFixed(2)),
-                    fracao_hora: grupo.fracaoHoraSoma,
-                    status_validacao: finalStatus,
-                    data_competencia: a.rawRow.data_competencia || null
-                };
+            // Se passou em tudo, é uma loja 100% pronta pro Lote Fiscal!
+            payloadRows.push({
+                lote_id: lote.id,
+                nome_profissional: "Vários Profissionais (Consolidado)",
+                loja_id: a.clienteId!,
+                cnpj_loja: a.cnpj || null,
+                data_inicio: periodoInicio,
+                data_fim: periodoFim,
+                valor_iwof: Number(parseFloat(String(grupo.valorSoma)).toFixed(2)),
+                fracao_hora: grupo.fracaoHoraSoma,
+                status_validacao: "VALIDADO",
+                data_competencia: a.rawRow.data_competencia || null
             });
+        });
 
-        // --- INÍCIO DA AUDITORIA DE PERDAS ---
-        // Extrai lojas brutas (únicas pós Etapa 1)
-        const dadosPlanilhaBruta = lojasAgrupadasPlanilha;
+        // 2B: Empacota os Rejeitados Individuais no banco de dados SOMENTE para auditoria aparecer na página Fiscal `page.tsx`.
+        invalidRowsForAudit.forEach((a) => {
+            // Só salva se tiver clienteId pq o Supabase exige a chave primária da Loja.
+            if (!a.clienteId) return;
 
-        // Extrai lojas validadas que irão para o banco
-        const lojasValidadas = Array.from(new Map(rows.map(r => [r.loja_id, r])).values());
+            let finalStatus = a.status as string;
+            if (a.isRemoved) {
+                if (a.status === "CANCELAR") finalStatus = "CANCELADO";
+                else if (allDuplicateIds.has(a.id)) finalStatus = "DUPLICATA";
+                else finalStatus = "EXCLUIDO";
+            } else if (allDuplicateIds.has(a.id)) {
+                finalStatus = "DUPLICATA";
+            } else if (a.status === "OK" || a.status === "CORREÇÃO") {
+                // Se era pra ser válido mas caiu no array de inválido (ex: sem CEP, CNPJ, valor <= 0)
+                finalStatus = "DADOS_FISCAIS_INCOMPLETOS";
+            }
+
+            payloadRows.push({
+                lote_id: lote.id,
+                nome_profissional: a.nome || "N/A",
+                loja_id: a.clienteId,
+                cnpj_loja: a.cnpj || null,
+                data_inicio: a.inicio?.toISOString() ?? periodoInicio,
+                data_fim: a.termino?.toISOString() ?? periodoFim,
+                valor_iwof: Number(parseFloat(String(a.manualValue ?? a.suggestedValorIwof ?? a.valorIwof)).toFixed(2)),
+                fracao_hora: a.fracaoHora,
+                status_validacao: finalStatus,
+                data_competencia: a.rawRow.data_competencia || null
+            });
+        });
+
+        const rows = payloadRows;
+
+        // --- INÍCIO DA AUDITORIA DE PERDAS DE CONSOLE (Apenas para Dev/Log) ---
+        // Extrai lojas brutas (únicas originais)
+        const dadosPlanilhaBruta = Array.from(new Map(agendamentos.map(a => [a.clienteId || a.loja, a])).values());
+
+        // Extrai lojas validadas "VIP" que entraram de fato pra emitir NF
+        const lojasValidadas = Array.from(new Map(rows.filter(r => r.status_validacao === "VALIDADO").map(r => [r.loja_id, r])).values());
 
         // Cruzamento: O que tem na planilha bruta que NÃO entrou nas validadas?
         const lojasPerdidas = dadosPlanilhaBruta.filter(bruta =>
