@@ -1072,6 +1072,7 @@ export default function NovoFaturamento() {
         const rows = payloadRows;
 
         // --- INÍCIO DA AUDITORIA DE PERDAS DE CONSOLE (Apenas para Dev/Log) ---
+        // --- INÍCIO DA AUDITORIA DE PERDAS DE CONSOLE (Apenas para Dev/Log) ---
         // Extrai lojas brutas (únicas originais)
         const dadosPlanilhaBruta = Array.from(new Map(agendamentos.map(a => [a.clienteId || a.loja, a])).values());
 
@@ -1080,16 +1081,16 @@ export default function NovoFaturamento() {
 
         // Cruzamento: O que tem na planilha bruta que NÃO entrou nas validadas?
         const lojasPerdidas = dadosPlanilhaBruta.filter(bruta =>
-            !lojasValidadas.some(validada => validada.cnpj_loja === bruta.agendamentoBase.cnpj || (bruta.agendamentoBase.clienteId && validada.loja_id === bruta.agendamentoBase.clienteId))
+            !lojasValidadas.some(validada => validada.cnpj_loja === bruta.cnpj || (bruta.clienteId && validada.loja_id === bruta.clienteId))
         );
 
         const relatorioPerdas = lojasPerdidas.map(loja => ({
-            "Nome na Planilha": loja.nomeLojaPlanilha || "N/A",
-            "Ciclo da Planilha": loja.agendamentoBase.cicloNome || "N/A",
-            "CNPJ Disponível": loja.agendamentoBase.cnpj ? "Sim" : "Não",
-            "Valor Planilha": loja.valorSoma ?? 0,
-            "Status Original": loja.agendamentoBase.status,
-            "Rejeição Provável": (!loja.agendamentoBase.cnpj && !loja.agendamentoBase.clienteId ? "Falta Vínculo / Divergente" : loja.agendamentoBase.isRemoved ? "Removida manualmente (ou Duplicata)" : (loja.agendamentoBase.status === "CICLO_INCORRETO" ? "Ciclo Incorreto" : (loja.agendamentoBase.status === "FORA_PERIODO" ? "Fora do Período" : "Faturamento Zerado/Outro")))
+            "Nome na Planilha": loja.loja || "N/A",
+            "Ciclo da Planilha": loja.cicloNome || "N/A",
+            "CNPJ Disponível": loja.cnpj ? "Sim" : "Não",
+            "Valor Planilha": loja.manualValue ?? loja.suggestedValorIwof ?? loja.valorIwof ?? 0,
+            "Status Original": loja.status,
+            "Rejeição Provável": (!loja.cnpj && !loja.clienteId ? "Falta Vínculo / Divergente" : loja.isRemoved ? "Removida manualmente (ou Duplicata)" : (loja.status === "CICLO_INCORRETO" ? "Ciclo Incorreto" : (loja.status === "FORA_PERIODO" ? "Fora do Período" : "Faturamento Zerado/Outro")))
         }));
 
         // Exibe uma tabela bonita e fácil de ler no Console do Navegador
@@ -1103,11 +1104,10 @@ export default function NovoFaturamento() {
         // --- FIM DA AUDITORIA DE PERDAS ---
 
         // --- INÍCIO DA AUDITORIA FISCAL DETALHADA ---
-        const lojasRejeitadas = dadosPlanilhaBruta.filter(bruta => !lojasValidadas.some(v => v.cnpj_loja === bruta.agendamentoBase.cnpj || (bruta.agendamentoBase.clienteId && v.loja_id === bruta.agendamentoBase.clienteId)));
+        const lojasRejeitadas = dadosPlanilhaBruta.filter(bruta => !lojasValidadas.some(v => v.cnpj_loja === bruta.cnpj || (bruta.clienteId && v.loja_id === bruta.clienteId)));
 
         console.log(`🚨 [AUDITORIA FINAL FISCAL] ${lojasRejeitadas.length} Lojas rejeitadas. Motivos:`);
-        lojasRejeitadas.forEach(lojaObj => {
-            const loja = lojaObj.agendamentoBase;
+        lojasRejeitadas.forEach(loja => {
             // Tenta achar no BD para ver o que faltou nela
             const dbMatch = dbClientes.find(db =>
                 normalizarNome(db.razao_social) === normalizarNome(loja.loja) ||
@@ -1121,7 +1121,7 @@ export default function NovoFaturamento() {
                 const motivos = [];
                 if (!dbMatch.cnpj) motivos.push("Sem CNPJ");
                 if (!dbMatch.cep || !dbMatch.endereco) motivos.push("Endereço Incompleto (CEP/Rua)");
-                if ((lojaObj.valorSoma || 0) <= 0) motivos.push("Faturamento <= 0");
+                if ((loja.manualValue ?? loja.suggestedValorIwof ?? loja.valorIwof ?? 0) <= 0) motivos.push("Faturamento <= 0");
                 if (loja.status === "CICLO_INCORRETO") motivos.push("Ciclo Incorreto");
                 if (loja.status === "FORA_PERIODO") motivos.push("Fora do Período");
                 if (loja.isRemoved) motivos.push("Removida Manualmente/Duplicata");
