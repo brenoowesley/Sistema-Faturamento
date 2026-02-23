@@ -191,10 +191,21 @@ export default function LoteFechamentoPage() {
             if (ajErr) throw ajErr;
 
             // 5. Group and Consolidate
+            console.log("📦 [AUDITORIA] Total de itens brutos recebidos para agrupamento:", agendamentos.length);
             const consolidatedMap = new Map<string, LojaConsolidada>();
 
             agendamentos.forEach(a => {
                 const client = a.clientes as any;
+
+                if (!a.loja_id || !client?.cnpj) {
+                    console.warn("⚠️ [ITEM DESCARTADO NO AGRUPAMENTO]:", {
+                        nome: client?.razao_social || "Sem Razão Social",
+                        cnpj: client?.cnpj,
+                        loja_id: a.loja_id,
+                        motivo: "Falta CNPJ ou ID da Loja para agrupar"
+                    });
+                }
+
                 if (!consolidatedMap.has(a.loja_id)) {
                     consolidatedMap.set(a.loja_id, {
                         id: a.loja_id,

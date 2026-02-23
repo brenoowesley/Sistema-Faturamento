@@ -176,6 +176,15 @@ function fmtTime(d: Date | null): string {
 
 // Remove função getSimilarity para evitar fallback frouxo
 
+const normalizarNome = (nome?: string) => {
+    if (!nome) return "";
+    return nome
+        .trim() // Remove espaços nas pontas
+        .toLowerCase() // Tudo minúsculo
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove acentos (ex: á -> a)
+        .replace(/\s+/g, " "); // Troca múltiplos espaços no meio por apenas um
+};
+
 /* ================================================================
    COMPONENT
    ================================================================ */
@@ -320,31 +329,6 @@ export default function NovoFaturamento() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    /* --- Log Ignored Stores --- */
-    useEffect(() => {
-        if (step !== "setup" && agendamentos.length > 0) {
-            const ignored = agendamentos.filter(a => {
-                const isValidated = !a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO") && a.clienteId;
-                return !isValidated;
-            });
-
-            if (ignored.length > 0) {
-                console.group("%c Lojas Ignoradas no Lote Final ", "color: white; background: #e11d48; font-weight: bold; border-radius: 4px; padding: 2px 6px;");
-                ignored.forEach(a => {
-                    let reason = "Desconhecido";
-                    if (a.isRemoved) reason = "Removido/Duplicata";
-                    else if (a.status === "FORA_PERIODO") reason = "Fora do Período";
-                    else if (a.status === "CICLO_INCORRETO") reason = "Ciclo Incorreto";
-                    else if (!a.clienteId) reason = "Divergente (Nome Conta Azul não encontrado)";
-                    else if (a.status === "CANCELAR") reason = "Cancelamento (Duração insuficiente)";
-
-                    console.log(`%c[${reason}]%c ${a.loja} %c(${a.nome})`, "color: #fbbf24; font-weight: bold;", "color: white;", "color: #94a3b8;");
-                });
-                console.groupEnd();
-            }
-        }
-    }, [agendamentos, step]);
-
     /* ================================================================
        PROCESSING PIPELINE
        ================================================================ */
@@ -416,7 +400,7 @@ export default function NovoFaturamento() {
             const clienteByContaAzul = new Map<string, ClienteDB>();
             for (const c of clientes) {
                 if (c.nome_conta_azul) {
-                    clienteByContaAzul.set(c.nome_conta_azul.toUpperCase().trim(), c);
+                    clienteByContaAzul.set(normalizarNome(c.nome_conta_azul), c);
                 }
             }
 
@@ -452,14 +436,15 @@ export default function NovoFaturamento() {
 
                 let suggestedClients: ClienteDB[] = [];
                 if (loja) {
-                    matched = clienteByContaAzul.get(loja);
+                    const lojaNormalizada = normalizarNome(loja);
+                    matched = clienteByContaAzul.get(lojaNormalizada);
 
                     // If no exact match, look for candidates (Substring)
                     if (!matched) {
                         suggestedClients = clientes.filter(c => {
                             if (!c.nome_conta_azul) return false;
-                            const dbName = c.nome_conta_azul.toUpperCase().trim();
-                            return loja.includes(dbName) || dbName.includes(loja);
+                            const dbName = normalizarNome(c.nome_conta_azul);
+                            return lojaNormalizada.includes(dbName) || dbName.includes(lojaNormalizada);
                         });
                     }
                 }
@@ -972,28 +957,36 @@ export default function NovoFaturamento() {
                 };
             });
 
-        // --- INÍCIO BLOCO DE AUDITORIA FISCAL (CONSOLE.LOG) ---
-        // Extrai as lojas únicas do array original (`agendamentos`) usando clienteId ou nome
-        const todasAsLojas = Array.from(new Map(agendamentos.map(a => [a.clienteId || a.loja, a])).values());
+        // --- INÍCIO DA AUDITORIA DE PERDAS ---
+        // Extrai lojas brutas (únicas)
+        const dadosPlanilhaBruta = Array.from(new Map(agendamentos.map(a => [a.clienteId || a.loja, a])).values());
 
-        // Extrai as lojas únicas do array final que vai pro banco (`rows`)
+        // Extrai lojas validadas que irão para o banco
         const lojasValidadas = Array.from(new Map(rows.map(r => [r.loja_id, r])).values());
 
-        const lojasBarradas = todasAsLojas.filter(original =>
-            !lojasValidadas.some(validada =>
-                (original.clienteId && validada.loja_id === original.clienteId) ||
-                (original.cnpj && validada.cnpj_loja === original.cnpj)
-            )
+        // Cruzamento: O que tem na planilha bruta que NÃO entrou nas validadas?
+        const lojasPerdidas = dadosPlanilhaBruta.filter(bruta =>
+            !lojasValidadas.some(validada => validada.cnpj_loja === bruta.cnpj || (bruta.clienteId && validada.loja_id === bruta.clienteId))
         );
 
-        console.log(`🚨 [RADAR FISCAL] Lojas Originais (Únicas): ${todasAsLojas.length} | Validadas (Únicas): ${lojasValidadas.length}`);
-        console.log("🕵️ Lojas que ficaram de fora:", lojasBarradas.map(loja => ({
-            nome: loja.razaoSocial || loja.loja,
-            cnpj: loja.cnpj || "SEM CNPJ",
-            motivoProvavel: !loja.clienteId ? "Falta Vínculo (Divergente)" : (loja.isRemoved ? "Removida manualmente (ou Duplicata)" : (loja.status === "CICLO_INCORRETO" ? "Ciclo Incorreto" : (loja.status === "FORA_PERIODO" ? "Fora do Período" : "Outro motivo (ex: Valor Zerado)"))),
-            statusOriginal: loja.status
-        })));
-        // --- FIM BLOCO DE AUDITORIA FISCAL ---
+        const relatorioPerdas = lojasPerdidas.map(loja => ({
+            "Nome na Planilha": loja.nome || loja.loja || "N/A",
+            "Ciclo da Planilha": loja.cicloNome || "N/A",
+            "CNPJ Disponível": loja.cnpj ? "Sim" : "Não",
+            "Valor Planilha": loja.originalValorIwof ?? loja.valorIwof ?? 0,
+            "Status Original": loja.status,
+            "Rejeição Provável": (!loja.cnpj && !loja.clienteId ? "Falta Vínculo / Divergente" : loja.isRemoved ? "Removida manualmente (ou Duplicata)" : (loja.status === "CICLO_INCORRETO" ? "Ciclo Incorreto" : (loja.status === "FORA_PERIODO" ? "Fora do Período" : "Faturamento Zerado/Outro")))
+        }));
+
+        // Exibe uma tabela bonita e fácil de ler no Console do Navegador
+        console.log(`📊 [AUDITORIA] Brutas Únicas: ${dadosPlanilhaBruta.length} | Validadas Únicas: ${lojasValidadas.length} | Perdidas: ${lojasPerdidas.length}`);
+        if (lojasPerdidas.length > 0) {
+            console.table(relatorioPerdas);
+
+            // Bônus: Imprime o JSON puro para fácil cópia
+            console.log("Copie o JSON abaixo se precisar de um arquivo:", JSON.stringify(relatorioPerdas, null, 2));
+        }
+        // --- FIM DA AUDITORIA DE PERDAS ---
 
         let ok = 0;
         let err = 0;
