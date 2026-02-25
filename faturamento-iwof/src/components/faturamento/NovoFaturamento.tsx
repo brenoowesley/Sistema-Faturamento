@@ -374,6 +374,7 @@ export default function NovoFaturamento() {
             const colDataCanc = findCol(headers, "data do cancelamento", "data_cancelamento");
             const colMotivo = findCol(headers, "motivo");
             const colRespCanc = findCol(headers, "responsável pelo cancelamento", "responsavel_cancelamento");
+            const colCnpjLoja = findCol(headers, "cnpj", "cnpj loja", "cnpj_loja", "cnpj empresa", "cnpj_empresa");
 
             /* --- Parse dates for period filter --- */
             const pStart = periodoInicio ? new Date(periodoInicio + "T00:00:00") : null;
@@ -442,6 +443,7 @@ export default function NovoFaturamento() {
                 const dataCancelamento = colDataCanc ? parseDate(row[colDataCanc]) : null;
                 const motivoCancelamento = colMotivo ? String(row[colMotivo] ?? "").trim() : "";
                 const responsavelCancelamento = colRespCanc ? String(row[colRespCanc] ?? "").trim() : "";
+                const cnpjDaPlanilha = colCnpjLoja ? normalizeCnpj(String(row[colCnpjLoja] ?? "").trim()) : "";
 
                 if (!loja) {
                     console.warn("Row skipped: no loja column found", row);
@@ -454,10 +456,17 @@ export default function NovoFaturamento() {
                 if (loja) {
                     const lojaNormalizada = normalizarNome(loja);
 
-                    // 1. Tenta achar direto no Map otimizado (Conta Azul)
-                    matched = clienteByContaAzul.get(lojaNormalizada);
+                    // 0. Prioridade máxima: CNPJ (identificador único, sem ambiguidade)
+                    if (cnpjDaPlanilha) {
+                        matched = clientes.find(c => normalizeCnpj(c.cnpj || "") === cnpjDaPlanilha);
+                    }
 
-                    // 2. Se não achou na Conta Azul, faz busca exata ampla no banco todo (Razão, Fantasia, Nome)
+                    // 1. Nome Conta Azul (único por cadastro)
+                    if (!matched) {
+                        matched = clienteByContaAzul.get(lojaNormalizada);
+                    }
+
+                    // 2. Busca exata por Razão Social / Fantasia / Nome
                     if (!matched) {
                         matched = clientes.find(c =>
                             normalizarNome(c.razao_social) === lojaNormalizada ||
