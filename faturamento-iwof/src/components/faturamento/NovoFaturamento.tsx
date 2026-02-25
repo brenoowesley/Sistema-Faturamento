@@ -467,9 +467,10 @@ export default function NovoFaturamento() {
                         );
                     }
 
-                    // 3. Se ainda não tem correspondência exata, busca candidatos parciais (Substring)
+                    // 3. Se ainda não tem correspondência exata, busca candidatos parciais e escolhe o mais específico
                     if (!matched) {
-                        suggestedClients = clientes.filter(c => {
+                        // Coleta todos os candidatos que têm sobreposição de substring
+                        const allPartials = clientes.filter(c => {
                             const nomesDb = [
                                 normalizarNome(c.nome_conta_azul || ""),
                                 normalizarNome(c.razao_social),
@@ -477,11 +478,56 @@ export default function NovoFaturamento() {
                                 normalizarNome(c.nome || "")
                             ].filter(n => n.length > 0);
 
-                            // Se a loja da planilha está contida no nome do BD ou vice-versa
                             return nomesDb.some(dbName =>
                                 lojaNormalizada.includes(dbName) || dbName.includes(lojaNormalizada)
                             );
                         });
+
+                        if (allPartials.length === 1) {
+                            // Apenas um candidato — usa diretamente
+                            matched = allPartials[0];
+                        } else if (allPartials.length > 1) {
+                            // Múltiplos candidatos: ranqueia pelo nome mais longo (mais específico) que ainda está
+                            // contido no nome da planilha ou vice-versa. Quanto maior o comprimento do match,
+                            // mais próximo da correspondência correta.
+                            let bestScore = -1;
+                            let bestCandidate: ClienteDB | undefined;
+                            let tied = false;
+
+                            for (const c of allPartials) {
+                                const nomesDb = [
+                                    normalizarNome(c.nome_conta_azul || ""),
+                                    normalizarNome(c.nome_fantasia || ""),
+                                    normalizarNome(c.razao_social),
+                                    normalizarNome(c.nome || "")
+                                ].filter(n => n.length > 0);
+
+                                // Score = comprimento do melhor nome que participou do match
+                                const score = Math.max(...nomesDb.map(dbName => {
+                                    if (lojaNormalizada === dbName) return dbName.length + 1000; // exato tem prioridade máxima
+                                    if (lojaNormalizada.includes(dbName) || dbName.includes(lojaNormalizada)) {
+                                        return Math.min(dbName.length, lojaNormalizada.length);
+                                    }
+                                    return -1;
+                                }));
+
+                                if (score > bestScore) {
+                                    bestScore = score;
+                                    bestCandidate = c;
+                                    tied = false;
+                                } else if (score === bestScore) {
+                                    tied = true;
+                                }
+                            }
+
+                            if (!tied && bestCandidate) {
+                                // Há um vencedor claro — usa como match automático
+                                matched = bestCandidate;
+                            } else {
+                                // Empate — não toma decisão, expõe todos como sugestões
+                                suggestedClients = allPartials;
+                            }
+                        }
                     }
                 }
 
