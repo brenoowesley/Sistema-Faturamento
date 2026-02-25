@@ -491,10 +491,16 @@ export default function NovoFaturamento() {
                 }
 
                 // 2. Ciclo Validation (Second Priority)
+                // Só rejeita se a loja TEM um ciclo cadastrado E ele não está na seleção.
+                // Lojas sem ciclo vinculado são aceitas (para não bloquear lojas mal configuradas).
                 if (status === "OK" && selectedCicloIds.length > 0) {
-                    if (!matched || !matched.ciclo_faturamento_id || !selectedCicloIds.includes(matched.ciclo_faturamento_id)) {
+                    const lojaTemCiclo = matched && matched.ciclo_faturamento_id;
+                    if (!matched) {
+                        // Não reconhecida no banco — sem ciclo para validar, deixa passar (será sinão "Conciliação")
+                    } else if (lojaTemCiclo && !selectedCicloIds.includes(matched.ciclo_faturamento_id!)) {
                         status = "CICLO_INCORRETO";
                     }
+                    // Se matched mas sem ciclo_faturamento_id: aceita como OK
                 }
 
                 // 3. Technical & Status Validations (Third Priority)
