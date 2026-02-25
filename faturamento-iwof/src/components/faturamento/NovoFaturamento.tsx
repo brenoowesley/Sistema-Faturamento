@@ -1000,6 +1000,7 @@ export default function NovoFaturamento() {
             payloadRows.push({
                 lote_id: lote.id,
                 nome_profissional: a.nome || "N/A",
+                vaga: a.vaga || null,
                 loja_id: a.clienteId!,
                 cnpj_loja: a.cnpj || null,
                 data_inicio: a.inicio?.toISOString() ?? periodoInicio,

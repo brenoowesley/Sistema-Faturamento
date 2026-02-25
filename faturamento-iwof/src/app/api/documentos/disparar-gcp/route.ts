@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
                 clientes(id, razao_social, cnpj)
             `)
             .eq("lote_id", loteId)
-            .eq("status_validacao", "VALIDADO")
+            .in("status_validacao", ["VALIDADO"])
             .order("data_inicio", { ascending: true });
 
         if (agErr) throw agErr;
@@ -88,6 +88,7 @@ export async function POST(req: NextRequest) {
                 fracao_hora: ag.fracao_hora,
                 valor: ag.valor_iwof,
                 profissional: ag.nome_profissional,
+                vaga: ag.vaga || null,
                 cnpj_execucao: ag.cnpj_loja || (ag.clientes as any)?.cnpj,
                 razao_social_execucao: (ag.clientes as any)?.razao_social
             });
@@ -105,7 +106,7 @@ export async function POST(req: NextRequest) {
             return ags.sort((a: any, b: any) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime())
                 .map((ag: any) => [
                     ag.profissional || "N/A",
-                    ag.razao_social_execucao || "N/A",
+                    ag.vaga || "-",
                     formatDateStr(ag.inicio),
                     formatDateStr(ag.termino),
                     `R$ ${formatarParaGCP(ag.valor)}`,
