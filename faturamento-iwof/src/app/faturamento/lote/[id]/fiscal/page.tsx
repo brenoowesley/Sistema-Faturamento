@@ -250,6 +250,7 @@ export default function FiscalProcessingPage() {
     const [rejeitados, setRejeitados] = useState<{ loja_id: string; razao_social: string; cnpj: string; motivo: string }[]>([]);
     const [isSummaryExpanded, setIsSummaryExpanded] = useState(false);
     const [summaryFilter, setSummaryFilter] = useState<"VALIDADAS" | "PENDENTES">("PENDENTES");
+    const [dropoutStores, setDropoutStores] = useState<{ razao_social: string; cnpj: string; statuses: string; total_valor: number }[]>([]);
 
     // Filter State
     const [filters, setFilters] = useState({
@@ -420,6 +421,36 @@ export default function FiscalProcessingPage() {
             const finalLojas = Array.from(finalMapping.values());
             setLojas(finalLojas);
 
+            // ── Dropout Diagnostics ──────────────────────────────────────────────────
+            // Identify stores that were saved to DB (any status) but are NOT in the
+            // VALIDADO fiscal consolidation. Helps diagnosing "missing" stores.
+            if (missingRecords) {
+                const validatedIds = new Set(finalLojas.flatMap(l => [l.id, ...(l.children || []).map((c: any) => c.id)]));
+                const byLoja = new Map<string, { razao: string; cnpj: string; statuses: Set<string>; total: number }>();
+
+                missingRecords.forEach((rec: any) => {
+                    if (validatedIds.has(rec.loja_id)) return; // already in fiscal — not a dropout
+                    const client = rec.clientes as any;
+                    const razao = client?.razao_social || "Empresa Desconhecida";
+                    const cnpj = client?.cnpj || rec.cnpj_loja || "Desconhecido";
+                    if (!byLoja.has(rec.loja_id)) {
+                        byLoja.set(rec.loja_id, { razao, cnpj, statuses: new Set(), total: 0 });
+                    }
+                    const entry = byLoja.get(rec.loja_id)!;
+                    entry.statuses.add(rec.status_validacao);
+                    entry.total += Number(rec.valor_iwof) || 0;
+                });
+
+                const dropout = Array.from(byLoja.values()).map(e => ({
+                    razao_social: e.razao,
+                    cnpj: e.cnpj,
+                    statuses: Array.from(e.statuses).join(" | "),
+                    total_valor: Math.round(e.total * 100) / 100
+                }));
+                setDropoutStores(dropout);
+            }
+            // ────────────────────────────────────────────────────────────────────────
+
         } catch (err) {
             console.error("Error fetching data:", err);
             alert("Erro ao carregar dados do lote.");
@@ -465,9 +496,28 @@ export default function FiscalProcessingPage() {
                 console.groupEnd();
             }
 
+            if (dropoutStores.length > 0) {
+                console.groupCollapsed(
+                    `%c 🔴 LOJAS DA CONSOLIDAÇÃO QUE SUMIRAM DO FISCAL (${dropoutStores.length}) `,
+                    "color: white; background: #dc2626; font-weight: bold; border-radius: 4px; padding: 2px 6px;"
+                );
+                console.log("%cEstas lojas tinham agendamentos no DB mas NENHUM chegou ao fiscal como VALIDADO:", "color: #fca5a5;");
+                console.table(
+                    dropoutStores.map(d => ({
+                        "Razão Social": d.razao_social,
+                        "CNPJ": d.cnpj,
+                        "Status(es) no DB": d.statuses,
+                        "Valor Total (R$)": d.total_valor
+                    }))
+                );
+                console.groupEnd();
+            } else if (!loading) {
+                console.log("%c ✅ Todas as lojas do DB estão representadas no fiscal ", "color: white; background: #16a34a; font-weight: bold; border-radius: 4px; padding: 2px 6px;");
+            }
+
             console.groupEnd();
         }
-    }, [loading, lojas, rejeitados]);
+    }, [loading, lojas, rejeitados, dropoutStores]);
 
     // 2. ZIP Processing
     const onDrop = useCallback(async (acceptedFiles: File[]) => {
