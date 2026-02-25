@@ -279,22 +279,54 @@ export default function FiscalProcessingPage() {
             }
             setLote(loteData);
 
-            // 2. Fetch Raw Agendamentos (to get Lojas involved)
-            const { data: agendamentos, error: agErr } = await supabase
-                .from("agendamentos_brutos")
-                .select("loja_id, cnpj_loja, valor_iwof, status_validacao, clientes(razao_social, nome_fantasia, nome_conta_azul, cnpj, loja_mae_id, ciclos_faturamento(nome))")
-                .eq("lote_id", loteId)
-                .eq("status_validacao", "VALIDADO");
+            // 2. Fetch Raw Agendamentos — paginated to bypass Supabase 1000-row default limit
+            let agendamentos: any[] = [];
+            {
+                let from = 0;
+                const step = 1000;
+                let hasMore = true;
+                while (hasMore) {
+                    const { data: chunk, error: chunkErr } = await supabase
+                        .from("agendamentos_brutos")
+                        .select("loja_id, cnpj_loja, valor_iwof, status_validacao, clientes(razao_social, nome_fantasia, nome_conta_azul, cnpj, loja_mae_id, ciclos_faturamento(nome))")
+                        .eq("lote_id", loteId)
+                        .eq("status_validacao", "VALIDADO")
+                        .range(from, from + step - 1);
+                    if (chunkErr) throw chunkErr;
+                    if (chunk && chunk.length > 0) {
+                        agendamentos = agendamentos.concat(chunk);
+                        from += step;
+                        hasMore = chunk.length === step;
+                    } else {
+                        hasMore = false;
+                    }
+                }
+            }
 
-            if (agErr) throw agErr;
+            // Fetch missing/rejected records — also paginated
+            let missingRecords: any[] = [];
+            {
+                let from = 0;
+                const step = 1000;
+                let hasMore = true;
+                while (hasMore) {
+                    const { data: chunk, error: chunkErr } = await supabase
+                        .from("agendamentos_brutos")
+                        .select("loja_id, status_validacao, cnpj_loja, valor_iwof, clientes(razao_social, cnpj, endereco, bairro, cidade, estado, cep)")
+                        .eq("lote_id", loteId)
+                        .range(from, from + step - 1);
+                    if (chunkErr) throw chunkErr;
+                    if (chunk && chunk.length > 0) {
+                        missingRecords = missingRecords.concat(chunk);
+                        from += step;
+                        hasMore = chunk.length === step;
+                    } else {
+                        hasMore = false;
+                    }
+                }
+            }
 
-            // Fetch missing/rejected records that couldn't be correctly billed for NFE export
-            const { data: missingRecords, error: missingErr } = await supabase
-                .from("agendamentos_brutos")
-                .select("loja_id, status_validacao, cnpj_loja, clientes(razao_social, cnpj, endereco, bairro, cidade, estado, cep)")
-                .eq("lote_id", loteId);
-
-            if (!missingErr && missingRecords) {
+            if (missingRecords.length > 0) {
                 const missingMap = new Map<string, { loja_id: string; razao_social: string; cnpj: string; motivo: string }>();
                 // Track which loja_ids have at least one VALIDADO record with complete fiscal data
                 const confirmedValidated = new Set<string>();
