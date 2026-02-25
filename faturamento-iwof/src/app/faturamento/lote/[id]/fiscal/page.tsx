@@ -24,7 +24,9 @@ import {
     Receipt,
     ChevronDown,
     ChevronUp,
-    Filter
+    Filter,
+    FileText,
+    Printer
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -676,31 +678,29 @@ export default function FiscalProcessingPage() {
         }
     };
 
-    const handleDispararGCP = async () => {
-        if (!confirm("Deseja disparar as tarefas de geração de documentos (PDFs) no Google Cloud Platform?")) return;
+    const handleDispararGCP = async (tipo: "NC" | "HC") => {
+        const label = tipo === "NC" ? "Notas de Crédito" : "Faturas / Descritivo de Horas";
+        if (!confirm(`Deseja disparar as tarefas de geração de ${label} no Google Cloud Platform?`)) return;
 
         setIsDispatching(true);
         try {
             const response = await fetch("/api/documentos/disparar-gcp", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ loteId })
+                body: JSON.stringify({ loteId, tipo })
             });
 
             const result = await response.json();
 
             if (!response.ok) throw new Error(result.error || "Erro ao disparar gerador GCP.");
 
-            alert("Processamento iniciado no servidor! Os documentos estarão disponíveis no Drive em instantes.");
+            alert(`Processamento de ${tipo} iniciado no servidor! Os documentos estarão disponíveis no Drive em instantes.`);
 
-            // Mostrar botão de ir para o drive. Se o backend mandou a drive_url na simulação ou se já temos no env local
+            // Mostrar botão de ir para o drive
             const driveUrl = result.data?.drive_url || process.env.NEXT_PUBLIC_DRIVE_FOLDER_URL || "https://drive.google.com/drive/my-drive";
-
-            // Setar estado temporario na window para simplificar ou usar hook de estado caso decida expandir
             window.open(driveUrl, "_blank");
 
-            fetchData(); // Refresh to show CONCLUÍDO status ou similar
-
+            fetchData();
         } catch (err: any) {
             console.error("Error dispatching GCP:", err);
             alert("Erro na integração com GCP: " + err.message);
@@ -1171,7 +1171,23 @@ export default function FiscalProcessingPage() {
                                     </button>
 
                                     <button
-                                        onClick={handleDispararGCP}
+                                        onClick={() => handleDispararGCP("NC")}
+                                        disabled={isConsolidating || isDispatching}
+                                        className="group relative overflow-hidden bg-amber-500 text-black px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center justify-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 shadow-[0_4px_20px_rgba(245,158,11,0.3)] hover:shadow-[0_0_30px_rgba(245,158,11,0.5)]"
+                                    >
+                                        {isDispatching ? (
+                                            <div className="w-5 h-5 border-2 border-black/20 border-t-black rounded-full animate-spin"></div>
+                                        ) : (
+                                            <>
+                                                Gerar Notas de Crédito (NC)
+                                                <FileText size={18} />
+                                            </>
+                                        )}
+                                        <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-12"></div>
+                                    </button>
+
+                                    <button
+                                        onClick={() => handleDispararGCP("HC")}
                                         disabled={isConsolidating || isDispatching}
                                         className="group relative overflow-hidden bg-[#3b82f6] text-white px-10 py-4 rounded-2xl font-black uppercase tracking-tighter text-sm flex items-center justify-center gap-3 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 shadow-[0_4px_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_30px_rgba(59,130,246,0.5)]"
                                     >
@@ -1179,8 +1195,8 @@ export default function FiscalProcessingPage() {
                                             <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
                                         ) : (
                                             <>
-                                                Disparar Geração de PDFs (Drive)
-                                                <Upload className="transition-transform group-hover:-translate-y-1" size={18} />
+                                                Gerar Faturas / HC
+                                                <Printer size={18} />
                                             </>
                                         )}
                                         <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-12"></div>

@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: NextRequest) {
     try {
-        const { loteId } = await req.json();
+        const { loteId, tipo } = await req.json();
 
         if (!loteId) {
             return NextResponse.json({ error: "loteId is required" }, { status: 400 });
@@ -338,6 +338,8 @@ export async function POST(req: NextRequest) {
 
         const pubNCUrl = process.env.GCP_PUB_NC_URL;
         const pubHCUrl = process.env.GCP_PUB_HC_URL;
+        const pubMasterNCUrl = process.env.GCP_PUB_MASTER_NC_URL;
+        const pubMasterHCUrl = process.env.GCP_PUB_MASTER_HC_URL;
         const gcpToken = process.env.GCP_AUTH_TOKEN;
 
         if (!pubNCUrl || !pubHCUrl) {
@@ -357,22 +359,52 @@ export async function POST(req: NextRequest) {
         const gcpRequests: Promise<Response>[] = [];
 
         // LOOP HC: Disparar MENSAGEM INDIVIDUAL p/ CADA LOJA
-        for (const lojaHC of payloadHC) {
-            const envioHCLoja = {
-                nome_pasta_ciclo: cycleNameStr,
-                ciclo_mensal: cyclePeriodStr,
-                ...lojaHC // info_loja, lista_acrescimos, itens_faturados_rows... at raiz
-            };
-            gcpRequests.push(fetch(pubHCUrl, { method: "POST", headers, body: JSON.stringify(envioHCLoja) }));
+        if (!tipo || tipo === "HC") {
+            for (const lojaHC of payloadHC) {
+                const envioHCLoja = {
+                    nome_pasta_ciclo: cycleNameStr,
+                    ciclo_mensal: cyclePeriodStr,
+                    ...lojaHC // info_loja, lista_acrescimos, itens_faturados_rows... at raiz
+                };
+                gcpRequests.push(fetch(pubHCUrl, { method: "POST", headers, body: JSON.stringify(envioHCLoja) }));
+            }
+
+            // GATILHO GLOBAL (MASTER HC)
+            if (pubMasterHCUrl && payloadHC.length > 0) {
+                const masterHCPayload = {
+                    nome_pasta_ciclo: cycleNameStr,
+                    ciclo_mensal: cyclePeriodStr,
+                    lote_id: lote.id,
+                    data_faturamento: new Date().toLocaleDateString("pt-BR"),
+                    lojas: payloadHC
+                };
+                gcpRequests.push(fetch(pubMasterHCUrl, { method: "POST", headers, body: JSON.stringify(masterHCPayload) }));
+                console.log(`[MASTER HC] Disparando gatilho global para o ciclo: ${cycleNameStr}`);
+            }
         }
 
         // LOOP NC: Disparar MENSAGEM INDIVIDUAL p/ CADA LOJA
-        for (const lojaNC of payloadNC) {
-            const envioNCLoja = {
-                nome_pasta_ciclo: cycleNameStr,
-                ...lojaNC // 'LOJA', 'CNPJ', 'NC'... at raiz
-            };
-            gcpRequests.push(fetch(pubNCUrl, { method: "POST", headers, body: JSON.stringify(envioNCLoja) }));
+        if (!tipo || tipo === "NC") {
+            for (const lojaNC of payloadNC) {
+                const envioNCLoja = {
+                    nome_pasta_ciclo: cycleNameStr,
+                    ...lojaNC // 'LOJA', 'CNPJ', 'NC'... at raiz
+                };
+                gcpRequests.push(fetch(pubNCUrl, { method: "POST", headers, body: JSON.stringify(envioNCLoja) }));
+            }
+
+            // GATILHO GLOBAL (MASTER NC)
+            if (pubMasterNCUrl && payloadNC.length > 0) {
+                const masterNCPayload = {
+                    nome_pasta_ciclo: cycleNameStr,
+                    ciclo_mensal: cyclePeriodStr,
+                    lote_id: lote.id,
+                    data_faturamento: new Date().toLocaleDateString("pt-BR"),
+                    lojas: payloadNC
+                };
+                gcpRequests.push(fetch(pubMasterNCUrl, { method: "POST", headers, body: JSON.stringify(masterNCPayload) }));
+                console.log(`[MASTER NC] Disparando gatilho global para o ciclo: ${cycleNameStr}`);
+            }
         }
 
         // Debug Payload p/ loggar a quantidade de disparos individuais (Apenas Exemplo Length)

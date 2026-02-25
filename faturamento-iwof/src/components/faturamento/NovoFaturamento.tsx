@@ -960,44 +960,12 @@ export default function NovoFaturamento() {
             }
         });
 
-        // O cliente definiu a regra sequencial: O validador primário para somar agendamentos DEVE SER o nome literal da loja enviado na planilha.
-        type AgrupamentoPlanilha = {
-            nomeLojaPlanilha: string;
-            agendamentoBase: Agendamento;
-            valorSoma: number;
-            fracaoHoraSoma: number;
-            allIds: string[];
-        };
-
-        const lojasAgrupadasValidas = validRowsToGroup.reduce<AgrupamentoPlanilha[]>((acc, current) => {
-            const nomeLoja = normalizarNome(current.loja);
-            const existente = acc.find(item => item.nomeLojaPlanilha === nomeLoja);
-
-            const valorAtual = current.manualValue ?? current.suggestedValorIwof ?? current.valorIwof;
-
-            if (existente) {
-                existente.valorSoma += valorAtual;
-                existente.fracaoHoraSoma += current.fracaoHora;
-                existente.allIds.push(current.id);
-            } else {
-                acc.push({
-                    nomeLojaPlanilha: nomeLoja,
-                    agendamentoBase: current,
-                    valorSoma: valorAtual,
-                    fracaoHoraSoma: current.fracaoHora,
-                    allIds: [current.id]
-                });
-            }
-            return acc;
-        }, []);
 
         // === ETAPA 2: Mapeamento, Validação Fiscal no Banco e Preparação do Payload ===
         const payloadRows: any[] = [];
 
-        // 2A: Empacota os Grupos de Lojas Válidas (1 Linha Consolidada por Loja)
-        lojasAgrupadasValidas.forEach((grupo) => {
-            const a = grupo.agendamentoBase;
-
+        // 2A: Empacota os Agendamentos Válidos Individuais (Detalhamento por Profissional)
+        validRowsToGroup.forEach((a) => {
             // Se for divergente ou sem vínculo, rebaixa para auditoria
             if (!a.clienteId) {
                 invalidRowsForAudit.push(a);
@@ -1011,22 +979,24 @@ export default function NovoFaturamento() {
                 return;
             }
 
+            const valorAtual = a.manualValue ?? a.suggestedValorIwof ?? a.valorIwof;
+
             // Filtrar faturamento zero ou negativo (não emite NF)
-            if (grupo.valorSoma <= 0) {
+            if (valorAtual <= 0) {
                 invalidRowsForAudit.push(a);
                 return;
             }
 
-            // Se passou em tudo, é uma loja 100% pronta pro Lote Fiscal!
+            // Se passou em tudo, é um agendamento individual pronto pro Lote Fiscal!
             payloadRows.push({
                 lote_id: lote.id,
-                nome_profissional: "Vários Profissionais (Consolidado)",
+                nome_profissional: a.nome || "N/A",
                 loja_id: a.clienteId!,
                 cnpj_loja: a.cnpj || null,
-                data_inicio: periodoInicio,
-                data_fim: periodoFim,
-                valor_iwof: Number(parseFloat(String(grupo.valorSoma)).toFixed(2)),
-                fracao_hora: grupo.fracaoHoraSoma,
+                data_inicio: a.inicio?.toISOString() ?? periodoInicio,
+                data_fim: a.termino?.toISOString() ?? periodoFim,
+                valor_iwof: Number(parseFloat(String(valorAtual)).toFixed(2)),
+                fracao_hora: a.fracaoHora,
                 status_validacao: "VALIDADO",
                 data_competencia: a.rawRow.data_competencia || null
             });
