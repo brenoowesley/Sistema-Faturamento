@@ -385,12 +385,15 @@ export default function FiscalProcessingPage() {
 
             const finalMapping = new Map<string, any>();
             Array.from(consolidatedMap.values()).forEach(st => {
-                const targetKey = st.loja_mae_id || st.id;
+                // Agrupamento por loja_mae somente para clientes LETA.
+                // Qualquer outra empresa sempre aparece como loja standalone.
+                const cicloNome: string = (st as any).ciclo || "";
+                const nomeContaAzul: string = (st.nome_conta_azul || "").toUpperCase();
+                const isLeta = cicloNome.toUpperCase().includes("LETA") || nomeContaAzul.includes("LETA") || nomeContaAzul.includes("ARCO-MIX") || nomeContaAzul.includes("ARCO MIX");
+                const targetKey = (isLeta && st.loja_mae_id) ? st.loja_mae_id : st.id;
 
                 if (!finalMapping.has(targetKey)) {
-                    // Se for uma loja que é mãe de outras, o consolidatedMap pode não ter uma entrada pra ela se ela não teve agendamentos.
-                    // Mas assumimos que se há filiais, a mãe existe ou o ID da mãe é suficiente para criar a entrada.
-                    finalMapping.set(targetKey, { ...st, isMother: !!st.loja_mae_id, children: [] });
+                    finalMapping.set(targetKey, { ...st, isMother: isLeta && !!st.loja_mae_id, children: [] });
                 } else {
                     const mother = finalMapping.get(targetKey)!;
                     mother.valorBruto += st.valorBruto;

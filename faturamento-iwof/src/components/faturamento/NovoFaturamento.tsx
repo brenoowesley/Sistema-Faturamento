@@ -717,7 +717,20 @@ export default function NovoFaturamento() {
                 suspicious: suspiciousListResult
             });
 
-            console.log(`Processing complete. Total input: ${rawRows.length}, Validated: ${finalParsed.length}, Skipped: ${rawRows.length - rawRows.length}`);
+            // Auto-remove identical duplicates (keep only the first of each group)
+            // This handles overlapping batch uploads (e.g. day 16-20 + 20-23 uploaded together).
+            const autoRemovedIds = new Set<string>();
+            identicalGroupsResult.forEach(group => {
+                group.slice(1).forEach(a => autoRemovedIds.add(a.id));
+            });
+            if (autoRemovedIds.size > 0) {
+                finalParsed.forEach(a => {
+                    if (autoRemovedIds.has(a.id)) a.isRemoved = true;
+                });
+                console.log(`Auto-removed ${autoRemovedIds.size} identical duplicate(s).`);
+            }
+
+            console.log(`Processing complete. Total input: ${rawRows.length}, Validated: ${finalParsed.length}, Auto-removed duplicates: ${autoRemovedIds.size}`);
             setAgendamentos(finalParsed);
 
             /* --- Conciliation --- */
