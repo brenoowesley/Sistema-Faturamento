@@ -505,9 +505,13 @@ export default function NovoFaturamento() {
 
                 // 3. Technical & Status Validations (Third Priority)
                 if (status === "OK") {
-                    const statusNormalizado = statusAgendamento.toLowerCase();
-                    if (statusNormalizado !== "concluído" && statusNormalizado !== "concluido") {
-                        status = "AUDITORIA_FINANCEIRA"; // Novo status interno para auditoria
+                    const statusNormalizado = statusAgendamento.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                    const isConcluido = statusNormalizado === "concluido" || statusNormalizado.includes("conclu");
+
+                    // Só aplica filtro de status se a coluna "status" foi encontrada na planilha
+                    // e o valor NÃO está vazio — evita bloquear planilhas sem essa coluna
+                    if (colStatusAgt && statusAgendamento.trim() !== "" && !isConcluido) {
+                        status = "AUDITORIA_FINANCEIRA";
                     } else if (fracaoHora < 0.16 && fracaoHora > 0) {
                         status = "CANCELAR";
                     } else if (fracaoHora > 6) {
