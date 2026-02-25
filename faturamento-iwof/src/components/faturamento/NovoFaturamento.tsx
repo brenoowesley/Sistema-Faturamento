@@ -53,7 +53,7 @@ interface ClienteDB {
     status: boolean;
 }
 
-type ValidationStatus = "OK" | "CANCELAR" | "CORREÇÃO" | "FORA_PERIODO" | "DUPLICATA" | "EXCLUIDO" | "CICLO_INCORRETO";
+type ValidationStatus = "OK" | "CANCELAR" | "CORREÇÃO" | "FORA_PERIODO" | "DUPLICATA" | "EXCLUIDO" | "CICLO_INCORRETO" | "AUDITORIA_FINANCEIRA";
 
 interface Agendamento {
     id: string;
@@ -497,9 +497,12 @@ export default function NovoFaturamento() {
                     }
                 }
 
-                // 3. Technical Validations (Third Priority)
+                // 3. Technical & Status Validations (Third Priority)
                 if (status === "OK") {
-                    if (fracaoHora < 0.16 && fracaoHora > 0) {
+                    const statusNormalizado = statusAgendamento.toLowerCase();
+                    if (statusNormalizado !== "concluído" && statusNormalizado !== "concluido") {
+                        status = "AUDITORIA_FINANCEIRA"; // Novo status interno para auditoria
+                    } else if (fracaoHora < 0.16 && fracaoHora > 0) {
                         status = "CANCELAR";
                     } else if (fracaoHora > 6) {
                         status = "CORREÇÃO";
@@ -952,8 +955,14 @@ export default function NovoFaturamento() {
         const invalidRowsForAudit: Agendamento[] = [];
 
         agendamentos.forEach(a => {
-            // Se o agendamento foi removido manualmente, cravado como fora de período/ciclo, ou status cancelar -> Vai pro lixo/auditoria e Não Soma no Boleto
-            if (a.status === "CICLO_INCORRETO" || a.status === "FORA_PERIODO" || a.isRemoved || a.status === "CANCELAR") {
+            // Se o agendamento foi removido manualmente, cravado como fora de período/ciclo, status cancelar ou não está "CONCLUÍDO" -> Vai pro lixo/auditoria e Não Soma no Boleto
+            if (
+                a.status === "CICLO_INCORRETO" ||
+                a.status === "FORA_PERIODO" ||
+                a.status === "AUDITORIA_FINANCEIRA" ||
+                a.isRemoved ||
+                a.status === "CANCELAR"
+            ) {
                 invalidRowsForAudit.push(a);
             } else {
                 validRowsToGroup.push(a);
@@ -1014,14 +1023,14 @@ export default function NovoFaturamento() {
                 else finalStatus = "EXCLUIDO";
             } else if (allDuplicateIds.has(a.id)) {
                 finalStatus = "DUPLICATA";
-            } else if (a.status === "OK" || a.status === "CORREÇÃO") {
-                // Se era pra ser válido mas caiu no array de inválido (ex: sem CEP, CNPJ, valor <= 0)
+            } else if (a.status === "OK" || a.status === "CORREÇÃO" || a.status === "AUDITORIA_FINANCEIRA") {
+                // Se era pra ser válido mas caiu no array de inválido (ex: sem CEP, CNPJ, valor <= 0, ou status não-Concluído)
                 finalStatus = "DADOS_FISCAIS_INCOMPLETOS";
             }
 
             payloadRows.push({
                 lote_id: lote.id,
-                nome_profissional: a.nome || "N/A",
+                nome_profissional: a.nome || "Individual",
                 loja_id: a.clienteId,
                 cnpj_loja: a.cnpj || null,
                 data_inicio: a.inicio?.toISOString() ?? periodoInicio,
