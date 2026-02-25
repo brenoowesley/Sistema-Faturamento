@@ -1026,8 +1026,11 @@ export default function NovoFaturamento() {
 
         /* 2) Bulk insert agendamentos */
         /* 2) Bulk insert agendamentos */
-        const allDuplicateIds = new Set([
-            ...duplicates.identical.flat().map(d => d.id),
+        // Only the non-first (removed) members of each identical group become DUPLICATA.
+        // The first member (kept) should NOT be in this set — if it fails for another reason,
+        // it should show its real status (DADOS_FISCAIS_INCOMPLETOS, etc.), not DUPLICATA.
+        const allDuplicateIds = new Set<string>([
+            ...duplicates.identical.flatMap(group => group.slice(1).map(d => d.id)),
             ...duplicates.suspicious.flat().map(d => d.id)
         ]);
 

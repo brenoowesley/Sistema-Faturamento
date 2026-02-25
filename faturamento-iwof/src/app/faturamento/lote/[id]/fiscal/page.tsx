@@ -295,6 +295,8 @@ export default function FiscalProcessingPage() {
 
             if (!missingErr && missingRecords) {
                 const missingMap = new Map<string, { loja_id: string; razao_social: string; cnpj: string; motivo: string }>();
+                // Track which loja_ids have at least one VALIDADO record with complete fiscal data
+                const confirmedValidated = new Set<string>();
 
                 missingRecords.forEach(rec => {
                     const client = rec.clientes as any;
@@ -302,20 +304,30 @@ export default function FiscalProcessingPage() {
                     const cnpj = client?.cnpj || rec.cnpj_loja || "Desconhecido";
 
                     if (!client) {
-                        missingMap.set(rec.loja_id, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: "Cliente não cadastrado no sistema" });
+                        if (!confirmedValidated.has(rec.loja_id)) {
+                            missingMap.set(rec.loja_id, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: "Cliente não cadastrado no sistema" });
+                        }
                         return;
                     }
 
                     if (rec.status_validacao !== "VALIDADO") {
-                        missingMap.set(rec.loja_id, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: `Status do agendamento: ${rec.status_validacao}` });
+                        // Only flag as missing if we haven't found a good VALIDADO record yet
+                        if (!confirmedValidated.has(rec.loja_id)) {
+                            missingMap.set(rec.loja_id, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: `Status do agendamento: ${rec.status_validacao}` });
+                        }
                         return;
                     }
 
-                    // Verifica se faltam dados fiscais cruciais para a Conta Azul (Endereço completo)
+                    // This is a VALIDADO record — check address completeness
                     const faltaEndereco = !client.endereco || !client.bairro || !client.cidade || !client.estado || !client.cep;
                     if (faltaEndereco) {
-                        missingMap.set(rec.loja_id, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: "Dados de endereço incompletos (Rua, Bairro, Cidade, UF ou CEP)" });
-                        return;
+                        if (!confirmedValidated.has(rec.loja_id)) {
+                            missingMap.set(rec.loja_id, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: "Dados de endereço incompletos (Rua, Bairro, Cidade, UF ou CEP)" });
+                        }
+                    } else {
+                        // Fully valid record — this store should NOT appear in Pendentes
+                        confirmedValidated.add(rec.loja_id);
+                        missingMap.delete(rec.loja_id);
                     }
                 });
 
