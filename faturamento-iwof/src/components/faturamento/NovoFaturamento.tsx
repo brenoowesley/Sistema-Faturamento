@@ -131,27 +131,37 @@ function findCol(headers: string[], ...candidates: string[]): string | null {
 function parseDate(val: unknown): Date | null {
     if (val == null || val === "") return null;
     const s = String(val).trim();
-    // Excel serial number
+    // Excel serial number (date only, no fractional time)
     const num = Number(s);
     if (!isNaN(num) && num > 10000 && num < 100000) {
         const epoch = new Date(Date.UTC(1899, 11, 30));
-        epoch.setUTCDate(epoch.getUTCDate() + num);
+        epoch.setUTCDate(epoch.getUTCDate() + Math.floor(num));
+        // Fractional part = time of day
+        const frac = num - Math.floor(num);
+        const totalSeconds = Math.round(frac * 86400);
+        epoch.setUTCHours(Math.floor(totalSeconds / 3600));
+        epoch.setUTCMinutes(Math.floor((totalSeconds % 3600) / 60));
+        epoch.setUTCSeconds(totalSeconds % 60);
         return epoch;
     }
-    // Try parsing as date string
+    // DD/MM/YYYY HH:MM:SS  or  DD/MM/YYYY HH:MM
+    const dtMatch = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (dtMatch) {
+        const [, day, month, year, hour, min, sec] = dtMatch;
+        return new Date(
+            parseInt(year), parseInt(month) - 1, parseInt(day),
+            parseInt(hour), parseInt(min), sec ? parseInt(sec) : 0
+        );
+    }
+    // DD/MM/YYYY (date only)
+    const dateOnly = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (dateOnly) {
+        const [, day, month, year] = dateOnly;
+        return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    }
+    // Generic ISO / other formats
     const d = new Date(s);
     if (!isNaN(d.getTime())) return d;
-    // dd/mm/yyyy
-    const parts = s.split(/[\/\-]/);
-    if (parts.length === 3) {
-        const day = parseInt(parts[0]);
-        const month = parseInt(parts[1]) - 1;
-        const year = parseInt(parts[2]);
-        if (year > 1900) {
-            const parsed = new Date(year, month, day);
-            if (!isNaN(parsed.getTime())) return parsed;
-        }
-    }
     return null;
 }
 
