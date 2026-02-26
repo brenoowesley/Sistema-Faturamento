@@ -14,6 +14,7 @@ import {
     ShieldAlert,
     ReceiptText,
     ClipboardList,
+    HelpCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -23,6 +24,7 @@ const navItems = [
     { label: "Novo Faturamento", href: "/faturamento/novo", icon: FilePlus },
     { label: "Notas de Crédito", href: "/notas-credito", icon: ReceiptText },
     { label: "Lanç. Parciais", href: "/lancamentos-parciais", icon: ClipboardList },
+    { label: "Como Usar", href: "/como-usar", icon: HelpCircle },
     { label: "Ajustes", href: "/ajustes", icon: SlidersHorizontal },
 ];
 
