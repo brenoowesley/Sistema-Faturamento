@@ -11,7 +11,9 @@ import {
     Receipt,
     LogOut,
     UserCircle,
-    ShieldAlert
+    ShieldAlert,
+    ReceiptText,
+    ClipboardList,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -19,6 +21,8 @@ const navItems = [
     { label: "Dashboard", href: "/", icon: LayoutDashboard },
     { label: "Clientes", href: "/clientes", icon: Users },
     { label: "Novo Faturamento", href: "/faturamento/novo", icon: FilePlus },
+    { label: "Notas de Crédito", href: "/notas-credito", icon: ReceiptText },
+    { label: "Lanç. Parciais", href: "/lancamentos-parciais", icon: ClipboardList },
     { label: "Ajustes", href: "/ajustes", icon: SlidersHorizontal },
 ];
 
