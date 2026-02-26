@@ -637,21 +637,47 @@ export default function CentralLancamentos() {
             return;
         }
 
-        const items = ncItems.map(l => ({
-            loja: l.nomeContaAzulMatch || l.razaoSocialMatch || l.lojaNomeSugerido || "Desconhecido",
-            cnpj: l.cnpj || "",
+        // Agrupar por loja+cnpj para não duplicar disparos
+        const agrupado = new Map<string, {
+            loja: string; cnpj: string; pedidos: string[];
+            totalValor: number; descricoes: string[];
+        }>();
+
+        for (const l of ncItems) {
+            const key = `${l.cnpj}_${l.lojaIdentificadaId}`;
+            const existing = agrupado.get(key);
+            if (existing) {
+                existing.totalValor += l.valor;
+                if (l.pedido && !existing.pedidos.includes(l.pedido)) {
+                    existing.pedidos.push(l.pedido);
+                }
+                if (l.descricao) existing.descricoes.push(l.descricao);
+            } else {
+                agrupado.set(key, {
+                    loja: l.nomeContaAzulMatch || l.razaoSocialMatch || l.lojaNomeSugerido || "Desconhecido",
+                    cnpj: l.cnpj || "",
+                    pedidos: l.pedido ? [l.pedido] : [],
+                    totalValor: l.valor,
+                    descricoes: l.descricao ? [l.descricao] : [],
+                });
+            }
+        }
+
+        const items = Array.from(agrupado.values()).map(g => ({
+            loja: g.loja,
+            cnpj: g.cnpj,
             estado: "",
             valorBoleto: 0,
-            valorNF: l.valor * 0.115,
-            valorNC: l.valor * 0.885,
-            descricaoServico: l.descricao,
+            valorNF: g.totalValor * 0.115,
+            valorNC: g.totalValor * 0.885,
+            descricaoServico: g.pedidos.join(", "),  // envia apenas os números de pedido
         }));
 
         try {
             const res = await fetch("/api/notas-credito/emitir", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ items, nomePasta: "LP_NC_" + new Date().toISOString().slice(0, 10) }),
+                body: JSON.stringify({ items, nomePasta: "Notas_Credito" }),
             });
             const json = await res.json();
             if (!res.ok) throw new Error(json.error);
