@@ -641,11 +641,10 @@ export default function FiscalProcessingPage() {
                     irrf = Number(((calcBase * 0.115) * 0.015).toFixed(2));
                 }
 
-                // O cliente definiu literalmente:
-                // 1. Soma do valor = Boleto
-                // 2. NC = 88.5% do Boleto
-                // 3. NF = 11.5% do Boleto
-                const boleto = calcBase;
+                // Regra de cálculo:
+                // - calcBase (bruto + acréscimos - descontos) define NF e NC
+                // - IRRF só afeta o boleto (valor líquido a receber)
+                const boleto = calcBase - irrf;
                 const nc = calcBase * 0.885;
 
                 return {
