@@ -46,18 +46,31 @@ export async function POST(req: NextRequest) {
             }, { status: 400 });
         }
 
-        // 3. Fetch Raw Agendamentos (Para os Descritivos)
-        const { data: agendamentos, error: agErr } = await supabase
-            .from("agendamentos_brutos")
-            .select(`
-                *,
-                clientes(id, razao_social, cnpj)
-            `)
-            .eq("lote_id", loteId)
-            .in("status_validacao", ["VALIDADO"])
-            .order("data_inicio", { ascending: true });
+        // 3. Fetch Raw Agendamentos (Para os Descritivos) — paginado para superar o limite de 1000 linhas do Supabase
+        let agendamentos: any[] = [];
+        let agFrom = 0;
+        const agStep = 1000;
+        let agHasMore = true;
+        while (agHasMore) {
+            const { data: agChunk, error: agErr } = await supabase
+                .from("agendamentos_brutos")
+                .select(`
+                    *,
+                    clientes(id, razao_social, cnpj)
+                `)
+                .eq("lote_id", loteId)
+                .in("status_validacao", ["VALIDADO"])
+                .order("data_inicio", { ascending: true })
+                .range(agFrom, agFrom + agStep - 1);
 
-        if (agErr) throw agErr;
+            if (agErr) throw agErr;
+            if (agChunk && agChunk.length > 0) {
+                agendamentos = [...agendamentos, ...agChunk];
+                agFrom += agStep;
+            }
+            if (!agChunk || agChunk.length < agStep) agHasMore = false;
+        }
+        console.log(`[GCP DISPATCH] Total agendamentos validados carregados (paginado): ${agendamentos.length}`);
 
         const payloadNC: any[] = [];
         const payloadHC: any[] = [];
@@ -218,23 +231,20 @@ export async function POST(req: NextRequest) {
                 if (isLeta) {
                     // LETA MESTRA E SUAS FILIAIS - INJETAR SEPARADAMENTE
 
-                    // 1. A Matriz (Tratar também aqui se teve agendamento direto)
+                    // 1. A Matriz — usa valores consolidados (mesma base do Fechamento Financeiro)
                     if (agsDaLoja.length > 0) {
-                        const brutoMatriz = agsDaLoja.reduce((acc, curr) => acc + curr.valor, 0);
-                        const baseMestraVirtual = brutoMatriz + totalAcrescimo - totalDesconto - Number(valorIRRF || 0);
-
                         payloadHC.push({
                             info_loja: {
                                 "LOJA": cliente.nome_conta_azul || cliente.razao_social,
                                 "CNPJ": cliente.cnpj,
                                 "Nº NF": numNotaFiscal,
-                                "VALOR_BRUTO": formatarParaGCP(brutoMatriz),
-                                "ACRESCIMO": formatarParaGCP(totalAcrescimo),
-                                "DESCONTO": formatarParaGCP(totalDesconto),
-                                "IRRF": formatarParaGCP(Number(valorIRRF || 0)),
-                                "VALOR_LIQUIDO": formatarParaGCP(baseMestraVirtual),
-                                "NF": formatarParaGCP(baseMestraVirtual * 0.115),
-                                "NC": formatarParaGCP(baseMestraVirtual * 0.885)
+                                "VALOR_BRUTO": financeiroPayload.valor_bruto,
+                                "ACRESCIMO": financeiroPayload.acrescimos,
+                                "DESCONTO": financeiroPayload.descontos,
+                                "IRRF": financeiroPayload.irrf_presumido,
+                                "VALOR_LIQUIDO": financeiroPayload.valor_liquido_boleto,
+                                "NF": financeiroPayload.valor_nf_emitida,
+                                "NC": financeiroPayload.valor_nc_final
                             },
                             lista_acrescimos: lista_acrescimos,
                             lista_descontos: lista_descontos,
@@ -292,23 +302,20 @@ export async function POST(req: NextRequest) {
 
                 } else {
                     // TODAS AS OUTRAS LOJAS E NORDESTÃO (Não-LETA)
-                    const brutoNormal = agsDaLoja.reduce((acc, curr) => acc + curr.valor, 0);
-                    // O valorIRRF é declarado na linha 129. Sempre aplica pra todos os padroes
-                    const valorIrRegra = Number(valorIRRF || 0);
-                    const baseNormalVirtual = brutoNormal + totalAcrescimo - totalDesconto - valorIrRegra;
-
+                    // Usa valores consolidados do faturamento_consolidados (mesma base do Fechamento Financeiro)
+                    // Os ajustes e IRRF já estão calculados em financeiroPayload
                     payloadHC.push({
                         info_loja: {
                             "LOJA": cliente.nome_conta_azul || cliente.razao_social,
                             "CNPJ": cliente.cnpj,
                             "Nº NF": numNotaFiscal,
-                            "VALOR_BRUTO": formatarParaGCP(brutoNormal),
-                            "ACRESCIMO": formatarParaGCP(totalAcrescimo),
-                            "DESCONTO": formatarParaGCP(totalDesconto),
-                            "IRRF": formatarParaGCP(valorIrRegra),
-                            "VALOR_LIQUIDO": formatarParaGCP(baseNormalVirtual),
-                            "NF": formatarParaGCP(baseNormalVirtual * 0.115),
-                            "NC": formatarParaGCP(baseNormalVirtual * 0.885)
+                            "VALOR_BRUTO": financeiroPayload.valor_bruto,
+                            "ACRESCIMO": financeiroPayload.acrescimos,
+                            "DESCONTO": financeiroPayload.descontos,
+                            "IRRF": financeiroPayload.irrf_presumido,
+                            "VALOR_LIQUIDO": financeiroPayload.valor_liquido_boleto,
+                            "NF": financeiroPayload.valor_nf_emitida,
+                            "NC": financeiroPayload.valor_nc_final
                         },
                         lista_acrescimos: lista_acrescimos,
                         lista_descontos: lista_descontos,
