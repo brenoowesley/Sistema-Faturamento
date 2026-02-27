@@ -102,7 +102,7 @@ export default function Step1Upload({ onNext, setIsProcessing, isProcessing }: S
     return (
         <div className="card">
             <div className="flex flex-col mb-6">
-                <h2 className="text-xl font-bold text-white mb-2">Upload de Arquivos</h2>
+                <h2 className="text-xl font-bold text-[var(--fg)] mb-2">Upload de Arquivos</h2>
                 <p className="text-sm text-[var(--fg-dim)]">Arraste os arquivos PDF de Boletos individuais ou um arquivo ZIP contendo as Notas Fiscais extraídas do portal (NFE.io).</p>
             </div>
 
@@ -124,14 +124,14 @@ export default function Step1Upload({ onNext, setIsProcessing, isProcessing }: S
                 {isProcessing ? (
                     <div className="flex flex-col items-center gap-4 py-8">
                         <Loader2 size={48} className="text-[var(--accent)] animate-spin" />
-                        <span className="font-semibold text-white tracking-widest uppercase text-sm">Extraindo pacotes...</span>
+                        <span className="font-semibold text-[var(--fg)] tracking-widest uppercase text-sm">Extraindo pacotes...</span>
                     </div>
                 ) : (
                     <>
                         <div className="w-16 h-16 rounded-full bg-[rgba(129,140,248,0.1)] flex items-center justify-center mb-2">
                             <UploadCloud size={32} className="text-[var(--accent)]" />
                         </div>
-                        <h3 className="text-lg font-bold text-white">Arraste seus PDFs ou ZIPs aqui</h3>
+                        <h3 className="text-lg font-bold text-[var(--fg)]">Arraste seus PDFs ou ZIPs aqui</h3>
                         <p className="text-sm text-[var(--fg-muted)]">Ou clique para selecionar de uma pasta.</p>
                         <div className="flex gap-3 mt-4">
                             <span className="badge badge-info"><FileType2 size={12} /> PDF (Boletos)</span>
@@ -155,7 +155,7 @@ export default function Step1Upload({ onNext, setIsProcessing, isProcessing }: S
                         <AlertCircle size={16} />
                     </div>
                     <div>
-                        <p className="text-sm font-bold text-white">Como funciona?</p>
+                        <p className="text-sm font-bold text-[var(--fg)]">Como funciona?</p>
                         <p className="text-xs text-[var(--fg-dim)]">Seus ZIPs não sobem diretamente pro servidor. Nós extraimos tudo de forma ultra-rápida no seu navegador e usamos a inteligência artificial para ler os nomes.</p>
                     </div>
                 </div>

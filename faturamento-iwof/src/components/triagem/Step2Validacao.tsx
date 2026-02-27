@@ -117,7 +117,7 @@ export default function Step2Validacao({ arquivos, setArquivos, onBack, onNext }
         <div className="flex flex-col gap-6">
             <div className="card">
                 <div className="flex flex-col mb-4">
-                    <h2 className="text-xl font-bold text-white mb-2">Validação e Relacionamento</h2>
+                    <h2 className="text-xl font-bold text-[var(--fg)] mb-2">Validação e Relacionamento</h2>
                     <p className="text-sm text-[var(--fg-dim)]">O sistema tentou adivinhar os nomes de clientes e números de nota. Revise se os nomes estão corretos e defina qual é a pasta do Ciclo.</p>
                 </div>
 
@@ -171,7 +171,7 @@ export default function Step2Validacao({ arquivos, setArquivos, onBack, onNext }
                                                 <td>
                                                     <div className="flex items-center gap-2">
                                                         <FileText size={16} className="text-[var(--fg-dim)]" />
-                                                        <span className="text-sm font-medium text-white max-w-[200px] truncate" title={a.file.name}>
+                                                        <span className="text-sm font-medium text-[var(--fg)] max-w-[200px] truncate" title={a.file.name}>
                                                             {a.file.name}
                                                         </span>
                                                     </div>
@@ -186,7 +186,7 @@ export default function Step2Validacao({ arquivos, setArquivos, onBack, onNext }
                                                     />
                                                     {a.nfNumber && (
                                                         <span className="text-[10px] text-[var(--fg-dim)] mt-1 block tracking-wider">
-                                                            NF Extraída: <strong className="text-white">{a.nfNumber}</strong>
+                                                            NF Extraída: <strong className="text-[var(--fg)]">{a.nfNumber}</strong>
                                                         </span>
                                                     )}
                                                 </td>
@@ -198,7 +198,7 @@ export default function Step2Validacao({ arquivos, setArquivos, onBack, onNext }
                                                     >
                                                         <option value="" disabled className="bg-[var(--bg-card)]">Selecione o Ciclo</option>
                                                         {ciclosOptions.map(c => (
-                                                            <option key={c} value={c} className="bg-[var(--bg-card)] text-white">{c}</option>
+                                                            <option key={c} value={c} className="bg-[var(--bg-card)] text-[var(--fg)]">{c}</option>
                                                         ))}
                                                     </select>
                                                 </td>

@@ -11,6 +11,7 @@ interface EmissaoNotasProps {
     periodoFim: string;
     selectedCicloIds: string[];
     lojasSemNf: Set<string>;
+    agendamentos: any[];
     nfseFiles: { name: string; blob: Blob; buffer: ArrayBuffer }[];
     setNfseFiles: React.Dispatch<React.SetStateAction<{ name: string; blob: Blob; buffer: ArrayBuffer }[]>>;
 }
@@ -21,6 +22,7 @@ export default function EmissaoNotas({
     periodoFim,
     selectedCicloIds,
     lojasSemNf,
+    agendamentos,
     nfseFiles,
     setNfseFiles
 }: EmissaoNotasProps) {
@@ -31,17 +33,33 @@ export default function EmissaoNotas({
     const handleDownload = async () => {
         setIsExporting(true);
         try {
-            const queryParams = new URLSearchParams();
-            if (periodoInicio) queryParams.append("inicio", periodoInicio);
-            if (periodoFim) queryParams.append("fim", periodoFim);
-            if (selectedCicloIds.length > 0) queryParams.append("ciclos", selectedCicloIds.join(","));
-            if (lojasSemNf.size > 0) queryParams.append("lojasSemNF", Array.from(lojasSemNf).join(","));
+            const response = await fetch("/api/documentos/simular-nfe", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    agendamentos,
+                    lojasSemNF: Array.from(lojasSemNf),
+                    periodoInicio,
+                    periodoFim
+                })
+            });
 
-            const url = `/api/documentos/exportar-nfe?${queryParams.toString()}`;
-            window.location.href = url;
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.error || "Erro ao gerar NFE simulada.");
+            }
 
-            // Give it time to download
-            setTimeout(() => setIsExporting(false), 2000);
+            const blob = await response.blob();
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = downloadUrl;
+            a.download = `planilha_nfe_iw_${Date.now()}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(downloadUrl);
+
+            setIsExporting(false);
         } catch (e) {
             console.error("Erro ao exportar NFSE", e);
             setIsExporting(false);
@@ -108,7 +126,7 @@ export default function EmissaoNotas({
     return (
         <div className="flex flex-col gap-6 max-w-6xl mx-auto">
             <div className="flex items-center justify-between mb-4">
-                <button className="btn btn-ghost text-[var(--fg-dim)] hover:text-white" onClick={() => setCurrentStep(3)}>
+                <button className="btn btn-ghost text-[var(--fg-dim)] hover:text-[var(--fg)]" onClick={() => setCurrentStep(3)}>
                     <ArrowLeft size={16} /> Voltar Seleção Fiscal
                 </button>
                 <button
@@ -121,7 +139,7 @@ export default function EmissaoNotas({
             </div>
 
             <div className="text-center mb-6">
-                <h2 className="text-3xl font-black text-white mb-2">Emissão de Notas</h2>
+                <h2 className="text-3xl font-black text-[var(--fg)] mb-2">Emissão de Notas</h2>
                 <p className="text-[var(--fg-dim)] max-w-2xl mx-auto">
                     Exporte a planilha unificada, importe na plataforma emissora (Conta Azul/NFE.IO) e, em seguida, devolva o arquivo ZIP gerado para darmos continuidade ao disparo e faturamento.
                 </p>
@@ -139,7 +157,7 @@ export default function EmissaoNotas({
                         <FileDown size={40} className="text-[var(--accent)]" />
                     </div>
 
-                    <h3 className="text-2xl font-bold text-white mb-3 relative z-10">Exportar Planilha Base</h3>
+                    <h3 className="text-2xl font-bold text-[var(--fg)] mb-3 relative z-10">Exportar Planilha Base</h3>
                     <p className="text-[var(--fg-dim)] mb-8 relative z-10 text-sm leading-relaxed px-4">
                         Faça o download da planilha padronizada contendo apenas as lojas selecionadas para a emissão. Este é o arquivo que você subirá na plataforma da NFE.IO.
                     </p>
@@ -174,7 +192,7 @@ export default function EmissaoNotas({
                     {isExtracting ? (
                         <div className="flex flex-col items-center gap-4 relative z-10 animate-in fade-in">
                             <span className="loading loading-spinner loading-lg text-[var(--accent)]"></span>
-                            <p className="font-bold text-white">Extraindo arquivos do ZIP...</p>
+                            <p className="font-bold text-[var(--fg)]">Extraindo arquivos do ZIP...</p>
                         </div>
                     ) : nfseFiles.length > 0 ? (
                         <div className="flex flex-col items-center gap-4 relative z-10 animate-in zoom-in duration-300">
@@ -182,7 +200,7 @@ export default function EmissaoNotas({
                                 <CheckCircle2 size={48} className="text-[var(--success)]" />
                             </div>
                             <div>
-                                <h3 className="text-2xl font-bold text-white mb-1">Upload Concluído!</h3>
+                                <h3 className="text-2xl font-bold text-[var(--fg)] mb-1">Upload Concluído!</h3>
                                 <p className="text-[var(--success)] font-medium bg-[var(--success)]/10 px-4 py-1.5 rounded-full inline-block">
                                     {nfseFiles.length} notas carregadas na memória
                                 </p>
@@ -202,7 +220,7 @@ export default function EmissaoNotas({
                             <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-6 border transition-all duration-300 ${isDragActive ? "bg-[var(--accent)] text-white border-[var(--accent)] scale-110 shadow-[0_0_40px_rgba(33,118,255,0.4)]" : "bg-[var(--bg-card)] text-[var(--fg-dim)] border-[var(--border)]"}`}>
                                 <UploadCloud size={40} className={isDragActive ? "animate-bounce" : ""} />
                             </div>
-                            <h3 className="text-2xl font-bold text-white mb-2">Devolver ZIP com XML/PDFs</h3>
+                            <h3 className="text-2xl font-bold text-[var(--fg)] mb-2">Devolver ZIP com XML/PDFs</h3>
                             <p className="text-[var(--fg-dim)] text-sm max-w-[280px] leading-relaxed mb-4">
                                 Após gerar as notas na plataforma, baixe o arquivo comprimido (.zip) e jogue aqui.
                             </p>
@@ -213,7 +231,7 @@ export default function EmissaoNotas({
                                 </div>
                             )}
 
-                            <span className="btn btn-outline border-[var(--border)] text-[var(--fg-dim)] hover:border-white hover:text-white transition-colors">
+                            <span className="btn btn-outline border-[var(--border)] text-[var(--fg-dim)] hover:border-[var(--fg)] hover:text-[var(--fg)] transition-colors">
                                 Selecionar Arquivo
                             </span>
                         </div>
@@ -231,3 +249,4 @@ export default function EmissaoNotas({
         </div>
     );
 }
+

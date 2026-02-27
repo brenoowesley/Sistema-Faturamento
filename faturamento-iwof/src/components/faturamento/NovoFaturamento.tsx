@@ -1268,7 +1268,7 @@ export default function NovoFaturamento() {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {/* Left column: Period + Ciclos */}
                     <div className="card">
-                        <h3 className="text-lg font-semibold text-white mb-4">Configuração do Lote</h3>
+                        <h3 className="text-lg font-semibold text-[var(--fg)] mb-4">Configuração do Lote</h3>
 
                         {/* Period */}
                         <p className="text-xs font-semibold uppercase tracking-wider text-[var(--fg-dim)] mb-2">
@@ -1513,7 +1513,7 @@ export default function NovoFaturamento() {
                                 <div className="p-2 rounded-lg bg-amber-500/10">
                                     <AlertTriangle className="text-amber-500" size={24} />
                                 </div>
-                                <h3 className="text-lg font-bold text-white">Configurar Fatiamento Queiroz</h3>
+                                <h3 className="text-lg font-bold text-[var(--fg)]">Configurar Fatiamento Queiroz</h3>
                             </div>
 
                             <p className="text-sm text-[var(--fg-dim)] mb-6 leading-relaxed">
@@ -1619,7 +1619,7 @@ export default function NovoFaturamento() {
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-xs font-medium uppercase tracking-wider text-[var(--fg-dim)]">Empresas Faturadas (Validadas)</p>
-                            <p className="text-2xl font-bold mt-1 text-white">{financialSummary.globalFaturadas} <span className="text-sm font-normal text-[var(--fg-muted)]">CNPJs Únicos</span></p>
+                            <p className="text-2xl font-bold mt-1 text-[var(--fg)]">{financialSummary.globalFaturadas} <span className="text-sm font-normal text-[var(--fg-muted)]">CNPJs Únicos</span></p>
                         </div>
                         <CheckCircle2 size={32} className="text-[#3b82f6] opacity-30" />
                     </div>
@@ -1847,7 +1847,7 @@ export default function NovoFaturamento() {
                                                             {/* ── State header ── */}
                                                             <div className="flex items-center justify-between px-5 py-3" style={{ background: "linear-gradient(135deg, rgba(99,102,241,0.15), rgba(99,102,241,0.05))", borderBottom: "1px solid var(--border)" }}>
                                                                 <div className="flex items-center gap-3">
-                                                                    <span className="text-2xl font-black tracking-tight text-white">{uf}</span>
+                                                                    <span className="text-2xl font-black tracking-tight text-[var(--fg)]">{uf}</span>
                                                                     <div className="h-5 w-px bg-[var(--border)]" />
                                                                     <span className="text-xs text-[var(--fg-dim)]">
                                                                         {cancelar.length + correcao.length} agendamento{cancelar.length + correcao.length !== 1 ? "s" : ""}
@@ -2756,3 +2756,4 @@ export default function NovoFaturamento() {
         </div >
     );
 }
+

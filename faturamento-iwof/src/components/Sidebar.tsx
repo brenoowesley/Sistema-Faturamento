@@ -71,7 +71,7 @@ export default function Sidebar() {
                 <div className="sidebar-brand flex justify-between items-center w-full">
                     <div className="sidebar-logo-container">
                         <img
-                            src="https://i.imgur.com/ag93VEM.png"
+                            src={theme === 'dark' ? "https://i.imgur.com/ag93VEM.png" : "https://i.imgur.com/MKGrpJX.png"}
                             alt="IWOF Logo"
                             className="sidebar-logo-img"
                             style={{ height: "45px", width: "auto" }}

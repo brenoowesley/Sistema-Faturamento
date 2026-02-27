@@ -84,7 +84,7 @@ export default function Step3Envio({ arquivos, onBack, onComplete }: Step3EnvioP
         <div className="flex flex-col gap-6">
             <div className="card">
                 <div className="flex flex-col mb-6">
-                    <h2 className="text-xl font-bold text-white mb-2">Disparo para o Google Drive</h2>
+                    <h2 className="text-xl font-bold text-[var(--fg)] mb-2">Disparo para o Google Drive</h2>
                     <p className="text-sm text-[var(--fg-dim)]">Pronto para organizar os PDFs na nuvem. Acompanhe o progresso do upload pelo terminal abaixo.</p>
                 </div>
 
@@ -103,8 +103,8 @@ export default function Step3Envio({ arquivos, onBack, onComplete }: Step3EnvioP
                                 <div key={log.id} className="flex gap-3">
                                     <span className="text-[var(--fg-dim)] opacity-50 flex-shrink-0">[{log.time}]</span>
                                     <span className={`${log.type === 'success' ? 'text-[var(--success)]' :
-                                            log.type === 'error' ? 'text-[var(--danger)]' :
-                                                log.type === 'warning' ? 'text-[var(--warning)]' : 'text-blue-300'
+                                        log.type === 'error' ? 'text-[var(--danger)]' :
+                                            log.type === 'warning' ? 'text-[var(--warning)]' : 'text-blue-300'
                                         }`}>
                                         {log.message}
                                     </span>

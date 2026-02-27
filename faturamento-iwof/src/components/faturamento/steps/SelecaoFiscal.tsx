@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { ArrowLeft, ChevronRight, Check, X, Info } from "lucide-react";
+import { ArrowLeft, ChevronRight, Check, X, Info, Search } from "lucide-react";
 import { Agendamento, FinancialSummary } from "../types";
 import { fmtCurrency } from "../utils";
 
@@ -59,6 +59,19 @@ export default function SelecaoFiscal({
         return Array.from(map.values()).sort((a, b) => b.valorSugerido - a.valorSugerido);
     }, [agendamentos]);
 
+    const [searchTerm, setSearchTerm] = useState("");
+
+    const filteredLojas = useMemo(() => {
+        if (!searchTerm.trim()) return lojasData;
+        const lowerSearch = searchTerm.toLowerCase();
+
+        return lojasData.filter(loja =>
+            loja.razaoSocial.toLowerCase().includes(lowerSearch) ||
+            loja.nomeCliente.toLowerCase().includes(lowerSearch) ||
+            loja.cnpj.includes(lowerSearch)
+        );
+    }, [lojasData, searchTerm]);
+
     // Handle initial state alignment
     useEffect(() => {
         // If a new store is brought in that was missing, by default it SHOULD emit NF
@@ -78,12 +91,19 @@ export default function SelecaoFiscal({
     };
 
     const toggleAll = (forceOn: boolean) => {
-        if (forceOn) {
-            setLojasSemNf(new Set());
-        } else {
-            const allIds = new Set(lojasData.map(l => l.id));
-            setLojasSemNf(allIds);
-        }
+        setLojasSemNf(prev => {
+            const next = new Set(prev);
+            for (const loja of filteredLojas) {
+                if (forceOn) {
+                    // Turn ON emissions -> remove from lojasSemNf
+                    next.delete(loja.id);
+                } else {
+                    // Turn OFF emissions -> add to lojasSemNf
+                    next.add(loja.id);
+                }
+            }
+            return next;
+        });
     };
 
     const emitCount = lojasData.length - lojasSemNf.size;
@@ -91,7 +111,7 @@ export default function SelecaoFiscal({
     return (
         <div className="flex flex-col gap-6 max-w-5xl mx-auto">
             <div className="flex items-center justify-between mb-2">
-                <button className="btn btn-ghost text-[var(--fg-dim)] hover:text-white" onClick={() => setCurrentStep(2)}>
+                <button className="btn btn-ghost text-[var(--fg-dim)] hover:text-[var(--fg)]" onClick={() => setCurrentStep(2)}>
                     <ArrowLeft size={16} /> Voltar ao Resumo
                 </button>
                 <button className="btn btn-primary" onClick={() => setCurrentStep(4)}>
@@ -100,7 +120,7 @@ export default function SelecaoFiscal({
             </div>
 
             <div className="text-center mb-6">
-                <h2 className="text-2xl font-bold text-white mb-2">Seleção Fiscal</h2>
+                <h2 className="text-2xl font-bold text-[var(--fg)] mb-2">Seleção Fiscal</h2>
                 <p className="text-[var(--fg-dim)]">
                     Escolha quais lojas deverão ter a Nota Fiscal Eletrônica (NF-e) gerada na próxima etapa e quais terão NF Inibida.
                 </p>
@@ -108,18 +128,32 @@ export default function SelecaoFiscal({
 
             <div className="bg-gradient-to-r from-[var(--bg-sidebar)] to-[rgba(33,118,255,0.05)] border border-[var(--border)] rounded-2xl p-5 flex items-center justify-between shadow-sm">
                 <div>
-                    <h3 className="font-bold text-white text-lg">
+                    <h3 className="font-bold text-[var(--fg)] text-lg">
                         <span className="text-[var(--accent)]">{emitCount}</span> de {lojasData.length} Lojas Emitirão NF
                     </h3>
                     <p className="text-sm text-[var(--fg-muted)] mt-1">Lojas apagadas não irão aparecer na etapa de geração de notas da Conta Azul.</p>
                 </div>
-                <div className="flex gap-2">
-                    <button className="btn btn-ghost btn-sm text-[var(--danger)] bg-[rgba(239,68,68,0.1)] hover:bg-[var(--danger)] hover:text-white" onClick={() => toggleAll(false)}>
-                        <X size={14} className="mr-1" /> Desativar Todas
-                    </button>
-                    <button className="btn btn-ghost btn-sm text-[var(--success)] bg-[rgba(34,197,94,0.1)] hover:bg-[var(--success)] hover:text-white" onClick={() => toggleAll(true)}>
-                        <Check size={14} className="mr-1" /> Ativar Todas
-                    </button>
+                <div className="flex flex-col md:flex-row items-end md:items-center gap-4">
+                    <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Search size={16} className="text-[var(--fg-dim)]" />
+                        </div>
+                        <input
+                            type="text"
+                            className="input w-full md:w-64 pl-10 h-10 bg-[var(--bg-card)] border-[var(--border)] focus:border-[var(--accent)] text-sm"
+                            placeholder="Buscar CNPJ ou Loja..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                    <div className="flex gap-2">
+                        <button className="btn btn-ghost h-10 px-4 text-[var(--danger)] bg-[rgba(239,68,68,0.1)] hover:bg-[var(--danger)] hover:text-white" onClick={() => toggleAll(false)} title="Desativar as lojas visíveis na busca atual">
+                            <X size={16} className="mr-1.5" /> Desativar Filtro
+                        </button>
+                        <button className="btn btn-ghost h-10 px-4 text-[var(--success)] bg-[rgba(34,197,94,0.1)] hover:bg-[var(--success)] hover:text-white" onClick={() => toggleAll(true)} title="Ativar as lojas visíveis na busca atual">
+                            <Check size={16} className="mr-1.5" /> Ativar Filtro
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -134,7 +168,7 @@ export default function SelecaoFiscal({
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-[var(--border)]">
-                        {lojasData.map(loja => {
+                        {filteredLojas.map(loja => {
                             const emitsNf = !lojasSemNf.has(loja.id);
 
                             return (
@@ -151,7 +185,7 @@ export default function SelecaoFiscal({
                                         </label>
                                     </td>
                                     <td className="py-4 px-6">
-                                        <p className={`font-bold ${emitsNf ? "text-white" : "text-[var(--fg-dim)] line-through decoration-[var(--border)] decoration-2"}`}>
+                                        <p className={`font-bold ${emitsNf ? "text-[var(--fg)]" : "text-[var(--fg-dim)] line-through decoration-[var(--border)] decoration-2"}`}>
                                             {loja.razaoSocial}
                                         </p>
                                         <p className="text-[10px] text-[var(--fg-muted)] font-mono mt-1">
@@ -169,11 +203,11 @@ export default function SelecaoFiscal({
                                 </tr>
                             );
                         })}
-                        {lojasData.length === 0 && (
+                        {filteredLojas.length === 0 && (
                             <tr>
                                 <td colSpan={4} className="py-12 text-center text-[var(--fg-dim)]">
                                     <Info size={32} className="mx-auto mb-3 opacity-20" />
-                                    <p>Não há clientes válidos para configurar NF. Verifique as conciliações na etapa anterior.</p>
+                                    <p>{lojasData.length > 0 ? "Nenhuma loja encontrada para a pesquisa atual." : "Não há clientes válidos para configurar NF. Verifique as conciliações na etapa anterior."}</p>
                                 </td>
                             </tr>
                         )}
@@ -183,3 +217,4 @@ export default function SelecaoFiscal({
         </div>
     );
 }
+

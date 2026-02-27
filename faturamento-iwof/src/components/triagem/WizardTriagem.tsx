@@ -46,12 +46,12 @@ export default function WizardTriagem() {
                         return (
                             <div key={s.num} className="relative z-10 flex flex-col items-center gap-2">
                                 <div className={`w-12 h-12 rounded-full flex items-center justify-center border-4 transition-colors duration-300 ${active
-                                        ? 'bg-[var(--accent)] border-[var(--bg-card)] text-white shadow-[0_0_15px_var(--accent-glow)]'
-                                        : 'bg-[var(--bg)] border-[var(--border-light)] text-[var(--fg-dim)]'
+                                    ? 'bg-[var(--accent)] border-[var(--bg-card)] text-white shadow-[0_0_15px_var(--accent-glow)]'
+                                    : 'bg-[var(--bg)] border-[var(--border-light)] text-[var(--fg-dim)]'
                                     }`}>
                                     {active && !isCurrent ? <CheckCircle2 size={20} /> : <s.icon size={20} />}
                                 </div>
-                                <span className={`text-xs font-bold uppercase tracking-wider ${active ? 'text-white' : 'text-[var(--fg-dim)]'}`}>
+                                <span className={`text-xs font-bold uppercase tracking-wider ${active ? 'text-[var(--fg)]' : 'text-[var(--fg-dim)]'}`}>
                                     {s.title}
                                 </span>
                             </div>

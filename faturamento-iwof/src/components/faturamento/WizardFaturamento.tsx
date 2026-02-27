@@ -649,7 +649,7 @@ export default function WizardFaturamento() {
     return (
         <div className="w-full max-w-7xl mx-auto flex flex-col gap-6">
             <div className="flex flex-col gap-2">
-                <h1 className="text-3xl font-bold tracking-tight text-white mb-1">Faturamento {periodoInicio ? `(${new Date(periodoInicio).getMonth() + 1}/${new Date(periodoInicio).getFullYear()})` : null}</h1>
+                <h1 className="text-3xl font-bold tracking-tight text-[var(--fg)] mb-1">Faturamento {periodoInicio ? `(${new Date(periodoInicio).getMonth() + 1}/${new Date(periodoInicio).getFullYear()})` : null}</h1>
 
                 {/* Visual Stepper */}
                 <div className="flex items-center justify-between w-full relative before:absolute before:top-1/2 before:-translate-y-1/2 before:h-[2px] before:w-full before:bg-[var(--border)] before:z-0 my-6 max-w-4xl mx-auto">
@@ -689,3 +689,4 @@ export default function WizardFaturamento() {
         </div>
     );
 }
+

@@ -16,6 +16,8 @@ interface SetupProps {
     setPeriodoInicio: (v: string) => void;
     periodoFim: string;
     setPeriodoFim: (v: string) => void;
+    nomePasta: string;
+    setNomePasta: (v: string) => void;
     processFile: (rows: Record<string, string>[]) => Promise<void>;
     processing: boolean;
     setFileName: (name: string) => void;
@@ -30,16 +32,21 @@ export default function Setup({
     setPeriodoInicio,
     periodoFim,
     setPeriodoFim,
+    nomePasta,
+    setNomePasta,
     processFile,
     processing,
     setFileName
 }: SetupProps) {
-    const [file, setFile] = useState<File | null>(null);
+    const [files, setFiles] = useState<File[]>([]);
 
     const onDrop = useCallback((acceptedFiles: File[]) => {
         if (acceptedFiles.length > 0) {
-            setFile(acceptedFiles[0]);
-            setFileName(acceptedFiles[0].name);
+            setFiles(prev => {
+                const newFiles = [...prev, ...acceptedFiles];
+                setFileName(newFiles.map(f => f.name).join(", "));
+                return newFiles;
+            });
         }
     }, [setFileName]);
 
@@ -50,55 +57,63 @@ export default function Setup({
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
             "application/vnd.ms-excel": [".xls"],
         },
-        maxFiles: 1,
     });
 
     const handleProcess = async () => {
-        if (!file) return;
+        if (files.length === 0) return;
 
-        const reader = new FileReader();
+        let allRows: Record<string, string>[] = [];
 
-        if (file.name.endsWith(".csv")) {
-            reader.onload = async (e) => {
-                const text = e.target?.result as string;
-                Papa.parse(text, {
-                    header: true,
-                    skipEmptyLines: true,
-                    complete: async (results) => {
-                        await processFile(results.data as Record<string, string>[]);
-                    },
-                });
-            };
-            reader.readAsText(file);
-        } else {
-            reader.onload = async (e) => {
-                const data = new Uint8Array(e.target?.result as ArrayBuffer);
-                const workbook = XLSX.read(data, { type: "array" });
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
-                const rawData = XLSX.utils.sheet_to_json<Record<string, string>>(worksheet, { defval: "" });
+        for (const file of files) {
+            await new Promise<void>((resolve) => {
+                const reader = new FileReader();
 
-                // Normalizando as chaves para lowercase e trim
-                const normalizedData = rawData.map(row => {
-                    const newRow: Record<string, string> = {};
-                    for (const key in row) {
-                        newRow[key.trim().toLowerCase()] = String(row[key]);
-                    }
-                    return newRow;
-                });
+                if (file.name.endsWith(".csv")) {
+                    reader.onload = async (e) => {
+                        const text = e.target?.result as string;
+                        Papa.parse(text, {
+                            header: true,
+                            skipEmptyLines: true,
+                            complete: (results) => {
+                                allRows = [...allRows, ...(results.data as Record<string, string>[])];
+                                resolve();
+                            },
+                        });
+                    };
+                    reader.readAsText(file);
+                } else {
+                    reader.onload = async (e) => {
+                        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+                        const workbook = XLSX.read(data, { type: "array" });
+                        const firstSheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[firstSheetName];
+                        const rawData = XLSX.utils.sheet_to_json<Record<string, string>>(worksheet, { defval: "" });
 
-                await processFile(normalizedData);
-            };
-            reader.readAsArrayBuffer(file);
+                        const normalizedData = rawData.map(row => {
+                            const newRow: Record<string, string> = {};
+                            for (const key in row) {
+                                newRow[key.trim().toLowerCase()] = String(row[key]);
+                            }
+                            return newRow;
+                        });
+
+                        allRows = [...allRows, ...normalizedData];
+                        resolve();
+                    };
+                    reader.readAsArrayBuffer(file);
+                }
+            });
         }
+
+        await processFile(allRows);
     };
 
-    const isReady = file && periodoInicio && periodoFim && selectedCicloIds.length > 0;
+    const isReady = files.length > 0 && periodoInicio && periodoFim && selectedCicloIds.length > 0 && nomePasta.trim().length > 0;
 
     return (
         <div className="flex flex-col gap-6 max-w-4xl mx-auto">
             <div className="text-center mb-6">
-                <h2 className="text-2xl font-bold text-white mb-2">Setup Inicial do Lote</h2>
+                <h2 className="text-2xl font-bold text-[var(--fg)] mb-2">Setup Inicial do Lote</h2>
                 <p className="text-[var(--fg-dim)]">Configure o período, o ciclo de faturamento e envie a planilha base.</p>
             </div>
 
@@ -111,7 +126,7 @@ export default function Setup({
                         </label>
                         <input
                             type="date"
-                            className="input w-full bg-[var(--bg-card)] border-[var(--border)] focus:border-[var(--accent)] text-white"
+                            className="input w-full bg-[var(--bg-card)] border-[var(--border)] focus:border-[var(--accent)] text-[var(--fg)]"
                             value={periodoInicio}
                             onChange={(e) => setPeriodoInicio(e.target.value)}
                         />
@@ -123,7 +138,7 @@ export default function Setup({
                         </label>
                         <input
                             type="date"
-                            className="input w-full bg-[var(--bg-card)] border-[var(--border)] focus:border-[var(--accent)] text-white"
+                            className="input w-full bg-[var(--bg-card)] border-[var(--border)] focus:border-[var(--accent)] text-[var(--fg)]"
                             value={periodoFim}
                             onChange={(e) => setPeriodoFim(e.target.value)}
                         />
@@ -131,25 +146,37 @@ export default function Setup({
                     <div className="md:col-span-2 lg:col-span-1">
                         <label className="block text-sm font-semibold text-[var(--fg-dim)] mb-2 inline-flex items-center gap-2">
                             <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]"></span>
-                            Ciclo(s)
+                            Nome da Pasta no Drive
                         </label>
-                        <select
-                            multiple
-                            className="w-full bg-[var(--bg-card)] border border-[var(--border)] rounded-xl py-2 px-3 text-sm focus:outline-none focus:border-[var(--accent)] transition-colors text-white h-[42px] custom-scrollbar"
-                            value={selectedCicloIds}
-                            onChange={(e) => {
-                                const options = Array.from(e.target.selectedOptions);
-                                setSelectedCicloIds(options.map(o => o.value));
-                            }}
-                            title="Segure CTRL (ou CMD) para selecionar múltiplos ciclos"
-                        >
-                            {ciclos.map(c => (
-                                <option key={c.id} value={c.id} className="py-1">
-                                    {c.nome}
-                                </option>
-                            ))}
-                        </select>
-                        <p className="text-[10px] text-[var(--fg-muted)] mt-1">Geralmente "A2" ou "M2". Segure CRTL para múltiplos.</p>
+                        <input
+                            type="text"
+                            className="input w-full bg-[var(--bg-card)] border-[var(--border)] focus:border-[var(--accent)] text-[var(--fg)]"
+                            placeholder="Ex: M1, Semanal, etc."
+                            value={nomePasta}
+                            onChange={(e) => setNomePasta(e.target.value)}
+                        />
+                    </div>
+                    <div className="md:col-span-2 lg:col-span-3">
+                        <label className="block text-sm font-semibold text-[var(--fg-dim)] mb-2 inline-flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]"></span>
+                            Ciclos a serem processados
+                            <span className="text-[var(--fg-muted)] font-normal text-xs ml-1">(múltipla escolha)</span>
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                            {ciclos.map(c => {
+                                const isSelected = selectedCicloIds.includes(c.id);
+                                return (
+                                    <button
+                                        key={c.id}
+                                        className={`badge cursor-pointer transition-all text-sm px-4 py-2 ${isSelected ? "badge-success" : "bg-[var(--bg-sidebar)] border border-[var(--border)] text-[var(--fg-dim)] hover:border-[var(--accent)] hover:text-[var(--accent)]"}`}
+                                        style={{ border: isSelected ? "2px solid #22c55e" : undefined }}
+                                        onClick={() => setSelectedCicloIds(isSelected ? selectedCicloIds.filter(id => id !== c.id) : [...selectedCicloIds, c.id])}
+                                    >
+                                        {isSelected && "✓ "}{c.nome}
+                                    </button>
+                                );
+                            })}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -157,27 +184,44 @@ export default function Setup({
             <div
                 {...getRootProps()}
                 className={`relative overflow-hidden group border-2 border-dashed rounded-3xl p-10 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-300 min-h-[250px] ${isDragActive ? "border-[var(--accent)] bg-[rgba(33,118,255,0.05)]" :
-                    file ? "border-[var(--success)] bg-[rgba(34,197,94,0.05)]" :
+                    files.length > 0 ? "border-[var(--success)] bg-[rgba(34,197,94,0.05)]" :
                         "border-[var(--border)] bg-[var(--bg-sidebar)] hover:border-[var(--fg-dim)]"
                     }`}
             >
                 <input {...getInputProps()} />
 
-                {file ? (
-                    <div className="flex flex-col items-center gap-4 relative z-10 animate-in zoom-in duration-300">
+                {files.length > 0 ? (
+                    <div className="flex flex-col items-center gap-4 relative z-10 animate-in zoom-in duration-300 w-full max-w-lg">
                         <div className="w-16 h-16 rounded-2xl bg-[var(--success)]/20 flex items-center justify-center border border-[var(--success)]/30">
                             <FileSpreadsheet size={32} className="text-[var(--success)]" />
                         </div>
-                        <div>
-                            <p className="font-bold text-white text-lg">{file.name}</p>
+                        <div className="text-center">
+                            <p className="font-bold text-[var(--fg)] text-lg">{files.length} arquivo(s) selecionado(s)</p>
                             <p className="text-xs text-[var(--success)] font-medium mt-1">Pronto para processamento</p>
                         </div>
-                        <button
-                            className="btn btn-sm btn-ghost text-[var(--danger)] hover:bg-[var(--danger)] hover:text-white rounded-full mt-2"
-                            onClick={(e) => { e.stopPropagation(); setFile(null); }}
-                        >
-                            <X size={14} className="mr-1" /> Remover
-                        </button>
+                        <div className="flex flex-col gap-2 w-full mt-2">
+                            {files.map((f, i) => (
+                                <div key={i} className="flex items-center justify-between bg-[var(--bg-card)] border border-[var(--success)]/30 p-2 rounded-lg">
+                                    <span className="text-sm text-[var(--fg)] truncate max-w-[80%]">{f.name}</span>
+                                    <button
+                                        className="btn btn-sm btn-ghost text-[var(--danger)] px-2 h-auto py-1"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            const newFiles = files.filter((_, index) => index !== i);
+                                            setFiles(newFiles);
+                                            setFileName(newFiles.map(file => file.name).join(", "));
+                                        }}
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                        {isDragActive && (
+                            <div className="mt-4 text-[var(--accent)] font-semibold text-sm">
+                                Solte para adicionar mais arquivos...
+                            </div>
+                        )}
                     </div>
                 ) : (
                     <div className="flex flex-col items-center gap-4 relative z-10">
@@ -185,7 +229,7 @@ export default function Setup({
                             <UploadCloud size={32} className={isDragActive ? "animate-bounce" : ""} />
                         </div>
                         <div>
-                            <p className="font-bold text-white text-lg mb-1">Arraste a Planilha da Iwof</p>
+                            <p className="font-bold text-[var(--fg)] text-lg mb-1">Arraste a Planilha da Iwof</p>
                             <p className="text-sm text-[var(--fg-dim)]">.csv ou .xlsx gerado pelo Admin</p>
                         </div>
                     </div>
@@ -216,3 +260,4 @@ export default function Setup({
         </div>
     );
 }
+

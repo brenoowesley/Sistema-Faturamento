@@ -4,15 +4,19 @@ import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 import { usePathname } from "next/navigation";
 
+import { ThemeProvider } from "@/components/ThemeProvider";
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR">
+    <html lang="pt-BR" suppressHydrationWarning>
       <body className="antialiased font-sans">
-        <LayoutShell>{children}</LayoutShell>
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
+          <LayoutShell>{children}</LayoutShell>
+        </ThemeProvider>
       </body>
     </html>
   );
