@@ -78,7 +78,7 @@ export async function POST(request: Request) {
         const mailOptions = {
             from: `"Financeiro iWof" <${process.env.EMAIL_FINANCEIRO_USER}>`,
             to: process.env.EMAIL_FINANCEIRO_USER, // Para testes manda pra ele mesmo
-            subject: \`Faturamento iWof - \${mockTemplateData.subfolderName} - \${mockTemplateData.currentMonth}/\${mockTemplateData.currentYear}\`,
+            subject: `Faturamento iWof - ${mockTemplateData.subfolderName} - ${mockTemplateData.currentMonth}/${mockTemplateData.currentYear}`,
             html: htmlContent,
             attachments: [] // Em produção: stream de binários do Google Drive
         };
@@ -87,7 +87,7 @@ export async function POST(request: Request) {
         const result = await transporter.sendMail(mailOptions);
         console.log(`Email enviado.MessageId: ${ result.messageId }`);
         */
-        console.log(`E - mail simulado enviado para ${ mailOptions.to } `);
+        console.log(`E - mail simulado enviado para ${mailOptions.to} `);
 
         return NextResponse.json({ success: true, message: "E-mails disparados com sucesso (simulado)" });
 

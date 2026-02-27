@@ -5,7 +5,7 @@ import { UploadCloud, CheckCircle2, ChevronRight, FileSpreadsheet, X } from "luc
 import { useDropzone } from "react-dropzone";
 import * as Papa from "papaparse";
 import * as XLSX from "xlsx";
-import { Ciclo } from "../../types";
+import { Ciclo } from "../types";
 
 interface SetupProps {
     setCurrentStep: (s: number) => void;
@@ -157,8 +157,8 @@ export default function Setup({
             <div
                 {...getRootProps()}
                 className={`relative overflow-hidden group border-2 border-dashed rounded-3xl p-10 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-300 min-h-[250px] ${isDragActive ? "border-[var(--accent)] bg-[rgba(33,118,255,0.05)]" :
-                        file ? "border-[var(--success)] bg-[rgba(34,197,94,0.05)]" :
-                            "border-[var(--border)] bg-[var(--bg-sidebar)] hover:border-[var(--fg-dim)]"
+                    file ? "border-[var(--success)] bg-[rgba(34,197,94,0.05)]" :
+                        "border-[var(--border)] bg-[var(--bg-sidebar)] hover:border-[var(--fg-dim)]"
                     }`}
             >
                 <input {...getInputProps()} />
