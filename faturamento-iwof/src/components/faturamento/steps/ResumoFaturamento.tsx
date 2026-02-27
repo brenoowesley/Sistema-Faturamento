@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ArrowLeft, ChevronRight, DollarSign, Building2, CheckCircle2, AlertTriangle, AlertCircle, Users, XCircle, ChevronDown } from "lucide-react";
 import { FinancialSummary, ConciliationResult, Agendamento } from "../types";
 import { fmtCurrency } from "../utils";

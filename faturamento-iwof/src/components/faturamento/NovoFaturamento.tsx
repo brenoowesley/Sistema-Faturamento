@@ -1604,12 +1604,6 @@ export default function NovoFaturamento() {
                     <ArrowLeft size={16} /> Voltar ao Setup
                 </button>
 
-                <button
-                    className="btn btn-ghost btn-sm text-[var(--fg-dim)] gap-2"
-                    onClick={() => setIsMinimized(!isMinimized)}
-                >
-                    {isMinimized ? "Mostrar Detalhes" : "Minimizar Detalhes"}
-                </button>
             </div>
 
             {/* ======== Novo Card de Resumo Global ======== */}
@@ -1802,7 +1796,7 @@ export default function NovoFaturamento() {
             </div>
 
             {/* ======== Tab Content ======== */}
-            {!isMinimized && (
+            <>
                 <div className="card" style={{ borderTopLeftRadius: 0, marginTop: 0 }}>
                     {/* ----------- TAB: VALIDAÇÕES ----------- */}
                     {activeTab === "validacoes" && (
@@ -2722,8 +2716,7 @@ export default function NovoFaturamento() {
                         </div>
                     )}
                 </div>
-            )
-            }
+            </>
 
             {/* ======== Action bar ======== */}
             <div className="flex items-center justify-between mt-5 pt-4 border-t border-[var(--border)]">
