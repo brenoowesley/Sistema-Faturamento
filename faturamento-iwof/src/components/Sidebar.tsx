@@ -80,7 +80,7 @@ export default function Sidebar() {
                     {mounted && (
                         <button
                             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                            className="p-2 rounded-full hover:bg-white/10 transition-colors text-[var(--fg-muted)] hover:text-white"
+                            className="p-2 rounded-full hover:bg-[var(--bg-card-hover)] transition-colors text-[var(--fg-muted)] hover:text-[var(--fg)]"
                             title="Alternar Tema"
                         >
                             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}

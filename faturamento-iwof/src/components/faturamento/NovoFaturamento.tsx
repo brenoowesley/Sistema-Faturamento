@@ -1465,7 +1465,7 @@ export default function NovoFaturamento() {
                                         <div key={idx} className="flex items-center justify-between p-3 rounded-lg bg-[var(--bg-card-hover)] border border-[var(--border)]">
                                             <div className="flex items-center gap-3 overflow-hidden">
                                                 <FileSpreadsheet size={18} className="text-[var(--accent)] flex-shrink-0" />
-                                                <span className="text-xs text-white truncate font-medium">{file.name}</span>
+                                                <span className="text-xs text-[var(--fg)] truncate font-medium">{file.name}</span>
                                                 <span className="text-[10px] text-[var(--fg-dim)] flex-shrink-0">
                                                     {(file.size / 1024).toFixed(1)} KB
                                                 </span>
@@ -1735,11 +1735,11 @@ export default function NovoFaturamento() {
                             <div className="flex items-center gap-2">
                                 {collapsedLojas ? <ChevronRight size={16} className="text-[var(--fg-dim)]" /> : <ChevronDown size={16} className="text-[var(--fg-dim)]" />}
                                 <Users size={16} className="text-[var(--accent)]" />
-                                <h4 className="text-sm font-semibold text-white">
+                                <h4 className="text-sm font-semibold text-[var(--fg)]">
                                     Lojas Faturadas ({lojasArr.length}) — {faturados.length} agendamentos contabilizados
                                 </h4>
                             </div>
-                            <span className="text-[10px] text-[var(--fg-dim)] uppercase tracking-wider group-hover:text-white transition-colors">
+                            <span className="text-[10px] text-[var(--fg-dim)] uppercase tracking-wider group-hover:text-[var(--fg)] transition-colors">
                                 {collapsedLojas ? "Expandir" : "Recolher"}
                             </span>
                         </button>
@@ -1755,7 +1755,7 @@ export default function NovoFaturamento() {
                                 <tbody>
                                     {lojasArr.map(([loja, info]) => (
                                         <tr key={loja} className="border-t border-[var(--border)] hover:bg-[var(--bg-card-hover)]">
-                                            <td className="py-1.5 px-2 text-white font-medium">{loja}</td>
+                                            <td className="py-1.5 px-2 text-[var(--fg)] font-medium">{loja}</td>
                                             <td className="py-1.5 px-2 text-center font-mono text-[var(--fg-muted)]">{info.count}</td>
                                             <td className="py-1.5 px-2 text-right font-mono text-[var(--success)]">{fmtCurrency(info.total)}</td>
                                         </tr>
@@ -1824,7 +1824,7 @@ export default function NovoFaturamento() {
                                                     Cancelamentos e Correções ({validacoes.length})
                                                 </h4>
                                             </div>
-                                            <span className="text-[10px] text-[var(--fg-dim)] uppercase tracking-wider group-hover:text-white transition-colors">
+                                            <span className="text-[10px] text-[var(--fg-dim)] uppercase tracking-wider group-hover:text-[var(--fg)] transition-colors">
                                                 {collapsedValidacoes ? "Expandir" : "Recolher"}
                                             </span>
                                         </button>
@@ -1878,7 +1878,7 @@ export default function NovoFaturamento() {
                                                                                 <div key={a.id} className={`rounded-xl p-4 border-l-4 border-[var(--danger)] transition-all ${a.isRemoved ? "opacity-30 grayscale blur-[1px]" : ""}`} style={{ background: "rgba(239,68,68,0.04)", border: "1px solid rgba(239,68,68,0.15)", borderLeft: "4px solid var(--danger)" }}>
                                                                                     <div className="flex justify-between items-start mb-3">
                                                                                         <div className="flex-1 min-w-0 mr-2">
-                                                                                            <h5 className="font-bold text-white text-sm leading-tight truncate">{a.loja}</h5>
+                                                                                            <h5 className="font-bold text-[var(--fg)] text-sm leading-tight truncate">{a.loja}</h5>
                                                                                             <div className="flex flex-col mt-0.5">
                                                                                                 <p className="text-[10px] text-[var(--fg-dim)] uppercase font-bold">{a.nome}</p>
                                                                                                 <p className="text-[9px] text-[var(--fg-muted)] uppercase tracking-wider">{a.vaga}</p>
@@ -1895,13 +1895,13 @@ export default function NovoFaturamento() {
                                                                                         <div className="text-[var(--fg-dim)] uppercase">Duração</div>
                                                                                         <div className="text-right font-mono font-bold text-[var(--danger)]">{a.fracaoHora.toFixed(2)}h</div>
                                                                                         <div className="text-[var(--fg-dim)] uppercase">Valor Bruto</div>
-                                                                                        <div className="text-right font-mono text-white">{fmtCurrency(a.valorIwof)}</div>
+                                                                                        <div className="text-right font-mono text-[var(--fg)]">{fmtCurrency(a.valorIwof)}</div>
                                                                                     </div>
                                                                                     <div className="pt-3 border-t border-[var(--border)] flex justify-between items-center gap-2">
                                                                                         <button className={`btn btn-sm h-7 px-2 text-[10px] ${a.isRemoved ? "btn-success" : "btn-danger"}`} onClick={() => toggleRemoval(a.id)}>
                                                                                             {a.isRemoved ? "Restaurar" : "Remover"}
                                                                                         </button>
-                                                                                        <a href={`https://administrativo.iwof.com.br/workers/${a.refAgendamento}`} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-sm h-7 px-3 flex items-center gap-2 text-[var(--fg-dim)] hover:text-white hover:border-[var(--fg-dim)] transition-colors" title="Ver Perfil no Admin">
+                                                                                        <a href={`https://administrativo.iwof.com.br/workers/${a.refAgendamento}`} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-sm h-7 px-3 flex items-center gap-2 text-[var(--fg-dim)] hover:text-[var(--fg)] hover:border-[var(--fg-dim)] transition-colors" title="Ver Perfil no Admin">
                                                                                             <span className="text-[10px] uppercase font-semibold">Perfil</span>
                                                                                             <ExternalLink size={10} />
                                                                                         </a>
@@ -1926,7 +1926,7 @@ export default function NovoFaturamento() {
                                                                                 <div key={a.id} className={`rounded-xl p-4 transition-all ${a.isRemoved ? "opacity-30 grayscale blur-[1px]" : ""}`} style={{ background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.15)", borderLeft: "4px solid #f59e0b" }}>
                                                                                     <div className="flex justify-between items-start mb-3">
                                                                                         <div className="flex-1 min-w-0 mr-2">
-                                                                                            <h5 className="font-bold text-white text-sm leading-tight truncate">{a.loja}</h5>
+                                                                                            <h5 className="font-bold text-[var(--fg)] text-sm leading-tight truncate">{a.loja}</h5>
                                                                                             <div className="flex flex-col mt-0.5">
                                                                                                 <p className="text-[10px] text-[var(--fg-dim)] uppercase font-bold">{a.nome}</p>
                                                                                                 <p className="text-[9px] text-[var(--fg-muted)] uppercase tracking-wider">{a.vaga}</p>
@@ -1949,7 +1949,7 @@ export default function NovoFaturamento() {
                                                                                         <div className="text-[var(--fg-dim)] uppercase">Duração Original</div>
                                                                                         <div className="text-right font-mono font-bold" style={{ color: "#f59e0b" }}>{(a.originalFracaoHora ?? a.fracaoHora).toFixed(2)}h</div>
                                                                                         <div className="text-[var(--fg-dim)] uppercase">Valor Original</div>
-                                                                                        <div className="text-right font-mono text-white">{fmtCurrency(a.originalValorIwof ?? a.valorIwof)}</div>
+                                                                                        <div className="text-right font-mono text-[var(--fg)]">{fmtCurrency(a.originalValorIwof ?? a.valorIwof)}</div>
                                                                                     </div>
 
                                                                                     {/* Suggested values */}
@@ -1999,7 +1999,7 @@ export default function NovoFaturamento() {
                                                                                                 {a.isRemoved ? "Restaurar" : "Remover"}
                                                                                             </button>
                                                                                         </div>
-                                                                                        <a href={`https://administrativo.iwof.com.br/workers/${a.refAgendamento}`} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-sm h-7 px-3 flex items-center gap-2 text-[var(--fg-dim)] hover:text-white hover:border-[var(--fg-dim)] transition-colors" title="Ver Perfil no Admin">
+                                                                                        <a href={`https://administrativo.iwof.com.br/workers/${a.refAgendamento}`} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-sm h-7 px-3 flex items-center gap-2 text-[var(--fg-dim)] hover:text-[var(--fg)] hover:border-[var(--fg-dim)] transition-colors" title="Ver Perfil no Admin">
                                                                                             <span className="text-[10px] uppercase font-semibold">Perfil</span>
                                                                                             <ExternalLink size={10} />
                                                                                         </a>
@@ -2025,7 +2025,7 @@ export default function NovoFaturamento() {
                                                 <h4 className="text-sm font-semibold" style={{ color: "#f59e0b" }}>
                                                     Fora do Período ({foraPeriodo.filter(a => !a.isRemoved).length})
                                                 </h4>
-                                                <span className="text-[10px] text-[var(--fg-dim)] uppercase tracking-wider group-hover:text-white transition-colors ml-2">
+                                                <span className="text-[10px] text-[var(--fg-dim)] uppercase tracking-wider group-hover:text-[var(--fg)] transition-colors ml-2">
                                                     {collapsedForaPeriodo ? "Expandir" : "Recolher"}
                                                 </span>
                                             </button>
@@ -2103,7 +2103,7 @@ export default function NovoFaturamento() {
                         <div className="space-y-8">
                             <div className="flex justify-between items-center bg-[var(--bg-card-hover)] p-4 rounded-xl border border-[var(--border)] mb-4">
                                 <div>
-                                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Limpeza Automática (100% Idênticos)</h3>
+                                    <h3 className="text-sm font-bold text-[var(--fg)] uppercase tracking-wider">Limpeza Automática (100% Idênticos)</h3>
                                     <p className="text-xs text-[var(--fg-dim)]">Remove duplicatas idênticas automaticamente. Itens suspeitos requerem revisão manual.</p>
                                     {removedCount !== null && (
                                         <p className="text-xs text-[var(--success)] mt-1 font-bold">
@@ -2130,7 +2130,7 @@ export default function NovoFaturamento() {
                                         <div>
                                             <div className="flex items-center gap-2 mb-4">
                                                 <div className="w-2 h-2 rounded-full bg-[var(--danger)]" />
-                                                <h4 className="text-sm font-semibold text-white uppercase tracking-wider">
+                                                <h4 className="text-sm font-semibold text-[var(--fg)] uppercase tracking-wider">
                                                     Duplicatas Idênticas ({duplicates.identical.length} grupos)
                                                 </h4>
                                             </div>
@@ -2175,7 +2175,7 @@ export default function NovoFaturamento() {
                                         <div>
                                             <div className="flex items-center gap-2 mb-4">
                                                 <div className="w-2 h-2 rounded-full bg-[#f59e0b]" />
-                                                <h4 className="text-sm font-semibold text-white uppercase tracking-wider">
+                                                <h4 className="text-sm font-semibold text-[var(--fg)] uppercase tracking-wider">
                                                     Suspeitas de Duplicidade ({"99%+"})
                                                 </h4>
                                             </div>
@@ -2323,7 +2323,7 @@ export default function NovoFaturamento() {
                                                 <tbody>
                                                     {lojasFaturadas.map(([loja, info]) => (
                                                         <tr key={loja} className="border-t border-[var(--border)] hover:bg-[var(--bg-card-hover)]">
-                                                            <td className="py-2 px-3 text-white font-medium">{loja}</td>
+                                                            <td className="py-2 px-3 text-[var(--fg)] font-medium">{loja}</td>
                                                             <td className="py-2 px-3 text-center">
                                                                 <span className="badge badge-info" style={{ fontSize: 10 }}>{info.ciclo}</span>
                                                             </td>
@@ -2332,8 +2332,8 @@ export default function NovoFaturamento() {
                                                         </tr>
                                                     ))}
                                                     <tr className="border-t-2 border-[var(--border)] font-semibold">
-                                                        <td className="py-2 px-3 text-white" colSpan={2}>TOTAL</td>
-                                                        <td className="py-2 px-3 text-center font-mono text-white">
+                                                        <td className="py-2 px-3 text-[var(--fg)]" colSpan={2}>TOTAL</td>
+                                                        <td className="py-2 px-3 text-center font-mono text-[var(--fg)]">
                                                             {lojasFaturadas.reduce((s, [, d]) => s + d.count, 0)}
                                                         </td>
                                                         <td className="py-2 px-3 text-right font-mono text-[var(--success)]">

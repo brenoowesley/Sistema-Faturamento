@@ -249,7 +249,7 @@ function DashboardContent() {
             <span className="text-xs font-bold text-[var(--fg-dim)] uppercase tracking-widest">Faturamento Total</span>
             <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-500"><TrendingUp size={18} /></div>
           </div>
-          <p className="text-2xl font-black text-white">{formatCurrency(stats.faturamentoTotal)}</p>
+          <p className="text-2xl font-black text-[var(--fg)]">{formatCurrency(stats.faturamentoTotal)}</p>
           <p className="text-[10px] text-[var(--fg-dim)] mt-1">Acumulado histórico</p>
         </div>
 
@@ -258,7 +258,7 @@ function DashboardContent() {
             <span className="text-xs font-bold text-[var(--fg-dim)] uppercase tracking-widest">Clientes Ativos</span>
             <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-500"><Users size={18} /></div>
           </div>
-          <p className="text-2xl font-black text-white">{stats.clientesAtivos}</p>
+          <p className="text-2xl font-black text-[var(--fg)]">{stats.clientesAtivos}</p>
           <p className="text-[10px] text-[var(--fg-dim)] mt-1">Empresas em operação</p>
         </div>
 
@@ -267,7 +267,7 @@ function DashboardContent() {
             <span className="text-xs font-bold text-[var(--fg-dim)] uppercase tracking-widest">Lotes Pendentes</span>
             <div className="p-2 bg-amber-500/10 rounded-lg text-amber-500"><Clock size={18} /></div>
           </div>
-          <p className="text-2xl font-black text-white">{stats.lotesPendentes}</p>
+          <p className="text-2xl font-black text-[var(--fg)]">{stats.lotesPendentes}</p>
           <p className="text-[10px] text-[var(--fg-dim)] mt-1">Aguardando consolidação</p>
         </div>
 
@@ -276,7 +276,7 @@ function DashboardContent() {
             <span className="text-xs font-bold text-[var(--fg-dim)] uppercase tracking-widest">Ajustes em Aberto</span>
             <div className="p-2 bg-red-500/10 rounded-lg text-red-500"><AlertCircle size={18} /></div>
           </div>
-          <p className="text-2xl font-black text-white">{formatCurrency(stats.ajustesPendentes)}</p>
+          <p className="text-2xl font-black text-[var(--fg)]">{formatCurrency(stats.ajustesPendentes)}</p>
           <p className="text-[10px] text-[var(--fg-dim)] mt-1">Acréscimos/Descontos pendentes</p>
         </div>
       </div>
@@ -284,7 +284,7 @@ function DashboardContent() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
         {/* Gráfico de Ciclos */}
         <div className="lg:col-span-2 space-y-4">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+          <h2 className="text-lg font-bold text-[var(--fg)] flex items-center gap-2">
             <TrendingUp className="text-indigo-500" size={20} />
             Faturamento por Ciclo
           </h2>
@@ -316,14 +316,14 @@ function DashboardContent() {
         {/* Atalhos Rápidos */}
         <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="md:col-span-2">
-            <h2 className="text-lg font-bold text-white mb-4">Ações Rápidas</h2>
+            <h2 className="text-lg font-bold text-[var(--fg)] mb-4">Ações Rápidas</h2>
           </div>
           <Link href="/faturamento/novo" className="card p-5 hover:border-indigo-500/50 transition-all flex items-center gap-4 group">
             <div className="w-12 h-12 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-500 group-hover:bg-indigo-500 group-hover:text-white transition-all shadow-inner">
               <FileText size={24} />
             </div>
             <div>
-              <p className="text-sm font-bold text-white group-hover:text-indigo-400 transition-colors">Novo Faturamento</p>
+              <p className="text-sm font-bold text-[var(--fg)] group-hover:text-indigo-400 transition-colors">Novo Faturamento</p>
               <p className="text-[10px] text-[var(--fg-dim)]">Processar planilha bruta</p>
             </div>
           </Link>
@@ -332,7 +332,7 @@ function DashboardContent() {
               <AlertCircle size={24} />
             </div>
             <div>
-              <p className="text-sm font-bold text-white group-hover:text-amber-400 transition-colors">Gerenciar Ajustes</p>
+              <p className="text-sm font-bold text-[var(--fg)] group-hover:text-amber-400 transition-colors">Gerenciar Ajustes</p>
               <p className="text-[10px] text-[var(--fg-dim)]">Gerar acréscimos/descontos</p>
             </div>
           </Link>
@@ -341,7 +341,7 @@ function DashboardContent() {
               <Users size={24} />
             </div>
             <div>
-              <p className="text-sm font-bold text-white group-hover:text-emerald-400 transition-colors">Base de Clientes</p>
+              <p className="text-sm font-bold text-[var(--fg)] group-hover:text-emerald-400 transition-colors">Base de Clientes</p>
               <p className="text-[10px] text-[var(--fg-dim)]">Cadastrar e atualizar lojas</p>
             </div>
           </Link>
@@ -350,7 +350,7 @@ function DashboardContent() {
               <ShieldCheck size={24} />
             </div>
             <div>
-              <p className="text-sm font-bold text-white group-hover:text-indigo-400 transition-colors">Gestão Usuários</p>
+              <p className="text-sm font-bold text-[var(--fg)] group-hover:text-indigo-400 transition-colors">Gestão Usuários</p>
               <p className="text-[10px] text-[var(--fg-dim)]">Controle de acessos</p>
             </div>
           </Link>
@@ -360,7 +360,7 @@ function DashboardContent() {
       {/* Segunda Linha: Lotes Recentes */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+          <h2 className="text-lg font-bold text-[var(--fg)] flex items-center gap-2">
             <Clock className="text-indigo-500" size={20} />
             Lotes em Processamento
           </h2>
@@ -383,7 +383,7 @@ function DashboardContent() {
                   <tr key={lote.id} className="border-t border-[var(--border)] hover:bg-white/[0.02] transition-colors">
                     <td className="p-4">
                       <div className="flex flex-col">
-                        <span className="text-sm font-bold text-white">
+                        <span className="text-sm font-bold text-[var(--fg)]">
                           {new Date(lote.data_competencia).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
                         </span>
                         <span className="text-[10px] text-[var(--fg-dim)] font-mono">{lote.id.slice(0, 8)}</span>
@@ -415,7 +415,7 @@ function DashboardContent() {
                         </button>
                         <Link
                           href={`/faturamento/lote/${lote.id}`}
-                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-500/10 text-indigo-500 text-xs font-bold hover:bg-indigo-500 hover:text-white transition-all"
+                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-500/10 text-indigo-500 text-xs font-bold hover:bg-indigo-500 hover:text-[var(--fg)] transition-all"
                         >
                           Acessar Lote
                           <ArrowRight size={14} />
