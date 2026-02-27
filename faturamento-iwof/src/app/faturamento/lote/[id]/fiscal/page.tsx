@@ -707,7 +707,13 @@ export default function FiscalProcessingPage() {
 
         setIsConsolidating(true);
         try {
+            // Retrieve inactive stores that shouldn't emit NF saved from previous step
+            const lojasSemNFStr = localStorage.getItem(`lojas_sem_nf_${loteId}`);
+            const lojasSemNF: string[] = lojasSemNFStr ? JSON.parse(lojasSemNFStr) : [];
+
             for (const item of conciliacao) {
+                const isSemNF = lojasSemNF.includes(item.loja.id);
+
                 // 1. Salvar ou Atualizar registro da Mãe (ou Loja Avulsa)
                 const { error: errorMother } = await supabase
                     .from("faturamento_consolidados")
@@ -719,7 +725,7 @@ export default function FiscalProcessingPage() {
                         acrescimos: item.loja.acrescimos,
                         descontos: item.loja.descontos,
                         valor_ir_xml: item.irrfCalculado,
-                        valor_nf_emitida: ((item.loja.valorBruto + item.loja.acrescimos) - item.loja.descontos) * 0.115,
+                        valor_nf_emitida: isSemNF ? 0 : ((item.loja.valorBruto + item.loja.acrescimos) - item.loja.descontos) * 0.115,
                         valor_nc_final: item.ncFinal,
                         valor_boleto_final: item.boletoFinal,
                         numero_nf: item.xml ? String(item.xml.numeroNF) : null,

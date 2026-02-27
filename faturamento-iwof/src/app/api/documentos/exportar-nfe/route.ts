@@ -7,6 +7,8 @@ export async function GET(req: NextRequest) {
     try {
         const { searchParams } = new URL(req.url);
         const loteId = searchParams.get("loteId");
+        const lojasSemNFStr = searchParams.get("lojasSemNF");
+        const lojasSemNF = lojasSemNFStr ? lojasSemNFStr.split(",") : [];
 
         if (!loteId) {
             return NextResponse.json({ error: "loteId is required" }, { status: 400 });
@@ -127,10 +129,11 @@ export async function GET(req: NextRequest) {
 
             records = Array.from(finalAgrupado.values()).map(r => {
                 const baseResumo = (r.valor_bruto + r.acrescimos) - r.descontos;
+                const isSemNF = lojasSemNF.includes(r.cliente_id) || lojasSemNF.includes(r.clientes?.loja_mae_id);
                 return {
                     ...r,
                     valor_base_calculo: baseResumo,
-                    valor_nf_emitida: Math.max(0, baseResumo * 0.115)
+                    valor_nf_emitida: isSemNF ? 0 : Math.max(0, baseResumo * 0.115)
                 };
             });
         }

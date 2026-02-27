@@ -313,6 +313,10 @@ export default function LoteFechamentoPage() {
 
         setIsClosing(true);
         try {
+            // 0. Save inactive stores to localStorage to pass to the next screen
+            const lojasSemNF = lojas.filter(l => !l.active).map(l => l.id);
+            localStorage.setItem(`lojas_sem_nf_${loteId}`, JSON.stringify(lojasSemNF));
+
             // 1. Get all adjustments ids from ALL stores (toggle only affects NF emission)
             const adjustmentIds = lojas.flatMap(l => l.ajustesDetalhes.map(aj => aj.id));
 
