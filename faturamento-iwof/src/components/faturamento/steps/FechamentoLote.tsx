@@ -91,14 +91,44 @@ export default function FechamentoLote({
         return { reports, orphanNfses, orphanBoletos };
     }, [agendamentos, nfseFiles, boletoFiles]);
 
-    const handleBoletoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleBoletoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files?.length) return;
-        const files = Array.from(e.target.files).map(f => ({
-            name: f.name,
-            file: f,
-            fetchUrl: URL.createObjectURL(f)
-        }));
-        setBoletoFiles(prev => [...prev, ...files]);
+        setLoadingMap(p => ({ ...p, "zipBoletos": true }));
+
+        try {
+            const newFiles: { name: string; fetchUrl: string; file: File }[] = [];
+
+            for (const file of Array.from(e.target.files)) {
+                if (file.name.toLowerCase().endsWith(".zip")) {
+                    const jsZip = new JSZip();
+                    const zip = await jsZip.loadAsync(file);
+
+                    for (const [filename, fileData] of Object.entries(zip.files)) {
+                        if (!fileData.dir && filename.toLowerCase().endsWith(".pdf")) {
+                            const blob = await fileData.async("blob");
+                            const extractedFile = new File([blob], filename, { type: "application/pdf" });
+                            newFiles.push({
+                                name: filename,
+                                file: extractedFile,
+                                fetchUrl: URL.createObjectURL(extractedFile)
+                            });
+                        }
+                    }
+                } else if (file.name.toLowerCase().endsWith(".pdf")) {
+                    newFiles.push({
+                        name: file.name,
+                        file: file,
+                        fetchUrl: URL.createObjectURL(file)
+                    });
+                }
+            }
+            setBoletoFiles(prev => [...prev, ...newFiles]);
+        } catch (error) {
+            console.error("Error reading boletos zip/pdf", error);
+            alert("Erro ao processar os arquivos de Boletos.");
+        } finally {
+            setLoadingMap(p => ({ ...p, "zipBoletos": false }));
+        }
     };
 
     const handleNfsZipUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -289,14 +319,14 @@ export default function FechamentoLote({
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
                     <div className="bg-[var(--bg-card)] border border-[var(--border)] p-6 rounded-2xl max-w-md w-full shadow-2xl">
                         <h3 className="text-xl font-bold mb-2">Enviar Boletos PDF</h3>
-                        <p className="text-sm text-[var(--fg-dim)] mb-6">Você pode soltar os PDFS (mesmo todos juntos) e faremos o cruzamento automático. Tem certeza de enviar?</p>
+                        <p className="text-sm text-[var(--fg-dim)] mb-6">Você pode soltar os PDFs (mesmo todos juntos) ou arquivo <strong>.ZIP</strong> contendo eles, e faremos o cruzamento. Tem certeza de enviar?</p>
 
                         <div className="flex justify-center border-2 border-dashed border-[var(--border)] rounded-xl py-8 mb-6 hover:bg-[var(--bg-sidebar)] transition-colors cursor-pointer" onClick={() => boletosInputRef.current?.click()}>
                             <div className="flex flex-col items-center gap-2">
                                 <UploadCloud className="text-[var(--accent)]" />
-                                <span className="font-bold text-sm">Selecionar Boletos</span>
+                                <span className="font-bold text-sm">{loadingMap["zipBoletos"] ? "Processando arquivos..." : "Selecionar Boletos (PDF/ZIP)"}</span>
                             </div>
-                            <input type="file" ref={boletosInputRef} onChange={handleBoletoUpload} multiple accept=".pdf" className="hidden" />
+                            <input type="file" ref={boletosInputRef} onChange={handleBoletoUpload} multiple accept=".pdf,.zip" className="hidden" />
                         </div>
                         {boletoFiles.length > 0 && <p className="text-xs text-center text-[var(--success)] mb-6 font-bold">{boletoFiles.length} adicionados e cruzados!</p>}
 
