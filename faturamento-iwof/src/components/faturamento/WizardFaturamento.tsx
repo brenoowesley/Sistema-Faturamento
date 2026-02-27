@@ -526,7 +526,6 @@ export default function WizardFaturamento() {
 
     const handleFecharLote = async () => {
         setSaving(true);
-        setCurrentStep(4); // Moving to generate boletos visual
 
         let validosCount = 1;
 
@@ -612,6 +611,7 @@ export default function WizardFaturamento() {
 
             await supabase.from("faturamento_lotes").update({ status: "FECHADO" }).eq("id", loteObj.id);
             setSaveResult({ ok: successCount, err: errorCount, loteId: loteObj.id });
+            return loteObj.id;
 
         } catch (e: any) {
             console.error("Erro ao consolidar:", e);

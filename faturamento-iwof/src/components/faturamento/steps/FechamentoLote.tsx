@@ -12,8 +12,9 @@ interface FechamentoLoteProps {
     nfseFiles: { name: string; blob: Blob; buffer: ArrayBuffer }[]; // Preserving standard nfse state if already generated
     setNfseFiles?: React.Dispatch<React.SetStateAction<{ name: string; blob: Blob; buffer: ArrayBuffer }[]>>;
     financialSummary: FinancialSummary;
-    handleFecharLote: () => Promise<void>;
+    handleFecharLote: () => Promise<void | string>;
     saving: boolean;
+    saveResult?: { ok: number; err: number; loteId?: string } | null;
     periodoInicio: string;
     periodoFim: string;
     nomePasta: string;
@@ -27,6 +28,7 @@ export default function FechamentoLote({
     financialSummary,
     handleFecharLote,
     saving,
+    saveResult,
     periodoInicio,
     periodoFim,
     nomePasta
@@ -124,49 +126,153 @@ export default function FechamentoLote({
         }
     };
 
-    const triggerAction = async (actionKey: string, endpoint: string) => {
-        setLoadingMap(p => ({ ...p, [actionKey]: true }));
-        try {
-            await new Promise(r => setTimeout(r, 1500)); // Mocking API
-            // const res = await fetch(endpoint, { method: "POST" });
-            // if (!res.ok) throw new Error("API Error");
-            setActionState(p => ({ ...p, [actionKey]: true }));
-        } catch (error) {
-            console.error("Action failed", error);
-            alert("Erro na execução da etapa.");
-        } finally {
-            setLoadingMap(p => ({ ...p, [actionKey]: false }));
-            setActiveModal(null);
-        }
-    };
-
     const handleUploadBoletos = async () => {
         setLoadingMap(p => ({ ...p, "boletosSuccess": true }));
         try {
-            await handleFecharLote();
-            await new Promise(r => setTimeout(r, 1500));
+            // Se ainda não fechou o lote, fecha agora
+            let targetLoteId = saveResult?.loteId;
+            if (!targetLoteId) {
+                targetLoteId = await handleFecharLote() as string;
+                if (!targetLoteId) throw new Error("Falha ao gerar o lote.");
+            }
+
+            const formData = new FormData();
+            formData.append("loteId", targetLoteId);
+            for (const fileObj of boletoFiles) {
+                formData.append("files", fileObj.file, fileObj.name);
+            }
+
+            const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
+
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || "Erro da API ao enviar boletos.");
+            }
+
             setActionState(p => ({ ...p, boletosSuccess: true }));
-        } catch (error) {
-            alert("Erro no upload dos boletos");
+        } catch (error: any) {
+            console.error(error);
+            alert(error.message || "Erro no upload dos boletos");
         } finally {
             setLoadingMap(p => ({ ...p, "boletosSuccess": false }));
             setActiveModal(null);
         }
     };
 
-    const handleUploadNfs = async () => triggerAction("nfsSuccess", "/api/documentos/upload-nfs");
-    const handleCriarNCs = async () => triggerAction("ncsSuccess", "/api/documentos/gerar-nc");
-    const handleCriarHCs = async () => triggerAction("hcsSuccess", "/api/documentos/gerar-hc");
+    const handleUploadNfs = async () => {
+        setLoadingMap(p => ({ ...p, "nfsSuccess": true }));
+        try {
+            let targetLoteId = saveResult?.loteId;
+            if (!targetLoteId) {
+                targetLoteId = await handleFecharLote() as string;
+                if (!targetLoteId) throw new Error("Falha ao gerar o lote.");
+            }
+
+            const formData = new FormData();
+            formData.append("loteId", targetLoteId);
+            for (const fileObj of nfseFiles) {
+                formData.append("files", fileObj.blob, fileObj.name);
+            }
+
+            const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || "Erro da API ao enviar NFs.");
+            }
+
+            setActionState(p => ({ ...p, nfsSuccess: true }));
+        } catch (error: any) {
+            console.error(error);
+            alert(error.message || "Erro no upload das NFs");
+        } finally {
+            setLoadingMap(p => ({ ...p, "nfsSuccess": false }));
+            setActiveModal(null);
+        }
+    };
+
+    const handleCriarNCs = async () => {
+        setLoadingMap(p => ({ ...p, "ncsSuccess": true }));
+        try {
+            let targetLoteId = saveResult?.loteId;
+            if (!targetLoteId) {
+                targetLoteId = await handleFecharLote() as string;
+                if (!targetLoteId) throw new Error("Falha ao gerar o lote.");
+            }
+
+            const payload = { loteId: targetLoteId, tipo: "NC" };
+            const res = await fetch("/api/documentos/disparar-gcp", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || "Erro da API ao gerar NCs.");
+            }
+
+            setActionState(p => ({ ...p, ncsSuccess: true }));
+        } catch (error: any) {
+            console.error(error);
+            alert(error.message || "Erro na geração de NCs");
+        } finally {
+            setLoadingMap(p => ({ ...p, "ncsSuccess": false }));
+            setActiveModal(null);
+        }
+    };
+
+    const handleCriarHCs = async () => {
+        setLoadingMap(p => ({ ...p, "hcsSuccess": true }));
+        try {
+            let targetLoteId = saveResult?.loteId;
+            if (!targetLoteId) {
+                targetLoteId = await handleFecharLote() as string;
+                if (!targetLoteId) throw new Error("Falha ao gerar o lote.");
+            }
+
+            const payload = { loteId: targetLoteId, tipo: "HC" };
+            const res = await fetch("/api/documentos/disparar-gcp", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || "Erro da API ao gerar HCs.");
+            }
+
+            setActionState(p => ({ ...p, hcsSuccess: true }));
+        } catch (error: any) {
+            console.error(error);
+            alert(error.message || "Erro na geração de HCs");
+        } finally {
+            setLoadingMap(p => ({ ...p, "hcsSuccess": false }));
+            setActiveModal(null);
+        }
+    };
 
     const handleDispararEmails = async () => {
         setLoadingMap(p => ({ ...p, "emailsSuccess": true }));
         try {
-            const res = await fetch("/api/faturamento/disparar-emails", { method: "POST" });
-            if (!res.ok) throw new Error("Erro ao disparar e-mails");
+            let targetLoteId = saveResult?.loteId;
+            if (!targetLoteId) throw new Error("Lote não encontrado. Processe uma das etapas anteriores primeiro.");
+
+            const payload = { loteId: targetLoteId };
+            const res = await fetch("/api/faturamento/disparar-emails", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || "Erro ao disparar e-mails");
+            }
             setActionState(p => ({ ...p, emailsSuccess: true }));
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
-            alert("A etapa finalizou com bugs durante envio de e-mail.");
+            alert(error.message || "A etapa finalizou com bugs durante envio de e-mail.");
         } finally {
             setLoadingMap(p => ({ ...p, "emailsSuccess": false }));
             setActiveModal(null);
