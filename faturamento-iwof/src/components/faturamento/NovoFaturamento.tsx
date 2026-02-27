@@ -321,7 +321,6 @@ export default function NovoFaturamento() {
     const [editingAgendamentoId, setEditingAgendamentoId] = useState<string | null>(null);
     const [tempValue, setTempValue] = useState<string>("");
     const [selectedRefs, setSelectedRefs] = useState<Set<string>>(new Set());
-    const [isMinimized, setIsMinimized] = useState(false);
     const [duplicates, setDuplicates] = useState<{ identical: Agendamento[][], suspicious: Agendamento[][] }>({ identical: [], suspicious: [] });
     const [removedCount, setRemovedCount] = useState<number | null>(null);
     const [conciliacaoCicloFilter, setConciliacaoCicloFilter] = useState<string | null>(null);

@@ -516,8 +516,10 @@ export default function FechamentoLote({
                             <thead className="bg-[var(--bg-card)] sticky top-0 shadow-sm z-10 border-b border-[var(--border)]">
                                 <tr>
                                     <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold uppercase text-[10px] tracking-wider">Cliente/Faturamento</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-center uppercase text-[10px] tracking-wider w-[200px]">Nota Fiscal (API/ZIP)</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-center uppercase text-[10px] tracking-wider w-[200px]">Boleto/Fatura</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-center uppercase text-[10px] tracking-wider w-[120px]">Valor Boleto</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-center uppercase text-[10px] tracking-wider w-[150px]">Tem NF?</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-center uppercase text-[10px] tracking-wider w-[150px]">Tem NC?</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-center uppercase text-[10px] tracking-wider w-[180px]">Status E-mail</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[var(--border)]">
@@ -531,24 +533,32 @@ export default function FechamentoLote({
                                             </div>
                                         </td>
                                         <td className="py-4 px-6 text-center">
+                                            <span className="font-mono text-[12px] font-bold text-[var(--fg)]">{fmtCurrency(r.totalFaturar)}</span>
+                                        </td>
+                                        <td className="py-4 px-6 text-center">
                                             {r.nfse ? (
                                                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-green-500/10 text-green-400 border border-green-500/20">
                                                     <CheckCircle2 size={12} /> {r.nfse.name.length > 20 ? r.nfse.name.substring(0, 18) + '...' : r.nfse.name}
                                                 </span>
                                             ) : (
                                                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20">
-                                                    <Info size={12} /> Sem NF Vinculada
+                                                    <Info size={12} /> S/NF
                                                 </span>
                                             )}
                                         </td>
                                         <td className="py-4 px-6 text-center">
-                                            {r.boleto ? (
+                                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-[var(--bg-card)] text-[var(--fg-dim)] border border-[var(--border)]">
+                                                — {/* TODO: Future NC mapping integration */}
+                                            </span>
+                                        </td>
+                                        <td className="py-4 px-6 text-center">
+                                            {actionState.emailsSuccess ? (
                                                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-green-500/10 text-green-400 border border-green-500/20">
-                                                    <CheckCircle2 size={12} /> {r.boleto.name.length > 20 ? r.boleto.name.substring(0, 18) + '...' : r.boleto.name}
+                                                    <CheckCircle2 size={12} /> Enviado
                                                 </span>
                                             ) : (
-                                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-[var(--danger)]/10 text-[var(--danger)] border border-[var(--danger)]/20">
-                                                    <X size={12} /> Pendente
+                                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-[var(--bg-card)] text-[var(--fg-dim)] border border-[var(--border)]">
+                                                    <Mail size={12} /> Pendente
                                                 </span>
                                             )}
                                         </td>

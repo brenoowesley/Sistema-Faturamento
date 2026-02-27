@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { ArrowLeft, ChevronRight, DollarSign, Building2, CheckCircle2, AlertTriangle, AlertCircle, Users, XCircle, ChevronDown, Clock, ExternalLink, UserX, Plus } from "lucide-react";
+import { ArrowLeft, ChevronRight, DollarSign, Building2, CheckCircle2, AlertTriangle, AlertCircle, Users, XCircle, ChevronDown } from "lucide-react";
 import { FinancialSummary, ConciliationResult, Agendamento } from "../types";
 import { fmtCurrency } from "../utils";
 
@@ -10,6 +10,7 @@ interface ResumoFaturamentoProps {
     financialSummary: FinancialSummary;
     conciliation: ConciliationResult;
     agendamentos: Agendamento[];
+    setAgendamentos: React.Dispatch<React.SetStateAction<Agendamento[]>>;
     duplicates: { identical: Agendamento[][], suspicious: Agendamento[][] };
 }
 
@@ -18,65 +19,90 @@ export default function ResumoFaturamento({
     financialSummary,
     conciliation,
     agendamentos,
+    setAgendamentos,
     duplicates
 }: ResumoFaturamentoProps) {
+
+    const [openCategories, setOpenCategories] = useState<Record<string, boolean>>({});
+
+    const toggleCategory = (title: string) => {
+        setOpenCategories(prev => ({ ...prev, [title]: !prev[title] }));
+    };
+
+    const handleActionItem = (id: string, actionDesc: "REMOVE" | "RESTORE" | "APPROVE", suggestedVal?: number) => {
+        setAgendamentos(prev => prev.map(a => {
+            if (a.id !== id) return a;
+
+            if (actionDesc === "REMOVE") {
+                return { ...a, isRemoved: true };
+            }
+            if (actionDesc === "RESTORE") {
+                return { ...a, isRemoved: false, status: "OK" };
+            }
+            if (actionDesc === "APPROVE") {
+                return { ...a, isRemoved: false, status: "OK", manualValue: suggestedVal ?? a.valorIwof, fracaoHora: a.suggestedFracaoHora ?? a.fracaoHora };
+            }
+            return a;
+        }));
+    };
 
     const totalFaturar = financialSummary.summaryArr.find(s => s.ciclo === "LÍQUIDO P/ LOTE")?.total || 0;
     const qtdEmpresas = financialSummary.summaryArr.find(s => s.ciclo === "LÍQUIDO P/ LOTE")?.empresasCount || 0;
 
     // Derived states for checklist
     const excluidos = agendamentos.filter(a => a.isRemoved).length;
-    const foraPeriodo = agendamentos.filter(a => !a.isRemoved && a.status === "FORA_PERIODO").length;
-    const ciclosIncorretos = agendamentos.filter(a => !a.isRemoved && a.status === "CICLO_INCORRETO").length;
-    const correcoes = agendamentos.filter(a => !a.isRemoved && a.status === "CORREÇÃO").length;
-    const divergentes = agendamentos.filter(a => !a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO") && !a.clienteId).length;
+
+    // Derived values for lists
+    const listForaPeriodo = agendamentos.filter(a => !a.isRemoved && a.status === "FORA_PERIODO");
+    const listCiclosIncorretos = agendamentos.filter(a => !a.isRemoved && a.status === "CICLO_INCORRETO");
+    const listCorrecoes = agendamentos.filter(a => !a.isRemoved && a.status === "CORREÇÃO");
+    const listSubMiny = agendamentos.filter(a => !a.isRemoved && a.status === "CANCELAR");
+    const listDivergentes = agendamentos.filter(a => !a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO") && !a.clienteId);
 
     const issues = [
         {
-            title: "Lojas Sem Cadastro",
-            count: conciliation.naoCadastrados.length,
+            title: "Lojas Sem Cadastro / Divergentes",
+            count: conciliation.naoCadastrados.length + listDivergentes.length,
             message: "Lojas na planilha sem paridade na base de clientes. Edite no cadastro do cliente se desejar incluir.",
             critical: true,
-            icon: AlertCircle
+            icon: AlertCircle,
+            items: [] // handled in tables
         },
         {
-            title: "Divergência de Nome Conta Azul",
-            count: divergentes,
-            message: "Lojas com pequenas divergências nominais e que não atrelaram CNPJ corretamente.",
-            critical: true,
-            icon: AlertTriangle
-        },
-        {
-            title: "Duplicatas Idênticas Detectadas",
-            count: duplicates.identical.length,
-            message: "Linhas 100% idênticas foram auto-removidas para evitar dupla cobrança.",
+            title: "Sessões Irrelevantes (< 0.16h)",
+            count: listSubMiny.length,
+            message: "Agendamentos curtíssimos marcados para Cancelamento. Você pode confirmar a remoção ou forçar faturamento.",
             critical: false,
-            icon: CheckCircle2
+            icon: AlertTriangle,
+            items: listSubMiny
         },
         {
             title: "Fora de Período",
-            count: foraPeriodo,
+            count: listForaPeriodo.length,
             message: "Agendamentos identificados com datas alheias ao escopo definido.",
             critical: false,
-            icon: CheckCircle2
+            icon: CheckCircle2,
+            items: listForaPeriodo
         },
         {
             title: "Ciclos Incorretos",
-            count: ciclosIncorretos,
+            count: listCiclosIncorretos.length,
             message: "Lojas de outros ciclos de faturamento estão sendo ignoradas automaticamente.",
             critical: false,
-            icon: CheckCircle2
+            icon: CheckCircle2,
+            items: listCiclosIncorretos
         },
         {
             title: "Correções Pendentes (> 6 horas)",
-            count: correcoes,
+            count: listCorrecoes.length,
             message: "Agendamentos sugeridos a terem jornada reduzida para 6h.",
             critical: true,
-            icon: AlertCircle
+            icon: AlertCircle,
+            items: listCorrecoes
         }
     ];
 
-    const hasBlockers = conciliation.naoCadastrados.length > 0 || divergentes > 0;
+    const hasBlockers = conciliation.naoCadastrados.length > 0 || listDivergentes.length > 0;
 
     return (
         <div className="flex flex-col gap-6 max-w-5xl mx-auto">
@@ -236,25 +262,164 @@ export default function ResumoFaturamento({
                             ? (issue.critical ? "border-l-4 border-l-[var(--danger)]" : "border-l-4 border-l-amber-500")
                             : "border-l-4 border-l-[var(--success)]";
 
+                        const isOpen = openCategories[issue.title];
+
                         return (
-                            <div key={idx} className={`p-5 flex items-start gap-4 ${borderLeft} hover:bg-[var(--bg-card-hover)] transition-colors`}>
-                                <div className={`p-2 rounded-xl ${bgClass}`}>
-                                    <Icon size={20} className={colorClass} />
-                                </div>
-                                <div className="flex-1">
-                                    <div className="flex items-center justify-between">
-                                        <h4 className="font-bold text-[var(--fg)]">{issue.title}</h4>
-                                        <span className={`font-mono font-bold text-sm bg-[var(--bg-card)] px-3 py-1 rounded-lg border border-[var(--border)] ${hasItems ? (issue.critical ? "text-[var(--danger)]" : "text-[var(--fg)]") : "text-[var(--fg-dim)]"}`}>
-                                            {issue.count} registros
-                                        </span>
+                            <div key={idx} className={`flex flex-col ${borderLeft} transition-colors`}>
+                                {/* Header Toggle */}
+                                <div
+                                    className={`p-5 flex items-start gap-4 hover:bg-[var(--bg-card-hover)] cursor-pointer select-none transition-colors ${isOpen ? 'bg-[rgba(0,0,0,0.1)]' : ''}`}
+                                    onClick={() => hasItems && issue.items.length > 0 && toggleCategory(issue.title)}
+                                >
+                                    <div className={`p-2 rounded-xl ${bgClass}`}>
+                                        <Icon size={20} className={colorClass} />
                                     </div>
-                                    <p className="text-sm text-[var(--fg-dim)] mt-1">
-                                        {hasItems ? issue.message : "Nenhuma anomalia detectada nesta categoria."}
-                                    </p>
+                                    <div className="flex-1">
+                                        <div className="flex items-center justify-between">
+                                            <h4 className="font-bold text-[var(--fg)]">{issue.title}</h4>
+                                            <div className="flex items-center gap-3">
+                                                <span className={`font-mono font-bold text-sm bg-[var(--bg-card)] px-3 py-1 rounded-lg border border-[var(--border)] ${hasItems ? (issue.critical ? "text-[var(--danger)]" : "text-[var(--fg)]") : "text-[var(--fg-dim)]"}`}>
+                                                    {issue.count} registros
+                                                </span>
+                                                {hasItems && issue.items.length > 0 && (
+                                                    <ChevronDown size={18} className={`text-[var(--fg-dim)] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                                                )}
+                                            </div>
+                                        </div>
+                                        <p className="text-sm text-[var(--fg-dim)] mt-1">
+                                            {hasItems ? issue.message : "Nenhuma anomalia detectada nesta categoria."}
+                                        </p>
+                                    </div>
                                 </div>
+
+                                {/* Expanded Content */}
+                                {isOpen && hasItems && issue.items.length > 0 && (
+                                    <div className="bg-[var(--bg-card)] border-t border-[var(--border)] p-4 max-h-[400px] overflow-y-auto">
+                                        <div className="space-y-3">
+                                            {issue.items.map(a => (
+                                                <div key={a.id} className="flex items-center justify-between p-3 rounded-lg border border-[var(--border)] bg-[rgba(255,255,255,0.02)]">
+                                                    <div>
+                                                        <p className="text-sm font-bold text-[var(--fg)]">{a.loja} <span className="text-xs font-normal text-[var(--fg-muted)]">({a.nome})</span></p>
+                                                        <p className="text-xs text-[var(--fg-dim)] mt-1">
+                                                            {a.inicio?.toLocaleDateString("pt-BR")} | {a.fracaoHora}h | <span className="font-mono">{fmtCurrency(a.valorIwof)}</span>
+                                                        </p>
+                                                    </div>
+
+                                                    <div className="flex gap-2">
+                                                        {issue.title.includes("Correções") ? (
+                                                            <>
+                                                                <button className="btn btn-sm btn-ghost text-[var(--danger)] text-xs" onClick={() => handleActionItem(a.id, "REMOVE")}>Remover</button>
+                                                                <button className="btn btn-sm bg-[var(--accent)] text-white text-xs border-none" onClick={() => handleActionItem(a.id, "APPROVE", a.suggestedValorIwof)}>Aprovar ({fmtCurrency(a.suggestedValorIwof || 0)})</button>
+                                                            </>
+                                                        ) : issue.title.includes("< 0.16") ? (
+                                                            <>
+                                                                <button className="btn btn-sm btn-ghost text-[var(--danger)] text-xs" onClick={() => handleActionItem(a.id, "REMOVE")}>Confirmar Remoção</button>
+                                                                <button className="btn btn-sm btn-ghost text-[var(--success)] text-xs border border-[var(--success)]" onClick={() => handleActionItem(a.id, "RESTORE")}>Forçar (Ignorar)</button>
+                                                            </>
+                                                        ) : (
+                                                            <button className="btn btn-sm btn-ghost text-[var(--danger)] text-xs" onClick={() => handleActionItem(a.id, "REMOVE")}>Zerar/Remover</button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         );
                     })}
+                </div>
+            </div>
+
+            {/* Conciliation / Perdas Board */}
+            <div className="bg-[var(--bg-sidebar)] border border-[var(--border)] rounded-2xl overflow-hidden mt-2">
+                <div className="px-6 py-5 border-b border-[var(--border)] bg-[rgba(0,0,0,0.2)]">
+                    <h3 className="text-lg font-bold text-[var(--fg)]">Auditoria de Perdas e Ausências</h3>
+                    <p className="text-sm text-[var(--fg-dim)] mt-1">
+                        Mapeamento de todas as lojas que constavam na planilha bruta mas que não se qualificaram para gerar Lote (Ex: Fora do período, Ciclo Errado, Sem Vínculo).
+                    </p>
+                </div>
+
+                <div className="max-h-[500px] overflow-y-auto w-full custom-scrollbar">
+                    <table className="w-full text-left text-sm">
+                        <thead className="bg-[var(--bg-card)] sticky top-0 shadow-sm border-b border-[var(--border)]">
+                            <tr>
+                                <th className="py-3 px-4 text-[var(--fg-dim)] font-semibold uppercase text-xs">Loja / Ref</th>
+                                <th className="py-3 px-4 text-[var(--fg-dim)] font-semibold uppercase text-xs">Status do Lote</th>
+                                <th className="py-3 px-4 text-[var(--fg-dim)] font-semibold uppercase text-xs">Motivo / Rejeição</th>
+                                <th className="py-3 px-4 text-[var(--fg-dim)] font-semibold text-right uppercase text-xs">Valor Bruto</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[var(--border)]">
+                            {/* Grouping total array to avoid individual prints of the same store */}
+                            {(() => {
+                                const map = new Map<string, {
+                                    loja: string,
+                                    validLines: number,
+                                    invalidLines: number,
+                                    reasons: Set<string>,
+                                    totalValor: number
+                                }>();
+
+                                agendamentos.forEach(a => {
+                                    const key = a.loja;
+                                    if (!map.has(key)) map.set(key, { loja: a.loja, validLines: 0, invalidLines: 0, reasons: new Set(), totalValor: 0 });
+                                    const m = map.get(key)!;
+
+                                    m.totalValor += a.valorIwof;
+
+                                    if (!a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO") && a.clienteId) {
+                                        m.validLines++;
+                                    } else {
+                                        m.invalidLines++;
+                                        if (a.isRemoved) m.reasons.add("Removida Manualmente (Ou Duplicada)");
+                                        else if (!a.clienteId) m.reasons.add("Sem Vínculo/Não Encontrada no Banco");
+                                        else if (a.status === "CICLO_INCORRETO") m.reasons.add("Ciclo Incorreto");
+                                        else if (a.status === "FORA_PERIODO") m.reasons.add("Fora do Período");
+                                        else if (a.status === "CANCELAR") m.reasons.add("Regra Irrelevante (<0.16h)");
+                                        else m.reasons.add("Outro Impedimento");
+                                    }
+                                });
+
+                                const rows = Array.from(map.values())
+                                    .filter(x => x.invalidLines > 0)
+                                    .sort((a, b) => b.totalValor - a.totalValor);
+
+                                if (rows.length === 0) {
+                                    return (
+                                        <tr>
+                                            <td colSpan={4} className="py-6 text-center text-[var(--fg-dim)] italic">Perfeição! Nenhuma loja ou linha sofreu perda para o lote.</td>
+                                        </tr>
+                                    )
+                                }
+
+                                return rows.map((r, i) => (
+                                    <tr key={i} className="hover:bg-[var(--bg-card-hover)] transition-colors">
+                                        <td className="py-3 px-4 font-semibold text-[var(--fg)]">{r.loja}</td>
+                                        <td className="py-3 px-4">
+                                            {r.validLines > 0 ? (
+                                                <span className="text-[10px] font-bold px-2 py-1 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20 whitespace-nowrap">
+                                                    PARCIALMENTE FATURADA
+                                                </span>
+                                            ) : (
+                                                <span className="text-[10px] font-bold px-2 py-1 rounded bg-[var(--danger)]/10 text-[var(--danger)] border border-[var(--danger)]/20 whitespace-nowrap">
+                                                    NÃO FATURADA (ZERA)
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="py-3 px-4 text-[var(--fg-muted)] flex flex-col gap-1 text-[11px]">
+                                            {Array.from(r.reasons).map((reason, ri) => (
+                                                <span key={ri}>• {reason}</span>
+                                            ))}
+                                        </td>
+                                        <td className="py-3 px-4 text-right font-mono text-[var(--danger)] font-medium">
+                                            {fmtCurrency(r.totalValor)}
+                                        </td>
+                                    </tr>
+                                ));
+                            })()}
+                        </tbody>
+                    </table>
                 </div>
             </div>
 

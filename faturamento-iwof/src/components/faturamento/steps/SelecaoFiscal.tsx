@@ -79,7 +79,7 @@ export default function SelecaoFiscal({
     }, []);
 
     const toggleNf = (clienteId: string) => {
-        setLojasSemNf(prev => {
+        setLojasSemNf((prev: Set<string>) => {
             const next = new Set(prev);
             if (next.has(clienteId)) {
                 next.delete(clienteId);
@@ -91,7 +91,7 @@ export default function SelecaoFiscal({
     };
 
     const toggleAll = (forceOn: boolean) => {
-        setLojasSemNf(prev => {
+        setLojasSemNf((prev: Set<string>) => {
             const next = new Set(prev);
             for (const loja of filteredLojas) {
                 if (forceOn) {
@@ -107,6 +107,33 @@ export default function SelecaoFiscal({
     };
 
     const emitCount = lojasData.length - lojasSemNf.size;
+
+    // --- Financial Summary Panel Calculations ---
+    const financialMetrics = useMemo(() => {
+        let baseTotal = 0;
+        let nfeTotal = 0;
+        let ncTotal = 0;
+        let boletoFinal = 0;
+
+        for (const loja of lojasData) {
+            baseTotal += loja.valorSugerido;
+            if (!lojasSemNf.has(loja.id)) {
+                nfeTotal += loja.valorSugerido;
+            } else {
+                ncTotal += loja.valorSugerido;
+            }
+            boletoFinal += loja.valorSugerido; // Boleto is simply the gross total without tax disc. mapping right now
+        }
+
+        return {
+            baseTotal,
+            nfeTotal,
+            ncTotal,
+            acrescidos: 0,
+            descontos: 0,
+            boletoFinal
+        };
+    }, [lojasData, lojasSemNf]);
 
     return (
         <div className="flex flex-col gap-6 max-w-5xl mx-auto">
@@ -126,33 +153,66 @@ export default function SelecaoFiscal({
                 </p>
             </div>
 
-            <div className="bg-gradient-to-r from-[var(--bg-sidebar)] to-[rgba(33,118,255,0.05)] border border-[var(--border)] rounded-2xl p-5 flex items-center justify-between shadow-sm">
-                <div>
-                    <h3 className="font-bold text-[var(--fg)] text-lg">
-                        <span className="text-[var(--accent)]">{emitCount}</span> de {lojasData.length} Lojas Emitirão NF
-                    </h3>
-                    <p className="text-sm text-[var(--fg-muted)] mt-1">Lojas apagadas não irão aparecer na etapa de geração de notas da Conta Azul.</p>
-                </div>
-                <div className="flex flex-col md:flex-row items-end md:items-center gap-4">
-                    <div className="relative">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <Search size={16} className="text-[var(--fg-dim)]" />
-                        </div>
-                        <input
-                            type="text"
-                            className="input w-full md:w-64 pl-10 h-10 bg-[var(--bg-card)] border-[var(--border)] focus:border-[var(--accent)] text-sm"
-                            placeholder="Buscar CNPJ ou Loja..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
+            <div className="bg-gradient-to-r from-[var(--bg-sidebar)] to-[rgba(33,118,255,0.05)] border border-[var(--border)] rounded-2xl p-6 shadow-sm">
+
+                {/* Search & Filter Header */}
+                <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-6 pb-6 border-b border-[var(--border)]">
+                    <div>
+                        <h3 className="font-bold text-[var(--fg)] text-xl">
+                            <span className="text-[var(--accent)]">{emitCount}</span> de {lojasData.length} Lojas Emitirão NF
+                        </h3>
+                        <p className="text-sm text-[var(--fg-muted)] mt-1">Lojas apagadas não irão aparecer na etapa de geração de notas da Conta Azul.</p>
                     </div>
-                    <div className="flex gap-2">
-                        <button className="btn btn-ghost h-10 px-4 text-[var(--danger)] bg-[rgba(239,68,68,0.1)] hover:bg-[var(--danger)] hover:text-white" onClick={() => toggleAll(false)} title="Desativar as lojas visíveis na busca atual">
-                            <X size={16} className="mr-1.5" /> Desativar Filtro
-                        </button>
-                        <button className="btn btn-ghost h-10 px-4 text-[var(--success)] bg-[rgba(34,197,94,0.1)] hover:bg-[var(--success)] hover:text-white" onClick={() => toggleAll(true)} title="Ativar as lojas visíveis na busca atual">
-                            <Check size={16} className="mr-1.5" /> Ativar Filtro
-                        </button>
+
+                    <div className="flex flex-col md:flex-row items-end md:items-center gap-4">
+                        <div className="relative">
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <Search size={16} className="text-[var(--fg-dim)]" />
+                            </div>
+                            <input
+                                type="text"
+                                className="input w-full md:w-64 pl-10 h-10 bg-[var(--bg-card)] border-[var(--border)] focus:border-[var(--accent)] text-sm"
+                                placeholder="Buscar CNPJ ou Loja..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
+                        </div>
+                        <div className="flex gap-2">
+                            <button className="btn btn-ghost h-10 px-4 text-[var(--danger)] bg-[rgba(239,68,68,0.1)] hover:bg-[var(--danger)] hover:text-white" onClick={() => toggleAll(false)} title="Desmarcar todas as lojas atualmente filtradas na busca">
+                                <X size={16} className="mr-1.5" /> Desmarcar Filtrados
+                            </button>
+                            <button className="btn btn-ghost h-10 px-4 text-[var(--success)] bg-[rgba(34,197,94,0.1)] hover:bg-[var(--success)] hover:text-white" onClick={() => toggleAll(true)} title="Marcar todas as lojas atualmente filtradas na busca">
+                                <Check size={16} className="mr-1.5" /> Marcar Filtrados
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Financial Summary KPIs */}
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                    <div className="p-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl">
+                        <p className="text-[10px] font-bold text-[var(--fg-muted)] uppercase tracking-wider mb-1">Valor Base</p>
+                        <p className="font-mono font-bold text-lg text-[var(--fg)]">{fmtCurrency(financialMetrics.baseTotal)}</p>
+                    </div>
+                    <div className="p-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl">
+                        <p className="text-[10px] font-bold text-[var(--fg-muted)] uppercase tracking-wider mb-1">Acréscimos</p>
+                        <p className="font-mono font-bold text-lg text-[var(--success)]">{fmtCurrency(financialMetrics.acrescidos)}</p>
+                    </div>
+                    <div className="p-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl">
+                        <p className="text-[10px] font-bold text-[var(--fg-muted)] uppercase tracking-wider mb-1">Descontos</p>
+                        <p className="font-mono font-bold text-lg text-[var(--danger)]">{fmtCurrency(financialMetrics.descontos)}</p>
+                    </div>
+                    <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                        <p className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-1">Faturamento (NF-e)</p>
+                        <p className="font-mono font-bold text-lg text-blue-500">{fmtCurrency(financialMetrics.nfeTotal)}</p>
+                    </div>
+                    <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                        <p className="text-[10px] font-bold text-amber-500 uppercase tracking-wider mb-1">Sem Emissão (NC)</p>
+                        <p className="font-mono font-bold text-lg text-amber-500">{fmtCurrency(financialMetrics.ncTotal)}</p>
+                    </div>
+                    <div className="p-3 bg-[var(--accent)] border border-[var(--accent)] rounded-xl shadow-md">
+                        <p className="text-[10px] font-bold text-white/80 uppercase tracking-wider mb-1">Boleto Final Estimado</p>
+                        <p className="font-mono font-bold text-lg text-white">{fmtCurrency(financialMetrics.boletoFinal)}</p>
                     </div>
                 </div>
             </div>
