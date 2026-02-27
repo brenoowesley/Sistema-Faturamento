@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .header {
+            background-color: #0d6efd;
+            color: #ffffff;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .content {
+            padding: 30px;
+            line-height: 1.6;
+            color: #333333;
+        }
+
+        .footer {
+            background-color: #f8f9fa;
+            color: #6c757d;
+            text-align: center;
+            padding: 15px;
+            font-size: 12px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+
+        .highlight {
+            font-weight: bold;
+            color: #0d6efd;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Faturamento iWof</h1>
+        </div>
+        <div class="content">
+            <p>Olá equipe <strong>
+                    <%= subfolderName %>
+                </strong>,</p>
+            <p>Segue em anexo o faturamento referente ao período <strong>
+                    <%= currentMonth %>/<%= currentYear %>
+                </strong>.</p>
+            <p>Ciclo de faturamento: <span class="highlight">
+                    <%= cicloFolder %>
+                </span>.</p>
+            <hr>
+            <p>Os documentos anexados incluem:</p>
+            <ul>
+                <li>Boleto Bancário</li>
+                <li>Nota Fiscal de Serviço (NFS-e)</li>
+            </ul>
+            <p>Por favor, certifique-se de realizar o pagamento até a data de vencimento estipulada no boleto.</p>
+            <p>Qualquer dúvida, nossa equipe financeira está à disposição para auxiliar.</p>
+        </div>
+        <div class="footer">
+            <p>Este é um e-mail automático enviado pelo sistema de Faturamento iWof. Por favor, não responda a este
+                e-mail.</p>
+            <p>&copy; <%= currentYear %> iWof. Todos os direitos reservados.</p>
+        </div>
+    </div>
+</body>
+
+</html>

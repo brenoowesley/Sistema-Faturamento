@@ -1,0 +1,151 @@
+<%- include('../partials/header') %>
+
+    <div class="container mt-4">
+        <h2>Disparo de Faturas para Clientes</h2>
+        <p>Selecione o Ciclo de Faturamento para processar o envio de E-mails com os anexos do Google Drive.</p>
+
+        <div class="card p-4 shadow-sm mb-4">
+            <form id="form-disparo">
+                <div class="row">
+                    <div class="col-md-4">
+                        <label for="ano" class="form-label">Ano</label>
+                        <select id="ano" class="form-select" required>
+                            <option value="2026">2026</option>
+                            <option value="2025">2025</option>
+                            <option value="2024">2024</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="mes" class="form-label">Mês</label>
+                        <select id="mes" class="form-select" required>
+                            <option value="01">Janeiro (01)</option>
+                            <option value="02">Fevereiro (02)</option>
+                            <option value="03">Março (03)</option>
+                            <option value="04">Abril (04)</option>
+                            <option value="05">Maio (05)</option>
+                            <option value="06">Junho (06)</option>
+                            <option value="07">Julho (07)</option>
+                            <option value="08">Agosto (08)</option>
+                            <option value="09">Setembro (09)</option>
+                            <option value="10">Outubro (10)</option>
+                            <option value="11">Novembro (11)</option>
+                            <option value="12">Dezembro (12)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="ciclo" class="form-label">Ciclo</label>
+                        <select id="ciclo" class="form-select" required>
+                            <option value="Ciclo 1">Ciclo 1</option>
+                            <option value="Ciclo 2">Ciclo 2</option>
+                            <option value="Ciclo 3">Ciclo 3</option>
+                            <option value="Ciclo 4">Ciclo 4</option>
+                            <option value="Semanal">Semanal</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="mt-4 text-end">
+                    <button type="submit" id="btn-disparar" class="btn btn-warning btn-lg">
+                        <i class="me-2 spinner-border spinner-border-sm d-none" id="spinner-btn" role="status"
+                            aria-hidden="true"></i>
+                        Disparar E-mails do Ciclo
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Painel de Logs -->
+        <div class="card shadow-sm d-none" id="log-panel">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0">Logs de Disparo</h5>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-striped mb-0 text-center">
+                    <thead>
+                        <tr>
+                            <th>Cliente</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logs-body">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            // Inicializa defaults no mês/ano atual
+            const dataAtual = new Date();
+            document.getElementById('ano').value = dataAtual.getFullYear().toString();
+            document.getElementById('mes').value = (dataAtual.getMonth() + 1).toString().padStart(2, '0');
+        });
+
+        const form = document.getElementById('form-disparo');
+        const btnDisparar = document.getElementById('btn-disparar');
+        const logPanel = document.getElementById('log-panel');
+        const logsBody = document.getElementById('logs-body');
+        const spinnerBtn = document.getElementById('spinner-btn');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const confirmacao = confirm('Tem certeza que deseja iniciar o disparo de faturas deste ciclo?');
+            if (!confirmacao) return;
+
+            const payload = {
+                ano: document.getElementById('ano').value,
+                mes: document.getElementById('mes').value,
+                ciclo: document.getElementById('ciclo').value
+            };
+
+            // UI Feedback
+            btnDisparar.disabled = true;
+            spinnerBtn.classList.remove('d-none');
+            logPanel.classList.add('d-none');
+            logsBody.innerHTML = '';
+
+            try {
+                const res = await fetch('/admin/api/faturamento/disparar-ciclo', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await res.json();
+
+                if (data.success && data.logs) {
+                    // Preenche UI
+                    logPanel.classList.remove('d-none');
+                    data.logs.forEach(log => {
+                        const tr = document.createElement('tr');
+
+                        const tdCliente = document.createElement('td');
+                        tdCliente.textContent = log.cliente;
+
+                        const tdStatus = document.createElement('td');
+                        tdStatus.innerHTML = log.status.toLowerCase().includes('sucesso')
+                            ? `<span class="badge bg-success">${log.status}</span>`
+                            : `<span class="badge bg-danger">${log.status}</span>`;
+
+                        tr.appendChild(tdCliente);
+                        tr.appendChild(tdStatus);
+                        logsBody.appendChild(tr);
+                    });
+                } else {
+                    alert('Erro na API: ' + (data.message || 'Desconhecido'));
+                }
+            } catch (error) {
+                console.error(error);
+                alert('Erro de comunicação com o servidor.');
+            } finally {
+                btnDisparar.disabled = false;
+                spinnerBtn.classList.add('d-none');
+            }
+        });
+
+    </script>
+    <%- include('../partials/footer') %>

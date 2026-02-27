@@ -1,0 +1,270 @@
+<%- include('../partials/header') %>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <div class="container mt-4">
+        <h2>Triagem de Notas Fiscais (NFE.io)</h2>
+        <p>Arraste e solte o arquivo ZIP contendo as Notas Fiscais.</p>
+
+        <div id="drop-zone-zip" class="p-5 border border-success border-2 text-center rounded mb-4"
+            style="border-style: dashed !important; cursor: pointer; background: #f8f9fa;">
+            <h5>Solte o .zip aqui ou clique para selecionar</h5>
+            <input type="file" id="file-input-zip" accept=".zip,application/zip" class="d-none">
+        </div>
+
+        <table class="table table-bordered table-hover" id="preview-table-nfs">
+            <thead class="table-light">
+                <tr>
+                    <th>Arquivo Original</th>
+                    <th>Número NF</th>
+                    <th>Cliente Identificado</th>
+                    <th>Ciclo</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Populado via JS -->
+            </tbody>
+        </table>
+
+        <div class="text-end">
+            <button id="btn-enviar-zip" class="btn btn-success" disabled>Enviar para o Drive</button>
+        </div>
+    </div>
+
+    <script>
+        const ciclosOptions = ['Ciclo 1', 'Ciclo 2', 'Ciclo 3', 'Ciclo 4', 'Semanal'];
+        let dicClientes = {};
+        let clientesLista = []; // Para o select
+
+        // Fetch mapping
+        fetch('/admin/api/notas-mapeamento')
+            .then(res => res.json())
+            .then(data => {
+                dicClientes = data;
+                clientesLista = Array.from(new Set(Object.values(data)));
+            })
+            .catch(err => console.error("Erro ao carregar mapeamento de NFs:", err));
+
+        const dropZoneZip = document.getElementById('drop-zone-zip');
+        const fileInputZip = document.getElementById('file-input-zip');
+        const tbodyNfs = document.querySelector('#preview-table-nfs tbody');
+        const btnEnviarZip = document.getElementById('btn-enviar-zip');
+
+        let stagedPdfFiles = []; // { blob, name, match, ciclo, nfNumber }
+
+        // Drag & Drop events
+        dropZoneZip.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZoneZip.classList.add('bg-light');
+        });
+
+        dropZoneZip.addEventListener('dragleave', () => {
+            dropZoneZip.classList.remove('bg-light');
+        });
+
+        dropZoneZip.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZoneZip.classList.remove('bg-light');
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                handleZipFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        dropZoneZip.addEventListener('click', () => fileInputZip.click());
+        fileInputZip.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) {
+                handleZipFile(e.target.files[0]);
+            }
+        });
+
+        async function handleZipFile(file) {
+            if (!file.name.toLowerCase().endsWith('.zip')) {
+                alert('Por favor, selecione um arquivo ZIP.');
+                return;
+            }
+
+            try {
+                const zip = await JSZip.loadAsync(file);
+                const pdfFiles = [];
+
+                zip.forEach((relativePath, zipEntry) => {
+                    if (relativePath.toLowerCase().endsWith('.pdf')) {
+                        pdfFiles.push(zipEntry);
+                    }
+                });
+
+                if (pdfFiles.length === 0) {
+                    alert('Nenhum PDF encontrado no ZIP.');
+                    return;
+                }
+
+                stagedPdfFiles = []; // Limpando estado anterior
+
+                for (let entry of pdfFiles) {
+                    const blob = await entry.async("blob");
+                    const cleanBlob = new Blob([blob], { type: 'application/pdf' });
+                    const name = entry.name;
+
+                    // Extrair 5 dígitos antes de -nfse.pdf
+                    // Exemplo: 00019770-nfse.pdf -> 19770
+                    let nfNumber = '';
+                    const matchNf = name.match(/(\d{1,5})-nfse\.pdf$/i);
+                    if (matchNf) {
+                        nfNumber = matchNf[1];
+                    }
+
+                    const clientMatch = nfNumber ? (dicClientes[nfNumber] || '') : '';
+
+                    stagedPdfFiles.push({
+                        blob: cleanBlob,
+                        name: name,
+                        nfNumber: nfNumber,
+                        match: clientMatch,
+                        ciclo: ''
+                    });
+                }
+
+                renderTableNfs();
+            } catch (error) {
+                console.error("Erro ao ler ZIP:", error);
+                alert("Erro ao processar o arquivo ZIP.");
+            }
+        }
+
+        function renderTableNfs() {
+            tbodyNfs.innerHTML = '';
+            btnEnviarZip.disabled = stagedPdfFiles.length === 0;
+
+            stagedPdfFiles.forEach((item, index) => {
+                const tr = document.createElement('tr');
+                tr.className = item.match ? 'table-success' : 'table-warning';
+
+                // Arquivo Original
+                const tdName = document.createElement('td');
+                tdName.textContent = item.name;
+
+                // NF Number
+                const tdNf = document.createElement('td');
+                tdNf.textContent = item.nfNumber || 'N/A';
+
+                // Cliente Select
+                const tdClient = document.createElement('td');
+                const selectClient = document.createElement('select');
+                selectClient.className = 'form-select form-select-sm';
+
+                const defaultOpt = document.createElement('option');
+                defaultOpt.value = '';
+                defaultOpt.textContent = 'Selecione...';
+                selectClient.appendChild(defaultOpt);
+
+                // Adiciona opções (clientes baseados no dicionário)
+                clientesLista.forEach(c => {
+                    const opt = document.createElement('option');
+                    opt.value = c;
+                    opt.textContent = c;
+                    if (c === item.match) opt.selected = true;
+                    selectClient.appendChild(opt);
+                });
+
+                // Fallback se o 'match' não estiver na clientesLista (e.g. mock incompleto)
+                if (item.match && !clientesLista.includes(item.match)) {
+                    const opt = document.createElement('option');
+                    opt.value = item.match;
+                    opt.textContent = item.match;
+                    opt.selected = true;
+                    selectClient.appendChild(opt);
+                }
+
+                selectClient.addEventListener('change', (e) => {
+                    item.match = e.target.value;
+                    tr.className = item.match ? 'table-success' : 'table-warning';
+                });
+
+                tdClient.appendChild(selectClient);
+
+                // Ciclo Select
+                const tdCiclo = document.createElement('td');
+                const selectCiclo = document.createElement('select');
+                selectCiclo.className = 'form-select form-select-sm';
+
+                const defCiclo = document.createElement('option');
+                defCiclo.value = '';
+                defCiclo.textContent = 'Selecione...';
+                selectCiclo.appendChild(defCiclo);
+
+                ciclosOptions.forEach(ciclo => {
+                    const opt = document.createElement('option');
+                    opt.value = ciclo;
+                    opt.textContent = ciclo;
+                    selectCiclo.appendChild(opt);
+                });
+
+                selectCiclo.addEventListener('change', (e) => item.ciclo = e.target.value);
+
+                tdCiclo.appendChild(selectCiclo);
+
+                // Ações
+                const tdAcoes = document.createElement('td');
+                const btnRemover = document.createElement('button');
+                btnRemover.className = 'btn btn-sm btn-danger';
+                btnRemover.textContent = 'Remover';
+                btnRemover.onclick = () => {
+                    stagedPdfFiles.splice(index, 1);
+                    renderTableNfs();
+                };
+                tdAcoes.appendChild(btnRemover);
+
+                tr.appendChild(tdName);
+                tr.appendChild(tdNf);
+                tr.appendChild(tdClient);
+                tr.appendChild(tdCiclo);
+                tr.appendChild(tdAcoes);
+
+                tbodyNfs.appendChild(tr);
+            });
+        }
+
+        btnEnviarZip.addEventListener('click', async () => {
+            // Validate
+            const invalid = stagedPdfFiles.find(f => !f.match || !f.ciclo);
+            if (invalid) {
+                alert('Por favor, defina Cliente e Ciclo para todas as Notas Fiscais antes de enviar.');
+                return;
+            }
+
+            btnEnviarZip.disabled = true;
+            btnEnviarZip.textContent = 'Enviando...';
+
+            const formData = new FormData();
+            stagedPdfFiles.forEach(f => {
+                // Recriando File object a partir do Blob
+                const fileObj = new File([f.blob], f.name, { type: 'application/pdf' });
+                formData.append('documentos', fileObj);
+                formData.append('clientes', f.match);
+                formData.append('ciclos', f.ciclo);
+            });
+
+            try {
+                const res = await fetch('/admin/api/drive/upload-documento', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (res.ok) {
+                    alert('NFs enviadas com sucesso para o Drive!');
+                    stagedPdfFiles = [];
+                    renderTableNfs();
+                } else {
+                    alert('Erro ao enviar arquivos.');
+                }
+            } catch (error) {
+                console.error(error);
+                alert('Erro de rede ao enviar arquivos.');
+            } finally {
+                btnEnviarZip.disabled = false;
+                btnEnviarZip.textContent = 'Enviar para o Drive';
+            }
+        });
+    </script>
+    <%- include('../partials/footer') %>

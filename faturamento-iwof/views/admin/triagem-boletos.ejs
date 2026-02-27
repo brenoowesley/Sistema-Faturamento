@@ -1,0 +1,249 @@
+<%- include('../partials/header') %> <!-- Assumindo um header padrão -->
+
+<div class="container mt-4">
+    <h2>Triagem de Boletos</h2>
+    <p>Arraste e solte os PDFs de boletos abaixo.</p>
+
+    <div id="drop-zone" class="p-5 border border-primary border-2 text-center rounded mb-4" style="border-style: dashed !important; cursor: pointer; background: #f8f9fa;">
+        <h5>Solte os PDFs aqui ou clique para selecionar</h5>
+        <input type="file" id="file-input" multiple accept="application/pdf" class="d-none">
+    </div>
+
+    <table class="table table-bordered table-hover" id="preview-table">
+        <thead class="table-light">
+            <tr>
+                <th>Arquivo Original</th>
+                <th>Cliente Identificado</th>
+                <th>Ciclo</th>
+                <th>Ações</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Populado via JS -->
+        </tbody>
+    </table>
+
+    <div class="text-end">
+        <button id="btn-enviar" class="btn btn-primary" disabled>Enviar para o Drive</button>
+    </div>
+</div>
+
+<script>
+    const clientes = <%- JSON.stringify(clientes || []) %>;
+    const ciclosOptions = ['Ciclo 1', 'Ciclo 2', 'Ciclo 3', 'Ciclo 4', 'Semanal'];
+
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const tbody = document.querySelector('#preview-table tbody');
+    const btnEnviar = document.getElementById('btn-enviar');
+
+    let stagedFiles = [];
+
+    // Drag & Drop events
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('bg-light');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('bg-light');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('bg-light');
+        if (e.dataTransfer.files) {
+            handleFiles(e.dataTransfer.files);
+        }
+    });
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+    function cleanFilename(name) {
+        let clean = name.replace(/\.pdf$/i, '')
+                        .replace(/[_-]/g, ' ')
+                        .replace(/BOLETO/i, '')
+                        .replace(/FATURA/i, '')
+                        .trim()
+                        .toUpperCase();
+        return clean;
+    }
+
+    function levenshtein(a, b) {
+        if (a.length === 0) return b.length;
+        if (b.length === 0) return a.length;
+        const matrix = [];
+        for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+        for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+        for (let i = 1; i <= b.length; i++) {
+            for (let j = 1; j <= a.length; j++) {
+                if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                    matrix[i][j] = matrix[i - 1][j - 1];
+                } else {
+                    matrix[i][j] = Math.min(
+                        matrix[i - 1][j - 1] + 1,
+                        Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1)
+                    );
+                }
+            }
+        }
+        return matrix[b.length][a.length];
+    }
+
+    function findMatch(cleanName) {
+        // Bi-directional includes
+        let match = clientes.find(c => c.toUpperCase().includes(cleanName) || cleanName.includes(c.toUpperCase()));
+        if (match) return match;
+
+        // Levenshtein
+        let bestMatch = null;
+        let minDistance = Infinity;
+        
+        for (let c of clientes) {
+            const dist = levenshtein(cleanName, c.toUpperCase());
+            if (dist < minDistance && dist <= 3) {
+                minDistance = dist;
+                bestMatch = c;
+            }
+        }
+        return bestMatch;
+    }
+
+    function renderTable() {
+        tbody.innerHTML = '';
+        btnEnviar.disabled = stagedFiles.length === 0;
+
+        stagedFiles.forEach((item, index) => {
+            const tr = document.createElement('tr');
+            tr.className = item.match ? 'table-success' : 'table-warning';
+
+            // Arquivo Original
+            const tdName = document.createElement('td');
+            tdName.textContent = item.file.name;
+
+            // Cliente Select
+            const tdClient = document.createElement('td');
+            const selectClient = document.createElement('select');
+            selectClient.className = 'form-select form-select-sm';
+            
+            const defaultOpt = document.createElement('option');
+            defaultOpt.value = '';
+            defaultOpt.textContent = 'Selecione...';
+            selectClient.appendChild(defaultOpt);
+
+            clientes.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c;
+                opt.textContent = c;
+                if (c === item.match) opt.selected = true;
+                selectClient.appendChild(opt);
+            });
+            
+            selectClient.addEventListener('change', (e) => {
+                item.match = e.target.value;
+                tr.className = item.match ? 'table-success' : 'table-warning';
+            });
+            
+            tdClient.appendChild(selectClient);
+
+            // Ciclo Select
+            const tdCiclo = document.createElement('td');
+            const selectCiclo = document.createElement('select');
+            selectCiclo.className = 'form-select form-select-sm';
+            
+            const defCiclo = document.createElement('option');
+            defCiclo.value = '';
+            defCiclo.textContent = 'Selecione...';
+            selectCiclo.appendChild(defCiclo);
+
+            ciclosOptions.forEach(ciclo => {
+                const opt = document.createElement('option');
+                opt.value = ciclo;
+                opt.textContent = ciclo;
+                selectCiclo.appendChild(opt);
+            });
+            
+            selectCiclo.addEventListener('change', (e) => item.ciclo = e.target.value);
+            
+            tdCiclo.appendChild(selectCiclo);
+
+            // Ações
+            const tdAcoes = document.createElement('td');
+            const btnRemover = document.createElement('button');
+            btnRemover.className = 'btn btn-sm btn-danger';
+            btnRemover.textContent = 'Remover';
+            btnRemover.onclick = () => {
+                stagedFiles.splice(index, 1);
+                renderTable();
+            };
+            tdAcoes.appendChild(btnRemover);
+
+            tr.appendChild(tdName);
+            tr.appendChild(tdClient);
+            tr.appendChild(tdCiclo);
+            tr.appendChild(tdAcoes);
+            
+            tbody.appendChild(tr);
+        });
+    }
+
+    function handleFiles(files) {
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            if (file.type === 'application/pdf') {
+                const cleanName = cleanFilename(file.name);
+                const matchName = findMatch(cleanName);
+                
+                stagedFiles.push({
+                    file: file,
+                    match: matchName || '',
+                    ciclo: ''
+                });
+            }
+        }
+        renderTable();
+    }
+
+    btnEnviar.addEventListener('click', async () => {
+        // Validate
+        const invalid = stagedFiles.find(f => !f.match || !f.ciclo);
+        if (invalid) {
+            alert('Por favor, defina Cliente e Ciclo para todos os arquivos antes de enviar.');
+            return;
+        }
+
+        btnEnviar.disabled = true;
+        btnEnviar.textContent = 'Enviando...';
+
+        const formData = new FormData();
+        stagedFiles.forEach(f => {
+            formData.append('documentos', f.file);
+            formData.append('clientes', f.match);
+            formData.append('ciclos', f.ciclo);
+        });
+
+        try {
+            const res = await fetch('/admin/api/drive/upload-documento', {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (res.ok) {
+                alert('Arquivos enviados com sucesso para o Drive!');
+                stagedFiles = [];
+                renderTable();
+            } else {
+                alert('Erro ao enviar arquivos.');
+            }
+        } catch (error) {
+            console.error(error);
+            alert('Erro de rede ao enviar arquivos.');
+        } finally {
+            btnEnviar.disabled = false;
+            btnEnviar.textContent = 'Enviar para o Drive';
+        }
+    });
+
+</script>
+<%- include('../partials/footer') %>
