@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { ArrowLeft, ChevronRight, FileDown, UploadCloud, FileArchive, CheckCircle2, X, AlertCircle, Info } from "lucide-react";
+import { useState, useCallback, useEffect } from "react";
+import { ArrowLeft, ChevronRight, FileDown, UploadCloud, FileArchive, CheckCircle2, X, AlertCircle, Info, Search } from "lucide-react";
 import { useDropzone } from "react-dropzone";
 import JSZip from "jszip";
 
@@ -29,6 +29,65 @@ export default function EmissaoNotas({
     const [isExporting, setIsExporting] = useState(false);
     const [isExtracting, setIsExtracting] = useState(false);
     const [extractError, setExtractError] = useState<string | null>(null);
+
+    // Resumo Data State
+    const [resumoData, setResumoData] = useState<any[]>([]);
+    const [isLoadingResumo, setIsLoadingResumo] = useState(true);
+    const [searchTerm, setSearchTerm] = useState("");
+
+    // Load Resumo on Mount
+    useEffect(() => {
+        const fetchResumo = async () => {
+            try {
+                const validados = agendamentos.filter(a =>
+                    !a.isRemoved &&
+                    (a.status === "OK" || a.status === "CORREÇÃO") &&
+                    a.clienteId
+                );
+
+                const payloadAgendamentos = validados.map(a => ({
+                    clienteId: a.clienteId,
+                    status: a.status,
+                    valorIwof: a.valorIwof,
+                    suggestedValorIwof: a.suggestedValorIwof,
+                    manualValue: a.manualValue,
+                    rawRow: {
+                        data_competencia: a.rawRow?.data_competencia
+                    }
+                }));
+
+                const response = await fetch("/api/documentos/resumo-nfe", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        agendamentos: payloadAgendamentos,
+                        lojasSemNF: Array.from(lojasSemNf)
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    setResumoData(data);
+                }
+            } catch (err) {
+                console.error("Failed to load resumo", err);
+            } finally {
+                setIsLoadingResumo(false);
+            }
+        };
+
+        fetchResumo();
+    }, [agendamentos, lojasSemNf]);
+
+    const filteredResumo = resumoData.filter(r =>
+        (r.nome_conta_azul?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
+        (r.razao_social?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
+        (r.cnpj || "").includes(searchTerm)
+    );
+
+    const formatCurrency = (val: number) => {
+        return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+    };
 
     const handleDownload = async () => {
         setIsExporting(true);
@@ -176,6 +235,104 @@ export default function EmissaoNotas({
                 <p className="text-[var(--fg-dim)] max-w-2xl mx-auto">
                     Exporte a planilha unificada, importe na plataforma emissora (Conta Azul/NFE.IO) e, em seguida, devolva o arquivo ZIP gerado para darmos continuidade ao disparo e faturamento.
                 </p>
+            </div>
+
+            {/* Resumo Table */}
+            <div className="bg-[var(--bg-card)] rounded-2xl border border-[var(--border)] shadow-sm overflow-hidden mb-8">
+                <div className="p-5 border-b border-[var(--border)] flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                        <h3 className="text-lg font-bold text-[var(--fg)]">Resumo de Emissão</h3>
+                        <p className="text-sm text-[var(--fg-dim)]">Valores consolidados que serão exportados na planilha.</p>
+                    </div>
+                    <div className="relative w-full md:w-72">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg-dim)]" size={16} />
+                        <input
+                            type="text"
+                            placeholder="Buscar loja ou CNPJ..."
+                            className="w-full bg-[var(--bg-sidebar)] border border-[var(--border)] rounded-full py-2 pl-10 pr-4 text-sm text-[var(--fg)] focus:outline-none focus:border-[var(--accent)]"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                </div>
+
+                <div className="overflow-x-auto max-h-[400px]">
+                    <table className="table w-full table-pin-rows table-pin-cols text-sm">
+                        <thead className="bg-[var(--bg-sidebar)] text-[var(--fg-dim)] shadow-[0_1px_0_var(--border)]">
+                            <tr>
+                                <th className="bg-[var(--bg-sidebar)]">Loja</th>
+                                <th className="text-center">NFSE Gerada</th>
+                                <th>Ciclo</th>
+                                <th className="text-right">Boleto Base</th>
+                                <th className="text-right text-emerald-500">Acréscimos</th>
+                                <th className="text-right text-rose-500">Descontos</th>
+                                <th className="text-right text-[var(--accent)]">NC (88,5%)</th>
+                                <th className="text-right text-purple-400">NF (11,5%)</th>
+                                <th className="text-right font-bold text-[var(--fg)] bg-[var(--bg-sidebar)]">Boleto Final</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {isLoadingResumo ? (
+                                <tr>
+                                    <td colSpan={9} className="text-center py-12">
+                                        <span className="loading loading-spinner text-[var(--accent)]"></span>
+                                        <p className="text-[var(--fg-dim)] mt-2">Calculando resumo consolidado...</p>
+                                    </td>
+                                </tr>
+                            ) : filteredResumo.length === 0 ? (
+                                <tr>
+                                    <td colSpan={9} className="text-center py-12 text-[var(--fg-dim)]">
+                                        Nenhum registro encontrado.
+                                    </td>
+                                </tr>
+                            ) : (
+                                filteredResumo.map((row) => (
+                                    <tr key={row.id} className="hover:bg-[var(--bg-sidebar)]/50 transition-colors group">
+                                        <td className="max-w-[250px] bg-[var(--bg-card)] group-hover:bg-[var(--bg-sidebar)]/50 transition-colors">
+                                            <div className="font-bold text-[var(--fg)] truncate" title={row.nome_conta_azul || row.razao_social}>
+                                                {row.nome_conta_azul || row.razao_social}
+                                            </div>
+                                            <div className="text-xs text-[var(--fg-dim)] truncate mt-0.5" title={row.razao_social}>
+                                                {row.razao_social}
+                                            </div>
+                                            <div className="text-[10px] text-[var(--fg-dim)]/70 font-mono mt-0.5">
+                                                {row.cnpj}
+                                            </div>
+                                        </td>
+                                        <td className="text-center">
+                                            {row.gerou_nfse ? (
+                                                <div className="badge badge-success badge-sm badge-outline gap-1">Sim</div>
+                                            ) : (
+                                                <div className="badge badge-ghost badge-sm gap-1 text-[var(--fg-dim)]">Não</div>
+                                            )}
+                                        </td>
+                                        <td className="whitespace-nowrap text-[var(--fg-dim)]">
+                                            {row.ciclo}
+                                        </td>
+                                        <td className="text-right whitespace-nowrap text-[var(--fg-dim)]">
+                                            {formatCurrency(row.boleto_base)}
+                                        </td>
+                                        <td className="text-right whitespace-nowrap text-emerald-500/80">
+                                            {row.acrescimos > 0 ? formatCurrency(row.acrescimos) : "-"}
+                                        </td>
+                                        <td className="text-right whitespace-nowrap text-rose-500/80">
+                                            {row.descontos > 0 ? formatCurrency(row.descontos) : "-"}
+                                        </td>
+                                        <td className="text-right whitespace-nowrap font-medium text-[var(--accent)]/90">
+                                            {formatCurrency(row.nc)}
+                                        </td>
+                                        <td className="text-right whitespace-nowrap font-medium text-purple-400/90">
+                                            {formatCurrency(row.nf)}
+                                        </td>
+                                        <td className="text-right font-bold text-[var(--fg)] whitespace-nowrap bg-[var(--bg-card)] group-hover:bg-[var(--bg-sidebar)]/50 transition-colors">
+                                            {formatCurrency(row.boleto_final)}
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
