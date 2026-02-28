@@ -144,51 +144,50 @@ export default function EmissaoNotas({
         }
     };
 
-    const processDroppedFile = async (file: File) => {
+    const processDroppedFile = async (files: File[]) => {
         setIsExtracting(true);
         setExtractError(null);
         try {
-            if (file.name.toLowerCase().endsWith('.zip')) {
-                const arrayBuffer = await file.arrayBuffer();
-                const zip = new JSZip();
-                const contents = await zip.loadAsync(arrayBuffer);
+            const extractedFiles: { name: string; blob: Blob; buffer: ArrayBuffer }[] = [...nfseFiles];
 
-                const extractedFiles: { name: string; blob: Blob; buffer: ArrayBuffer }[] = [];
+            for (const file of files) {
+                if (file.name.toLowerCase().endsWith('.zip')) {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const zip = new JSZip();
+                    const contents = await zip.loadAsync(arrayBuffer);
 
-                const pdfFiles = Object.keys(contents.files).filter(name => name.toLowerCase().endsWith('.pdf') || name.toLowerCase().endsWith('.xml'));
+                    const pdfFiles = Object.keys(contents.files).filter(name => name.toLowerCase().endsWith('.pdf') || name.toLowerCase().endsWith('.xml'));
 
-                if (pdfFiles.length === 0) {
-                    setExtractError("O arquivo ZIP não contém notas fiscais válidas (.pdf ou .xml).");
-                    setIsExtracting(false);
-                    return;
-                }
-
-                for (const filename of pdfFiles) {
-                    const zipObj = contents.files[filename];
-                    if (!zipObj.dir) {
-                        const fileData = await zipObj.async("blob");
-                        const fileBuffer = await zipObj.async("arraybuffer");
-                        // Clean up filename commonly used by Conta Azul
-                        let cleanName = filename.split('/').pop() || filename;
-                        extractedFiles.push({
-                            name: cleanName,
-                            blob: fileData,
-                            buffer: fileBuffer
-                        });
+                    if (pdfFiles.length === 0) {
+                        setExtractError("Parte dos arquivos ignorada: o arquivo ZIP não contém notas válidas.");
+                        continue;
                     }
-                }
 
-                setNfseFiles(extractedFiles);
-            } else if (file.name.toLowerCase().endsWith('.xml') || file.name.toLowerCase().endsWith('.pdf')) {
-                const arrayBuffer = await file.arrayBuffer();
-                setNfseFiles([{
-                    name: file.name,
-                    blob: file,
-                    buffer: arrayBuffer
-                }]);
-            } else {
-                setExtractError("Formato de arquivo não suportado.");
+                    for (const filename of pdfFiles) {
+                        const zipObj = contents.files[filename];
+                        if (!zipObj.dir) {
+                            const fileData = await zipObj.async("blob");
+                            const fileBuffer = await zipObj.async("arraybuffer");
+                            let cleanName = filename.split('/').pop() || filename;
+                            extractedFiles.push({
+                                name: cleanName,
+                                blob: fileData,
+                                buffer: fileBuffer
+                            });
+                        }
+                    }
+                } else if (file.name.toLowerCase().endsWith('.xml') || file.name.toLowerCase().endsWith('.pdf')) {
+                    const arrayBuffer = await file.arrayBuffer();
+                    extractedFiles.push({
+                        name: file.name,
+                        blob: file,
+                        buffer: arrayBuffer
+                    });
+                } else {
+                    setExtractError(prev => (prev ? prev + "\n" : "") + `Formato não suportado: ${file.name}`);
+                }
             }
+            setNfseFiles(extractedFiles);
         } catch (e: any) {
             console.error("Failed to process file", e);
             setExtractError("Erro ao processar o arquivo. Certifique-se de que é válido.");
@@ -196,12 +195,11 @@ export default function EmissaoNotas({
             setIsExtracting(false);
         }
     };
-
     const onDrop = useCallback((acceptedFiles: File[]) => {
         if (acceptedFiles.length > 0) {
-            processDroppedFile(acceptedFiles[0]);
+            processDroppedFile(acceptedFiles);
         }
-    }, []);
+    }, [processDroppedFile]);
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
@@ -212,7 +210,9 @@ export default function EmissaoNotas({
             "application/xml": [".xml"],
             "application/octet-stream": [".xml"]
         },
-        maxFiles: 1,
+        maxFiles: 500,
+        noClick: false, // Ensure clicking works
+        noKeyboard: false
     });
 
     return (

@@ -53,6 +53,8 @@ export default function FechamentoLote({
     const boletosInputRef = useRef<HTMLInputElement>(null);
     const nfsInputRef = useRef<HTMLInputElement>(null);
 
+    const [xmlParsedData, setXmlParsedData] = useState<Record<string, { cnpj: string | null; irrf: number }>>({});
+
     const matchFiles = useMemo(() => {
         const validados = agendamentos.filter(a =>
             !a.isRemoved &&
@@ -60,13 +62,14 @@ export default function FechamentoLote({
             a.clienteId
         );
 
-        const lojasUnicas = new Map<string, { nome: string; id: string; razaoSocial: string; totalFaturar: number }>();
+        const lojasUnicas = new Map<string, { nome: string; id: string; razaoSocial: string; cnpj: string | undefined; totalFaturar: number }>();
         for (const a of validados) {
             if (!lojasUnicas.has(a.clienteId!)) {
                 lojasUnicas.set(a.clienteId!, {
                     id: a.clienteId!,
                     nome: a.loja,
                     razaoSocial: a.razaoSocial || a.loja,
+                    cnpj: a.cnpj?.replace(/\D/g, ''),
                     totalFaturar: 0
                 });
             }
@@ -76,10 +79,26 @@ export default function FechamentoLote({
         const reports = Array.from(lojasUnicas.values()).map(loja => {
             const normalizedStoreName = normalizarNome(loja.nome);
 
-            const nfseMatch = nfseFiles.find(f => normalizarNome(f.name.replace(/nfse|nfe|\.pdf|\.xml/gi, "")).includes(normalizedStoreName) || normalizedStoreName.includes(normalizarNome(f.name.replace(/nfse|nfe|\.pdf|\.xml/gi, ""))));
-            const boletoMatch = boletoFiles.find(f => normalizarNome(f.name.replace(/boleto|\.pdf/gi, "")).includes(normalizedStoreName) || normalizedStoreName.includes(normalizarNome(f.name.replace(/boleto|\.pdf/gi, ""))));
+            let nfseMatch = null;
+            if (loja.cnpj) {
+                // Find any XML NF that matches this store's CNPJ
+                const cnpjToMatch = loja.cnpj;
+                const matchingNfEntry = Object.entries(xmlParsedData).find(([nfNum, data]) => data.cnpj === cnpjToMatch || (data.cnpj && cnpjToMatch.includes(data.cnpj)));
+                if (matchingNfEntry) {
+                    const nfNumber = matchingNfEntry[0];
+                    // Find the physical PDF file belonging to this NF number (usually Conta Azul PDFs have the NF number in the title)
+                    nfseMatch = nfseFiles.find(f => f.name.includes(nfNumber)) || null;
+                }
+            }
 
-            return { ...loja, nfse: nfseMatch || null, boleto: boletoMatch || null };
+            // 2. Fallback: name matching (legacy)
+            if (!nfseMatch) {
+                nfseMatch = nfseFiles.find(f => normalizarNome(f.name.replace(/nfse|nfe|\.pdf|\.xml/gi, "")).includes(normalizedStoreName) || normalizedStoreName.includes(normalizarNome(f.name.replace(/nfse|nfe|\.pdf|\.xml/gi, "")))) || null;
+            }
+
+            const boletoMatch = boletoFiles.find(f => normalizarNome(f.name.replace(/boleto|\.pdf/gi, "")).includes(normalizedStoreName) || normalizedStoreName.includes(normalizarNome(f.name.replace(/boleto|\.pdf/gi, "")))) || null;
+
+            return { ...loja, nfse: nfseMatch, boleto: boletoMatch };
         });
 
         const matchedNfseNames = new Set(reports.map(r => r.nfse?.name).filter(Boolean));
@@ -89,7 +108,7 @@ export default function FechamentoLote({
         const orphanBoletos = boletoFiles.filter(f => !matchedBoletoNames.has(f.name));
 
         return { reports, orphanNfses, orphanBoletos };
-    }, [agendamentos, nfseFiles, boletoFiles]);
+    }, [agendamentos, nfseFiles, boletoFiles, xmlParsedData]);
 
     const handleBoletoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files?.length) return;
@@ -130,8 +149,6 @@ export default function FechamentoLote({
             setLoadingMap(p => ({ ...p, "zipBoletos": false }));
         }
     };
-
-    const [xmlParsedData, setXmlParsedData] = useState<Record<string, { cnpj: string | null; irrf: number }>>({});
 
     const handleNfsZipUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files?.length) return;
