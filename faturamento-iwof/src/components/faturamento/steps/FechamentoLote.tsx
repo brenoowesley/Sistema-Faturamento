@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { ArrowLeft, CheckCircle2, ShieldCheck, FileText, UploadCloud, CloudLightning, Mail, AlertTriangle, Info, FileStack, X, FileArchive, Search, Send, FileCode2 } from "lucide-react";
 import { Agendamento, FinancialSummary } from "../types";
 import { fmtCurrency, normalizarNome } from "../utils";
@@ -52,8 +52,48 @@ export default function FechamentoLote({
 
     const boletosInputRef = useRef<HTMLInputElement>(null);
     const nfsInputRef = useRef<HTMLInputElement>(null);
-
     const [xmlParsedData, setXmlParsedData] = useState<Record<string, { cnpj: string | null; irrf: number }>>({});
+
+    useEffect(() => {
+        const parseXmls = async () => {
+            const newParsedMap = { ...xmlParsedData };
+            let hasChanges = false;
+
+            for (const fileObj of nfseFiles) {
+                if (fileObj.name.toLowerCase().endsWith('.xml')) {
+                    try {
+                        const textDecoder = new TextDecoder('utf-8');
+                        const xmlString = textDecoder.decode(fileObj.buffer);
+                        const parser = new DOMParser();
+                        const xmlDoc = parser.parseFromString(xmlString, "application/xml");
+
+                        const numeroElement = xmlDoc.querySelector("Numero") || xmlDoc.querySelector("nNF");
+                        const numeroNF = numeroElement ? numeroElement.textContent?.trim() : null;
+
+                        const tomadorElement = xmlDoc.querySelector("Tomador") || xmlDoc.querySelector("TomadorServico");
+                        const cnpjElement = tomadorElement ? tomadorElement.querySelector("Cnpj") || tomadorElement.querySelector("CNPJ") : null;
+                        const cnpjTomador = cnpjElement ? cnpjElement.textContent?.replace(/\D/g, '') : null;
+
+                        const irrfElement = xmlDoc.querySelector("ValorIr") || xmlDoc.querySelector("vIRRF");
+                        const valorIRRF = irrfElement ? parseFloat(irrfElement.textContent?.trim() || "0") : 0;
+
+                        if (numeroNF && (!newParsedMap[numeroNF] || newParsedMap[numeroNF].cnpj !== cnpjTomador)) {
+                            newParsedMap[numeroNF] = { cnpj: cnpjTomador || null, irrf: valorIRRF };
+                            hasChanges = true;
+                        }
+                    } catch (err) {
+                        console.error("Failed parsing XML:", fileObj.name, err);
+                    }
+                }
+            }
+            if (hasChanges) {
+                setXmlParsedData(newParsedMap);
+            }
+        };
+
+        parseXmls();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [nfseFiles]);
 
     const matchFiles = useMemo(() => {
         const validados = agendamentos.filter(a =>
@@ -154,47 +194,31 @@ export default function FechamentoLote({
         if (!e.target.files?.length) return;
         setLoadingMap(p => ({ ...p, "zipNfs": true }));
         try {
-            const file = e.target.files[0];
-            const jsZip = new JSZip();
-            const zip = await jsZip.loadAsync(file);
             const extractedFiles: { name: string; blob: Blob; buffer: ArrayBuffer }[] = [];
-            const newParsedMap = { ...xmlParsedData };
 
-            for (const [filename, fileData] of Object.entries(zip.files)) {
-                if (!fileData.dir) {
-                    if (filename.toLowerCase().endsWith(".pdf")) {
-                        const blob = await fileData.async("blob");
-                        const buffer = await fileData.async("arraybuffer");
-                        extractedFiles.push({ name: filename, blob, buffer });
-                    } else if (filename.toLowerCase().endsWith(".xml")) {
-                        const xmlString = await fileData.async("string");
-                        const parser = new DOMParser();
-                        const xmlDoc = parser.parseFromString(xmlString, "application/xml");
+            for (const file of Array.from(e.target.files)) {
+                if (file.name.toLowerCase().endsWith(".zip")) {
+                    const jsZip = new JSZip();
+                    const zip = await jsZip.loadAsync(file);
 
-                        // 1. Extrair Número da NF (Pode estar em <Numero> ou <nNF>)
-                        const numeroElement = xmlDoc.querySelector("Numero") || xmlDoc.querySelector("nNF");
-                        const numeroNF = numeroElement ? numeroElement.textContent?.trim() : null;
-
-                        // 2. Extrair CNPJ do Tomador (Cliente)
-                        const tomadorElement = xmlDoc.querySelector("Tomador") || xmlDoc.querySelector("TomadorServico");
-                        const cnpjElement = tomadorElement ? tomadorElement.querySelector("Cnpj") || tomadorElement.querySelector("CNPJ") : null;
-                        const cnpjTomador = cnpjElement ? cnpjElement.textContent?.replace(/\D/g, '') : null;
-
-                        // 3. Extrair Valor do IRRF
-                        const irrfElement = xmlDoc.querySelector("ValorIr") || xmlDoc.querySelector("vIRRF");
-                        const valorIRRF = irrfElement ? parseFloat(irrfElement.textContent?.trim() || "0") : 0;
-
-                        if (numeroNF) {
-                            newParsedMap[numeroNF] = { cnpj: cnpjTomador || null, irrf: valorIRRF };
+                    for (const [filename, fileData] of Object.entries(zip.files)) {
+                        if (!fileData.dir) {
+                            if (filename.toLowerCase().endsWith(".pdf") || filename.toLowerCase().endsWith(".xml")) {
+                                const blob = await fileData.async("blob");
+                                const buffer = await fileData.async("arraybuffer");
+                                extractedFiles.push({ name: filename, blob, buffer });
+                            }
                         }
                     }
+                } else if (file.name.toLowerCase().endsWith(".xml") || file.name.toLowerCase().endsWith(".pdf")) {
+                    const buffer = await file.arrayBuffer();
+                    extractedFiles.push({ name: file.name, blob: file, buffer });
                 }
             }
             if (setNfseFiles) setNfseFiles(prev => [...prev, ...extractedFiles]);
-            setXmlParsedData(newParsedMap);
         } catch (error) {
-            console.error("Error reading zip", error);
-            alert("Erro ao extrair arquivos do ZIP de Notas Fiscais.");
+            console.error("Error reading zip/xml upload", error);
+            alert("Erro ao extrair arquivos do ZIP/XML de Notas Fiscais.");
         } finally {
             setLoadingMap(p => ({ ...p, "zipNfs": false }));
         }
@@ -394,9 +418,9 @@ export default function FechamentoLote({
                         <div className="flex justify-center border-2 border-dashed border-[var(--border)] rounded-xl py-8 mb-6 hover:bg-[var(--bg-sidebar)] transition-colors cursor-pointer" onClick={() => nfsInputRef.current?.click()}>
                             <div className="flex flex-col items-center gap-2">
                                 <FileArchive className="text-[var(--accent)]" />
-                                <span className="font-bold text-sm">{loadingMap["zipNfs"] ? "Lendo ZIP..." : "Selecionar ZIP do NFE.io"}</span>
+                                <span className="font-bold text-sm">{loadingMap["zipNfs"] ? "Lendo Arquivos..." : "Selecionar ZIP/XMLs"}</span>
                             </div>
-                            <input type="file" ref={nfsInputRef} onChange={handleNfsZipUpload} accept=".zip" className="hidden" />
+                            <input type="file" ref={nfsInputRef} onChange={handleNfsZipUpload} multiple accept=".zip,.xml,.pdf" className="hidden" />
                         </div>
                         {nfseFiles.length > 0 && <p className="text-xs text-center text-[var(--success)] mb-6 font-bold">{nfseFiles.length} Extraídos com SUCESSO!</p>}
 
