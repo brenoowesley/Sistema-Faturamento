@@ -33,7 +33,13 @@ export default function EmissaoNotas({
     const handleDownload = async () => {
         setIsExporting(true);
         try {
-            const payloadAgendamentos = agendamentos.map(a => ({
+            const validados = agendamentos.filter(a =>
+                !a.isRemoved &&
+                (a.status === "OK" || a.status === "CORREÇÃO") &&
+                a.clienteId
+            );
+
+            const payloadAgendamentos = validados.map(a => ({
                 clienteId: a.clienteId,
                 status: a.status,
                 valorIwof: a.valorIwof,

@@ -22,11 +22,38 @@ export async function POST(req: NextRequest) {
             .select(`
                 id, razao_social, nome_fantasia, cnpj, email_principal, emails_faturamento, nome_conta_azul,
                 endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge,
-                loja_mae_id, boleto_unificado, tempo_pagamento_dias
+                loja_mae_id, boleto_unificado, tempo_pagamento_dias,
+                ciclos_faturamento(id, nome)
             `)
             .in("id", validStoreIds);
 
         if (cliErr) throw cliErr;
+
+        // Fetch missing mother stores if any exist
+        const motherIdsToFetch = new Set<string>();
+        dbClientes?.forEach(c => {
+            if (c.loja_mae_id && !validStoreIds.includes(c.loja_mae_id)) {
+                motherIdsToFetch.add(c.loja_mae_id);
+            }
+        });
+
+        let allClients = [...(dbClientes || [])];
+
+        if (motherIdsToFetch.size > 0) {
+            const { data: motherClients, error: motherErr } = await supabase
+                .from("clientes")
+                .select(`
+                    id, razao_social, nome_fantasia, cnpj, email_principal, emails_faturamento, nome_conta_azul,
+                    endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge,
+                    loja_mae_id, boleto_unificado, tempo_pagamento_dias,
+                    ciclos_faturamento(id, nome)
+                `)
+                .in("id", Array.from(motherIdsToFetch));
+
+            if (!motherErr && motherClients) {
+                allClients = [...allClients, ...motherClients];
+            }
+        }
 
         // Buscar AJUSTES
         const { data: ajustes, error: ajErr } = await supabase
@@ -39,7 +66,7 @@ export async function POST(req: NextRequest) {
 
         // Consolidate in memory strictly by client id
         const consolidatedMap = new Map<string, any>();
-        const clienteMap = new Map((dbClientes || []).map(c => [c.id, c]));
+        const clienteMap = new Map(allClients.map(c => [c.id, c]));
 
         agendamentos.forEach(a => {
             const lojaId = a.clienteId;
@@ -70,14 +97,29 @@ export async function POST(req: NextRequest) {
 
         const finalAgrupado = new Map<string, any>();
         Array.from(consolidatedMap.values()).forEach(r => {
-            const targetId = r.clientes?.cnpj || r.cliente_id;
+            const clientData = r.clientes || {};
+
+            // LETA Logic: If the store is part of the LETA cycle (or explicitly named LETA) and has a mother store, cluster under Mother.
+            const isLeta = clientData.ciclos_faturamento?.nome?.toUpperCase().includes('LETA') || clientData.razao_social?.toUpperCase().includes('LETA');
+
+            let targetId = clientData.cnpj || r.cliente_id;
+            let effectiveClientData = clientData;
+
+            if (isLeta && clientData.loja_mae_id) {
+                const motherData = clienteMap.get(clientData.loja_mae_id);
+                if (motherData) {
+                    targetId = motherData.cnpj || motherData.id;
+                    effectiveClientData = motherData;
+                }
+            }
+
             if (!finalAgrupado.has(targetId)) {
-                finalAgrupado.set(targetId, { ...r });
+                finalAgrupado.set(targetId, { ...r, clientes: effectiveClientData });
             } else {
-                const mother = finalAgrupado.get(targetId)!;
-                mother.valor_bruto += r.valor_bruto;
-                mother.acrescimos += r.acrescimos;
-                mother.descontos += r.descontos;
+                const grouped = finalAgrupado.get(targetId)!;
+                grouped.valor_bruto += r.valor_bruto;
+                grouped.acrescimos += r.acrescimos;
+                grouped.descontos += r.descontos;
             }
         });
 
