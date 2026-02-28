@@ -33,11 +33,22 @@ export default function EmissaoNotas({
     const handleDownload = async () => {
         setIsExporting(true);
         try {
+            const payloadAgendamentos = agendamentos.map(a => ({
+                clienteId: a.clienteId,
+                status: a.status,
+                valorIwof: a.valorIwof,
+                suggestedValorIwof: a.suggestedValorIwof,
+                manualValue: a.manualValue,
+                rawRow: {
+                    data_competencia: a.rawRow?.data_competencia
+                }
+            }));
+
             const response = await fetch("/api/documentos/simular-nfe", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    agendamentos,
+                    agendamentos: payloadAgendamentos,
                     lojasSemNF: Array.from(lojasSemNf),
                     periodoInicio,
                     periodoFim
@@ -49,9 +60,11 @@ export default function EmissaoNotas({
                 throw new Error(errData.error || "Erro ao gerar NFE simulada.");
             }
 
-            const blob = await response.blob();
+            const blobResponse = await response.blob();
+            const blob = new Blob([blobResponse], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
             const downloadUrl = window.URL.createObjectURL(blob);
             const a = document.createElement("a");
+            a.style.display = "none";
             a.href = downloadUrl;
             a.download = `planilha_nfe_iw_${Date.now()}.xlsx`;
             document.body.appendChild(a);
@@ -66,43 +79,54 @@ export default function EmissaoNotas({
         }
     };
 
-    const processZipFile = async (file: File) => {
+    const processDroppedFile = async (file: File) => {
         setIsExtracting(true);
         setExtractError(null);
         try {
-            const arrayBuffer = await file.arrayBuffer();
-            const zip = new JSZip();
-            const contents = await zip.loadAsync(arrayBuffer);
+            if (file.name.toLowerCase().endsWith('.zip')) {
+                const arrayBuffer = await file.arrayBuffer();
+                const zip = new JSZip();
+                const contents = await zip.loadAsync(arrayBuffer);
 
-            const extractedFiles: { name: string; blob: Blob; buffer: ArrayBuffer }[] = [];
+                const extractedFiles: { name: string; blob: Blob; buffer: ArrayBuffer }[] = [];
 
-            const pdfFiles = Object.keys(contents.files).filter(name => name.toLowerCase().endsWith('.pdf') || name.toLowerCase().endsWith('.xml'));
+                const pdfFiles = Object.keys(contents.files).filter(name => name.toLowerCase().endsWith('.pdf') || name.toLowerCase().endsWith('.xml'));
 
-            if (pdfFiles.length === 0) {
-                setExtractError("O arquivo ZIP não contém notas fiscais válidas (.pdf ou .xml).");
-                setIsExtracting(false);
-                return;
-            }
-
-            for (const filename of pdfFiles) {
-                const zipObj = contents.files[filename];
-                if (!zipObj.dir) {
-                    const fileData = await zipObj.async("blob");
-                    const fileBuffer = await zipObj.async("arraybuffer");
-                    // Clean up filename commonly used by Conta Azul
-                    let cleanName = filename.split('/').pop() || filename;
-                    extractedFiles.push({
-                        name: cleanName,
-                        blob: fileData,
-                        buffer: fileBuffer
-                    });
+                if (pdfFiles.length === 0) {
+                    setExtractError("O arquivo ZIP não contém notas fiscais válidas (.pdf ou .xml).");
+                    setIsExtracting(false);
+                    return;
                 }
-            }
 
-            setNfseFiles(extractedFiles);
+                for (const filename of pdfFiles) {
+                    const zipObj = contents.files[filename];
+                    if (!zipObj.dir) {
+                        const fileData = await zipObj.async("blob");
+                        const fileBuffer = await zipObj.async("arraybuffer");
+                        // Clean up filename commonly used by Conta Azul
+                        let cleanName = filename.split('/').pop() || filename;
+                        extractedFiles.push({
+                            name: cleanName,
+                            blob: fileData,
+                            buffer: fileBuffer
+                        });
+                    }
+                }
+
+                setNfseFiles(extractedFiles);
+            } else if (file.name.toLowerCase().endsWith('.xml') || file.name.toLowerCase().endsWith('.pdf')) {
+                const arrayBuffer = await file.arrayBuffer();
+                setNfseFiles([{
+                    name: file.name,
+                    blob: file,
+                    buffer: arrayBuffer
+                }]);
+            } else {
+                setExtractError("Formato de arquivo não suportado.");
+            }
         } catch (e: any) {
-            console.error("Failed to extract zip", e);
-            setExtractError("Erro ao ler o ZIP. Certifique-se que o arquivo é válido.");
+            console.error("Failed to process file", e);
+            setExtractError("Erro ao processar o arquivo. Certifique-se de que é válido.");
         } finally {
             setIsExtracting(false);
         }
@@ -110,7 +134,7 @@ export default function EmissaoNotas({
 
     const onDrop = useCallback((acceptedFiles: File[]) => {
         if (acceptedFiles.length > 0) {
-            processZipFile(acceptedFiles[0]);
+            processDroppedFile(acceptedFiles[0]);
         }
     }, []);
 
@@ -119,6 +143,9 @@ export default function EmissaoNotas({
         accept: {
             "application/zip": [".zip"],
             "application/x-zip-compressed": [".zip"],
+            "text/xml": [".xml"],
+            "application/xml": [".xml"],
+            "application/octet-stream": [".xml"]
         },
         maxFiles: 1,
     });
@@ -178,7 +205,7 @@ export default function EmissaoNotas({
                 {/* Column 2: Upload ZIP */}
                 <div
                     {...getRootProps()}
-                    className={`bg-gradient-to-b from-[var(--bg-sidebar)] to-[#0c1824] border-2 border-dashed rounded-3xl p-10 flex flex-col items-center justify-center text-center shadow-lg transition-all duration-300 relative overflow-hidden focus:outline-none cursor-pointer
+                    className={`w-full h-full min-h-[300px] bg-gradient-to-b from-[var(--bg-sidebar)] to-[#0c1824] border-2 border-dashed rounded-3xl p-10 flex flex-col items-center justify-center text-center shadow-lg transition-all duration-300 relative overflow-hidden focus:outline-none cursor-pointer
                         ${isDragActive ? "border-[var(--accent)] bg-[rgba(33,118,255,0.1)] scale-[1.02]" : "border-[var(--border)] hover:border-[var(--fg-dim)]"}
                         ${nfseFiles.length > 0 ? "border-[var(--success)]/50 from-[var(--bg-sidebar)] to-[rgba(34,197,94,0.05)] cursor-default" : ""}
                     `}

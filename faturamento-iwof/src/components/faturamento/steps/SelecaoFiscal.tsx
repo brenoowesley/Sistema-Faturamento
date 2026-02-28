@@ -118,8 +118,11 @@ export default function SelecaoFiscal({
         for (const loja of lojasData) {
             baseTotal += loja.valorSugerido;
             if (!lojasSemNf.has(loja.id)) {
-                nfeTotal += loja.valorSugerido;
+                // Emits NF: 11.5% NF and 88.5% NC
+                nfeTotal += loja.valorSugerido * 0.115;
+                ncTotal += loja.valorSugerido * 0.885;
             } else {
+                // Does NOT emit NF: 100% NC
                 ncTotal += loja.valorSugerido;
             }
             boletoFinal += loja.valorSugerido; // Boleto is simply the gross total without tax disc. mapping right now

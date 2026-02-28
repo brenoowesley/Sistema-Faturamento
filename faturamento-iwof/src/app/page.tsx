@@ -236,7 +236,7 @@ function DashboardContent() {
               <p className="text-xs opacity-80">Existem lotes com pedidos de exclusão aguardando sua revisão.</p>
             </div>
           </div>
-          <Link href="/faturamentos" className="btn-icon bg-amber-500/20 hover:bg-amber-500/30 text-amber-500">
+          <Link href="/faturamento/lotes" className="btn-icon bg-amber-500/20 hover:bg-amber-500/30 text-amber-500">
             Revisar <ArrowRight size={14} />
           </Link>
         </div>
@@ -364,7 +364,7 @@ function DashboardContent() {
             <Clock className="text-indigo-500" size={20} />
             Lotes em Processamento
           </h2>
-          <Link href="/faturamentos" className="text-xs text-indigo-500 hover:underline font-bold">Histórico Completo</Link>
+          <Link href="/faturamento/lotes" className="text-xs text-indigo-500 hover:underline font-bold">Histórico Completo</Link>
         </div>
 
         <div className="card overflow-hidden !p-0">
