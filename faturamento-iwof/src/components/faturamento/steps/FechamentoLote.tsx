@@ -131,6 +131,8 @@ export default function FechamentoLote({
         }
     };
 
+    const [xmlParsedData, setXmlParsedData] = useState<Record<string, { cnpj: string | null; irrf: number }>>({});
+
     const handleNfsZipUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files?.length) return;
         setLoadingMap(p => ({ ...p, "zipNfs": true }));
@@ -139,15 +141,40 @@ export default function FechamentoLote({
             const jsZip = new JSZip();
             const zip = await jsZip.loadAsync(file);
             const extractedFiles: { name: string; blob: Blob; buffer: ArrayBuffer }[] = [];
+            const newParsedMap = { ...xmlParsedData };
 
             for (const [filename, fileData] of Object.entries(zip.files)) {
-                if (!fileData.dir && filename.endsWith(".pdf")) {
-                    const blob = await fileData.async("blob");
-                    const buffer = await fileData.async("arraybuffer");
-                    extractedFiles.push({ name: filename, blob, buffer });
+                if (!fileData.dir) {
+                    if (filename.toLowerCase().endsWith(".pdf")) {
+                        const blob = await fileData.async("blob");
+                        const buffer = await fileData.async("arraybuffer");
+                        extractedFiles.push({ name: filename, blob, buffer });
+                    } else if (filename.toLowerCase().endsWith(".xml")) {
+                        const xmlString = await fileData.async("string");
+                        const parser = new DOMParser();
+                        const xmlDoc = parser.parseFromString(xmlString, "application/xml");
+
+                        // 1. Extrair Número da NF (Pode estar em <Numero> ou <nNF>)
+                        const numeroElement = xmlDoc.querySelector("Numero") || xmlDoc.querySelector("nNF");
+                        const numeroNF = numeroElement ? numeroElement.textContent?.trim() : null;
+
+                        // 2. Extrair CNPJ do Tomador (Cliente)
+                        const tomadorElement = xmlDoc.querySelector("Tomador") || xmlDoc.querySelector("TomadorServico");
+                        const cnpjElement = tomadorElement ? tomadorElement.querySelector("Cnpj") || tomadorElement.querySelector("CNPJ") : null;
+                        const cnpjTomador = cnpjElement ? cnpjElement.textContent?.replace(/\D/g, '') : null;
+
+                        // 3. Extrair Valor do IRRF
+                        const irrfElement = xmlDoc.querySelector("ValorIr") || xmlDoc.querySelector("vIRRF");
+                        const valorIRRF = irrfElement ? parseFloat(irrfElement.textContent?.trim() || "0") : 0;
+
+                        if (numeroNF) {
+                            newParsedMap[numeroNF] = { cnpj: cnpjTomador || null, irrf: valorIRRF };
+                        }
+                    }
                 }
             }
             if (setNfseFiles) setNfseFiles(prev => [...prev, ...extractedFiles]);
+            setXmlParsedData(newParsedMap);
         } catch (error) {
             console.error("Error reading zip", error);
             alert("Erro ao extrair arquivos do ZIP de Notas Fiscais.");
