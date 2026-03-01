@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
+import { createClient } from "@supabase/supabase-js";
 
 const auth = new google.auth.GoogleAuth({
     credentials: {
@@ -23,7 +24,7 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string) {
         });
 
         if (res.data.files && res.data.files.length > 0 && res.data.files[0].id) {
-            return res.data.files[0].id;
+            return res.data.files[0].id as string;
         } else {
             const fileMetadata = {
                 name: folderName,
@@ -34,7 +35,7 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string) {
                 requestBody: fileMetadata,
                 fields: 'id'
             });
-            return createRes.data.id;
+            return createRes.data.id as string;
         }
     } catch (error) {
         console.error('Erro ao procurar/criar pasta:', folderName, error);
@@ -46,25 +47,33 @@ export async function POST(request: Request) {
     try {
         const formData = await request.formData();
 
-        // This is a minimal implementation based on the Express route.
-        // In reality, you'd extract parameters from formData:
-        // const file = formData.get('file') as File;
-        // const clienteNome = formData.get('clienteNome') as string;
-        // const ciclo = formData.get('ciclo') as string;
-
-        // Since we are mocking the Drive component to avoid crashing when variables are absent
-        const dt = new Date();
-        const currentYear = dt.getFullYear().toString();
-        const currentMonth = (dt.getMonth() + 1).toString().padStart(2, '0');
+        const loteId = formData.get('loteId') as string;
+        const targetFolderName = formData.get('targetFolderName') as string || `Lote ${new Date().toISOString().split('T')[0]}`;
 
         console.log(`[Next.js API] Recebido pedido de upload GCP. FormData.keys: ${Array.from(formData.keys()).join(', ')}`);
 
-        // Árvore de Pastas (Mock para evitar quebra caso .env esteja vazio)
-        // const anoFolderId = await findOrCreateFolder(currentYear, ROOT_FOLDER_ID);
-        // const mesFolderId = await findOrCreateFolder(currentMonth, anoFolderId);
-        // const clienteFolderId = await findOrCreateFolder(clienteNome, mesFolderId);
-        // const cicloFolderId = await findOrCreateFolder(ciclo, clienteFolderId);
-        const cicloFolderId = 'dummy_ciclo_folder_id';
+        let rootFolderId: string | null | undefined = 'dummy_ciclo_folder_id';
+
+        if (loteId) {
+            const supabase = createClient(
+                process.env.NEXT_PUBLIC_SUPABASE_URL!,
+                process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+            );
+
+            const { data: lote } = await supabase.from('faturamentos_lote').select('*').eq('id', loteId).single();
+
+            if (lote) {
+                rootFolderId = lote.drive_folder_id;
+
+                if (!rootFolderId && ROOT_FOLDER_ID !== 'dummy_root_id') {
+                    rootFolderId = await findOrCreateFolder(lote.nome_pasta || targetFolderName, ROOT_FOLDER_ID);
+                    // Salva o ID no Supabase para as próximas requisições
+                    await supabase.from('faturamentos_lote').update({ drive_folder_id: rootFolderId }).eq('id', loteId);
+                }
+            }
+        } else if (ROOT_FOLDER_ID !== 'dummy_root_id') {
+            rootFolderId = await findOrCreateFolder(targetFolderName, ROOT_FOLDER_ID);
+        }
 
         // Iterating over all provided files and names
         const arrPromises = [];
@@ -77,7 +86,7 @@ export async function POST(request: Request) {
                 /*
                 const fileMetadata = {
                     name: value.name,
-                    parents: [cicloFolderId]
+                    parents: [rootFolderId as string]
                 };
 
                 const media = {

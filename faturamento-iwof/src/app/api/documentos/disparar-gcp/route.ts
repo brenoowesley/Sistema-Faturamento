@@ -1,5 +1,47 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { google } from "googleapis";
+
+const auth = new google.auth.GoogleAuth({
+    credentials: {
+        client_email: process.env.GOOGLE_CLIENT_EMAIL,
+        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n')
+    },
+    scopes: ['https://www.googleapis.com/auth/drive'],
+});
+
+const drive = google.drive({ version: 'v3', auth });
+const ROOT_FOLDER_ID = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || 'dummy_root_id';
+
+async function getOrCreateFolder(folderName: string, parentFolderId: string) {
+    try {
+        const q = `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`;
+        const res = await drive.files.list({
+            q,
+            fields: 'files(id, name)',
+            spaces: 'drive',
+            pageSize: 1
+        });
+
+        if (res.data.files && res.data.files.length > 0 && res.data.files[0].id) {
+            return res.data.files[0].id;
+        } else {
+            const fileMetadata = {
+                name: folderName,
+                mimeType: 'application/vnd.google-apps.folder',
+                parents: [parentFolderId]
+            };
+            const createRes = await drive.files.create({
+                requestBody: fileMetadata,
+                fields: 'id'
+            });
+            return createRes.data.id;
+        }
+    } catch (error) {
+        console.error('Erro ao procurar/criar pasta:', folderName, error);
+        throw error;
+    }
+}
 
 export async function POST(req: NextRequest) {
     try {
@@ -344,6 +386,16 @@ export async function POST(req: NextRequest) {
         const cycleNameStr = lote.nome_pasta ? lote.nome_pasta : (cicloLote?.nome || `Lote_${lote.id.substring(0, 8)}`);
         const cyclePeriodStr = `${dInicio} à ${dFim}`;
 
+        let rootFolderId = lote.drive_folder_id;
+        if (!rootFolderId && ROOT_FOLDER_ID !== 'dummy_root_id') {
+            rootFolderId = await getOrCreateFolder(cycleNameStr, ROOT_FOLDER_ID);
+            // Salva o ID no Supabase para as próximas requisições
+            await supabase.from('faturamentos_lote').update({ drive_folder_id: rootFolderId }).eq('id', loteId);
+            console.log(`[DRIVE CACHE] Pasta Mestre '${cycleNameStr}' criada e travada com ID: ${rootFolderId}`);
+        } else if (rootFolderId) {
+            console.log(`[DRIVE CACHE] Usando Pasta Mestre Existente '${cycleNameStr}': ${rootFolderId}`);
+        }
+
         const pubNCUrl = process.env.GCP_PUB_NC_URL;
         const pubHCUrl = process.env.GCP_PUB_HC_URL;
         const pubMasterNCUrl = process.env.GCP_PUB_MASTER_NC_URL;
@@ -372,6 +424,7 @@ export async function POST(req: NextRequest) {
                 const envioHCLoja = {
                     nome_pasta_ciclo: cycleNameStr,
                     ciclo_mensal: cyclePeriodStr,
+                    rootFolderId: rootFolderId,
                     ...lojaHC // info_loja, lista_acrescimos, itens_faturados_rows... at raiz
                 };
                 gcpRequests.push(fetch(pubHCUrl, { method: "POST", headers, body: JSON.stringify(envioHCLoja) }));
@@ -382,6 +435,7 @@ export async function POST(req: NextRequest) {
                 const masterHCPayload = {
                     nome_pasta_ciclo: cycleNameStr,
                     ciclo_mensal: cyclePeriodStr,
+                    rootFolderId: rootFolderId,
                     lote_id: lote.id,
                     data_faturamento: new Date().toLocaleDateString("pt-BR"),
                     lojas: payloadHC
@@ -396,6 +450,7 @@ export async function POST(req: NextRequest) {
             for (const lojaNC of payloadNC) {
                 const envioNCLoja = {
                     nome_pasta_ciclo: cycleNameStr,
+                    rootFolderId: rootFolderId,
                     ...lojaNC // 'LOJA', 'CNPJ', 'NC'... at raiz
                 };
                 gcpRequests.push(fetch(pubNCUrl, { method: "POST", headers, body: JSON.stringify(envioNCLoja) }));
@@ -406,6 +461,7 @@ export async function POST(req: NextRequest) {
                 const masterNCPayload = {
                     nome_pasta_ciclo: cycleNameStr,
                     ciclo_mensal: cyclePeriodStr,
+                    rootFolderId: rootFolderId,
                     lote_id: lote.id,
                     data_faturamento: new Date().toLocaleDateString("pt-BR"),
                     lojas: payloadNC
