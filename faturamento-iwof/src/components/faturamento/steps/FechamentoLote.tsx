@@ -49,6 +49,7 @@ export default function FechamentoLote({
 
     // MODAL STATE
     const [activeModal, setActiveModal] = useState<string | null>(null);
+    const [filterStatus, setFilterStatus] = useState<string>("TODAS");
 
     const boletosInputRef = useRef<HTMLInputElement>(null);
     const nfsInputRef = useRef<HTMLInputElement>(null);
@@ -119,6 +120,10 @@ export default function FechamentoLote({
         const reports = Array.from(lojasUnicas.values()).map(loja => {
             const normalizedStoreName = normalizarNome(loja.nome);
 
+            let statusNF: 'PENDENTE' | 'EMITIDA' = 'PENDENTE';
+            let numeroNF: string | undefined;
+            let descontoIR: number | undefined;
+
             let nfseMatch = null;
             if (loja.cnpj) {
                 // Find any XML NF that matches this store's CNPJ
@@ -126,6 +131,9 @@ export default function FechamentoLote({
                 const matchingNfEntry = Object.entries(xmlParsedData).find(([nfNum, data]) => data.cnpj === cnpjToMatch || (data.cnpj && cnpjToMatch.includes(data.cnpj)));
                 if (matchingNfEntry) {
                     const nfNumber = matchingNfEntry[0];
+                    statusNF = 'EMITIDA';
+                    numeroNF = nfNumber;
+                    descontoIR = matchingNfEntry[1].irrf;
                     // Find the physical PDF file belonging to this NF number (usually Conta Azul PDFs have the NF number in the title)
                     nfseMatch = nfseFiles.find(f => f.name.includes(nfNumber)) || null;
                 }
@@ -134,11 +142,23 @@ export default function FechamentoLote({
             // 2. Fallback: name matching (legacy)
             if (!nfseMatch) {
                 nfseMatch = nfseFiles.find(f => normalizarNome(f.name.replace(/nfse|nfe|\.pdf|\.xml/gi, "")).includes(normalizedStoreName) || normalizedStoreName.includes(normalizarNome(f.name.replace(/nfse|nfe|\.pdf|\.xml/gi, "")))) || null;
+                if (nfseMatch && statusNF === 'PENDENTE') {
+                    statusNF = 'EMITIDA';
+                    numeroNF = nfseMatch.name.split('.')[0].replace(/\D/g, '') || undefined;
+                }
             }
 
             const boletoMatch = boletoFiles.find(f => normalizarNome(f.name.replace(/boleto|\.pdf/gi, "")).includes(normalizedStoreName) || normalizedStoreName.includes(normalizarNome(f.name.replace(/boleto|\.pdf/gi, "")))) || null;
 
-            return { ...loja, nfse: nfseMatch, boleto: boletoMatch };
+            let statusNC: 'NAO_APLICAVEL' | 'PENDENTE' | 'EMITIDA' = 'NAO_APLICAVEL';
+            let numeroNC: string | undefined;
+
+            if (statusNF === 'PENDENTE') {
+                statusNC = actionState.ncsSuccess ? 'EMITIDA' : 'PENDENTE';
+                if (actionState.ncsSuccess) numeroNC = "Gerada";
+            }
+
+            return { ...loja, nfse: nfseMatch, boleto: boletoMatch, statusNF, numeroNF, descontoIR, statusNC, numeroNC };
         });
 
         const matchedNfseNames = new Set(reports.map(r => r.nfse?.name).filter(Boolean));
@@ -148,7 +168,7 @@ export default function FechamentoLote({
         const orphanBoletos = boletoFiles.filter(f => !matchedBoletoNames.has(f.name));
 
         return { reports, orphanNfses, orphanBoletos };
-    }, [agendamentos, nfseFiles, boletoFiles, xmlParsedData]);
+    }, [agendamentos, nfseFiles, boletoFiles, xmlParsedData, actionState.ncsSuccess]);
 
     const handleBoletoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files?.length) return;
@@ -379,6 +399,15 @@ export default function FechamentoLote({
 
     const totals = financialSummary.summaryArr.find(v => v.ciclo === "LÍQUIDO P/ LOTE");
 
+    const pendingNfCount = matchFiles.reports.filter(r => r.statusNF === 'PENDENTE').length;
+
+    const filteredReports = matchFiles.reports.filter(r => {
+        if (filterStatus === "FALTA_NF") return r.statusNF === 'PENDENTE';
+        if (filterStatus === "FALTA_NC") return r.statusNC === 'PENDENTE';
+        if (filterStatus === "COM_DESCONTO_IR") return r.descontoIR && r.descontoIR > 0;
+        return true;
+    });
+
     return (
         <div className="flex flex-col gap-6 max-w-6xl mx-auto pb-16">
 
@@ -577,91 +606,141 @@ export default function FechamentoLote({
                     </button>
 
                     {/* Botão 5: EMAIL */}
-                    <button
-                        onClick={() => setActiveModal("emails")}
-                        disabled={actionState.emailsSuccess || loadingMap["emailsSuccess"]}
-                        className={`group flex items-center gap-4 p-4 rounded-2xl border text-left transition-all mt-4 ${actionState.emailsSuccess ? "bg-green-500/5 border-green-500/20 opacity-60" : "bg-green-500/10 border-green-500/30 hover:bg-green-500 hover:text-white hover:border-green-500 hover:shadow-[0_0_20px_rgba(34,197,94,0.4)]"
-                            }`}
-                    >
-                        <div className={`p-3 rounded-xl ${actionState.emailsSuccess ? "bg-green-500/10 text-green-500" : "bg-[var(--bg-sidebar)] text-green-500 group-hover:text-green-500 group-hover:bg-white"}`}>
-                            <Send size={24} />
-                        </div>
-                        <div className="flex-1">
-                            <h4 className={`font-bold text-sm ${actionState.emailsSuccess ? "text-green-500" : "text-[var(--fg)] group-hover:text-white"}`}>5. Enviar E-mails</h4>
-                            <p className={`text-xs mt-0.5 ${actionState.emailsSuccess ? "text-green-500/70" : "text-[var(--fg-dim)] group-hover:text-white/80"}`}>Ação crítica final</p>
-                        </div>
-                        {actionState.emailsSuccess && <span className="text-xs font-bold px-2 py-1 bg-green-500/20 text-green-500 rounded-lg">Concluído</span>}
-                    </button>
+                    <div className="mt-4 flex flex-col gap-2">
+                        <button
+                            onClick={() => setActiveModal("emails")}
+                            disabled={actionState.emailsSuccess || loadingMap["emailsSuccess"]}
+                            className={`group flex items-center gap-4 p-4 rounded-2xl border text-left transition-all ${actionState.emailsSuccess ? "bg-green-500/5 border-green-500/20 opacity-60" : "bg-green-500/10 border-green-500/30 hover:bg-green-500 hover:text-white hover:border-green-500 hover:shadow-[0_0_20px_rgba(34,197,94,0.4)]"
+                                }`}
+                        >
+                            <div className={`p-3 rounded-xl ${actionState.emailsSuccess ? "bg-green-500/10 text-green-500" : "bg-[var(--bg-sidebar)] text-green-500 group-hover:text-green-500 group-hover:bg-white"}`}>
+                                <Send size={24} />
+                            </div>
+                            <div className="flex-1">
+                                <h4 className={`font-bold text-sm ${actionState.emailsSuccess ? "text-green-500" : "text-[var(--fg)] group-hover:text-white"}`}>5. Enviar E-mails</h4>
+                                <p className={`text-xs mt-0.5 ${actionState.emailsSuccess ? "text-green-500/70" : "text-[var(--fg-dim)] group-hover:text-white/80"}`}>Ação crítica final</p>
+                            </div>
+                            {actionState.emailsSuccess && <span className="text-xs font-bold px-2 py-1 bg-green-500/20 text-green-500 rounded-lg">Concluído</span>}
+                        </button>
+
+                        {pendingNfCount > 0 && (
+                            <div className="text-xs text-[var(--danger)] text-center font-bold px-3 py-2 bg-red-500/10 rounded-xl border border-red-500/20 flex flex-col items-center gap-1">
+                                <span>Atenção: {pendingNfCount} {pendingNfCount === 1 ? 'loja ainda está' : 'lojas ainda estão'} sem Nota Fiscal.</span>
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* Tabela Relatório de Conferência */}
-                <div className="lg:col-span-2 bg-[var(--bg-sidebar)] border border-[var(--border)] rounded-2xl overflow-hidden shadow-lg h-fit">
-                    <div className="px-6 py-4 border-b border-[var(--border)] flex items-center justify-between bg-[rgba(0,0,0,0.2)]">
+                <div className="lg:col-span-2 bg-[var(--bg-sidebar)] border border-[var(--border)] rounded-2xl overflow-hidden shadow-lg h-fit flex flex-col">
+                    <div className="px-6 py-4 border-b border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between bg-[rgba(0,0,0,0.2)] gap-4">
                         <div>
                             <h3 className="text-lg font-bold text-[var(--fg)] flex items-center gap-2">
-                                <FileStack size={20} className="text-[var(--accent)]" /> Relatório de Conferência (Matches)
+                                <ShieldCheck size={20} className="text-[var(--accent)]" /> Painel de Auditoria Fiscal
                             </h3>
-                            <p className="text-xs text-[var(--fg-dim)] mt-1">Status de acoplagem das {matchFiles.reports.length} empresas.</p>
+                            <p className="text-xs text-[var(--fg-dim)] mt-1">Acoplagem fiscal das {matchFiles.reports.length} empresas p/ o faturamento.</p>
                         </div>
-                        <div className="text-right">
-                            <p className="text-sm font-semibold text-[var(--fg)]">Total: {totals?.empresasCount} Lojas</p>
-                            <p className="text-[10px] text-[var(--success)] font-mono">{fmtCurrency(totals?.total || 0)} LÍQUIDOS</p>
+
+                        {/* Quick Filters */}
+                        <div className="flex bg-[var(--bg-card)] border border-[var(--border)] p-1 rounded-xl w-full sm:w-auto overflow-x-auto no-scrollbar">
+                            <button
+                                onClick={() => setFilterStatus("TODAS")}
+                                className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors whitespace-nowrap ${filterStatus === "TODAS" ? "bg-[var(--accent)] text-white shadow" : "text-[var(--fg-dim)] hover:text-[var(--fg)]"}`}
+                            >
+                                Todas
+                            </button>
+                            <button
+                                onClick={() => setFilterStatus("FALTA_NF")}
+                                className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors whitespace-nowrap ${filterStatus === "FALTA_NF" ? "bg-[var(--danger)] text-white shadow" : "text-[var(--fg-dim)] hover:text-[var(--danger)]"}`}
+                            >
+                                Falta NF
+                            </button>
+                            <button
+                                onClick={() => setFilterStatus("FALTA_NC")}
+                                className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors whitespace-nowrap ${filterStatus === "FALTA_NC" ? "bg-amber-500 text-white shadow" : "text-[var(--fg-dim)] hover:text-amber-500"}`}
+                            >
+                                Falta NC
+                            </button>
+                            <button
+                                onClick={() => setFilterStatus("COM_DESCONTO_IR")}
+                                className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors whitespace-nowrap ${filterStatus === "COM_DESCONTO_IR" ? "bg-purple-500 text-white shadow" : "text-[var(--fg-dim)] hover:text-purple-500"}`}
+                            >
+                                Desc. IR
+                            </button>
                         </div>
                     </div>
 
                     <div className="max-h-[500px] overflow-y-auto custom-scrollbar p-0">
-                        <table className="w-full text-left text-sm">
+                        <table className="w-full text-left text-sm whitespace-nowrap min-w-[700px]">
                             <thead className="bg-[var(--bg-card)] sticky top-0 shadow-sm z-10 border-b border-[var(--border)]">
                                 <tr>
                                     <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold uppercase text-[10px] tracking-wider">Cliente/Faturamento</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-center uppercase text-[10px] tracking-wider w-[120px]">Valor Boleto</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-center uppercase text-[10px] tracking-wider w-[150px]">Tem NF?</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-center uppercase text-[10px] tracking-wider w-[150px]">Tem NC?</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-center uppercase text-[10px] tracking-wider w-[180px]">Status E-mail</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Valor Boleto</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-center uppercase text-[10px] tracking-wider">Nota Fiscal (NF)</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-center uppercase text-[10px] tracking-wider">Nota de Crédito (NC)</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Desconto IR</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[var(--border)]">
-                                {matchFiles.reports.map((r, i) => (
+                                {filteredReports.map((r, i) => (
                                     <tr key={i} className="hover:bg-[rgba(33,118,255,0.02)] transition-colors">
                                         <td className="py-4 px-6">
-                                            <p className="font-bold text-[var(--fg)]">{r.razaoSocial}</p>
+                                            <p className="font-bold text-[var(--fg)] text-ellipsis overflow-hidden max-w-[200px]">{r.razaoSocial}</p>
                                             <div className="flex gap-2 items-center mt-1">
-                                                <span className="text-[10px] text-[var(--fg-muted)]">{r.nome}</span>
-                                                <span className="font-mono text-[10px] font-bold text-[var(--accent)] px-2 rounded-full border border-[var(--accent)]/30 bg-[var(--accent)]/10">{fmtCurrency(r.totalFaturar)}</span>
+                                                <span className="text-[10px] text-[var(--fg-muted)] font-mono">{r.cnpj ? r.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5") : r.nome}</span>
                                             </div>
                                         </td>
-                                        <td className="py-4 px-6 text-center">
-                                            <span className="font-mono text-[12px] font-bold text-[var(--fg)]">{fmtCurrency(r.totalFaturar)}</span>
+                                        <td className="py-4 px-6 text-right">
+                                            <span className="font-mono text-[13px] font-bold text-[var(--fg)]">{fmtCurrency(r.totalFaturar)}</span>
                                         </td>
                                         <td className="py-4 px-6 text-center">
-                                            {r.nfse ? (
-                                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-green-500/10 text-green-400 border border-green-500/20">
-                                                    <CheckCircle2 size={12} /> {r.nfse.name.length > 20 ? r.nfse.name.substring(0, 18) + '...' : r.nfse.name}
-                                                </span>
+                                            {r.statusNF === 'EMITIDA' ? (
+                                                <div className="flex flex-col items-center gap-1">
+                                                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-green-500/10 text-green-400 border border-green-500/20">
+                                                        <CheckCircle2 size={12} /> Emitida
+                                                    </span>
+                                                    {r.numeroNF && <span className="font-mono text-[10px] text-green-500/80">NF: {r.numeroNF}</span>}
+                                                </div>
                                             ) : (
-                                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20">
-                                                    <Info size={12} /> S/NF
+                                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-red-500/10 text-red-500 border border-red-500/20">
+                                                    <AlertTriangle size={12} /> Pendente
                                                 </span>
                                             )}
                                         </td>
                                         <td className="py-4 px-6 text-center">
-                                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-[var(--bg-card)] text-[var(--fg-dim)] border border-[var(--border)]">
-                                                — {/* TODO: Future NC mapping integration */}
-                                            </span>
-                                        </td>
-                                        <td className="py-4 px-6 text-center">
-                                            {actionState.emailsSuccess ? (
-                                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-green-500/10 text-green-400 border border-green-500/20">
-                                                    <CheckCircle2 size={12} /> Enviado
+                                            {r.statusNC === 'NAO_APLICAVEL' ? (
+                                                <span className="text-[14px] font-bold text-[var(--border)]">—</span>
+                                            ) : r.statusNC === 'PENDENTE' ? (
+                                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                                                    <Info size={12} /> Aguardando NC
                                                 </span>
                                             ) : (
-                                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-[var(--bg-card)] text-[var(--fg-dim)] border border-[var(--border)]">
-                                                    <Mail size={12} /> Pendente
+                                                <div className="flex flex-col items-center gap-1">
+                                                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                                        <CheckCircle2 size={12} /> Gerada
+                                                    </span>
+                                                    {r.numeroNC && <span className="font-mono text-[10px] text-blue-500/80">NC: {r.numeroNC}</span>}
+                                                </div>
+                                            )}
+                                        </td>
+                                        <td className="py-4 px-6 text-right">
+                                            {r.descontoIR && r.descontoIR > 0 ? (
+                                                <span className="font-mono text-[12px] font-bold text-red-400 bg-red-500/5 px-2 py-1 rounded-md">
+                                                    - {fmtCurrency(r.descontoIR)}
                                                 </span>
+                                            ) : (
+                                                <span className="font-mono text-[12px] font-medium text-[var(--fg-muted)]">R$ 0,00</span>
                                             )}
                                         </td>
                                     </tr>
                                 ))}
+                                {filteredReports.length === 0 && (
+                                    <tr>
+                                        <td colSpan={5} className="py-12 text-center text-[var(--fg-dim)] text-sm">
+                                            Nenhuma loja corresponde ao filtro selecionado.
+                                        </td>
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
