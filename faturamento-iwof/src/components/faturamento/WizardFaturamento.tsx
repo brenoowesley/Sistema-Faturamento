@@ -555,8 +555,9 @@ export default function WizardFaturamento() {
                     data_inicio: a.inicio ? a.inicio.toISOString() : new Date().toISOString(),
                     data_fim: a.termino ? a.termino.toISOString() : new Date().toISOString(),
                     valor_iwof: finalVal,
-                    fracao_hora: a.status === "CORREÇÃO" ? (a.suggestedFracaoHora ?? a.fracaoHora) : a.fracaoHora
-                    // ⛔ PROIBIDO ENVIAR: ref_agendamento, raw_data, motivos_cancelamento, status_validacao (deixa default)
+                    fracao_hora: a.status === "CORREÇÃO" ? (a.suggestedFracaoHora ?? a.fracaoHora) : a.fracaoHora,
+                    data_competencia: dataCompetencia,
+                    status_validacao: "VALIDADO" // FIX: Oficializando a validação feita na memória
                 };
             });
 
