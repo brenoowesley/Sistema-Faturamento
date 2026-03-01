@@ -758,6 +758,25 @@ export default function FechamentoLote({
                         {actionState.boletosSuccess && <span className="text-xs font-bold px-2 py-1 bg-green-500/20 text-green-500 rounded-lg flex items-center gap-1"><CheckCircle2 size={12} /> Concluído</span>}
                     </button>
 
+                    {/* Botão Exportação Conta Azul */}
+                    <button
+                        title={!isLoteConsolidado ? "Consolide o lote primeiro" : ""}
+                        onClick={() => {
+                            const targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
+                            if (targetLoteId) window.open(`/faturamento/lote/${targetLoteId}/conta-azul`, '_blank');
+                        }}
+                        disabled={!isLoteConsolidado}
+                        className={`flex items-center gap-4 p-4 rounded-2xl border text-left transition-all bg-[var(--bg-sidebar)] border-[var(--border)] hover:border-[var(--accent)] shadow-sm hover:shadow-md ${!isLoteConsolidado && "opacity-50 grayscale cursor-not-allowed pointer-events-none"}`}
+                    >
+                        <div className="p-3 rounded-xl bg-blue-500/10 text-blue-500">
+                            <FileCode2 size={24} />
+                        </div>
+                        <div className="flex-1">
+                            <h4 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">Exportar Conta Azul {!isLoteConsolidado && <Lock size={14} className="text-[var(--fg-dim)]" />}</h4>
+                            <p className="text-xs text-[var(--fg-dim)] mt-0.5">Gerar CSV de Boletos</p>
+                        </div>
+                    </button>
+
                     {/* Botão 6: EMAILS */}
                     <button
                         title={!isLoteConsolidado ? "Consolide o lote primeiro" : ""}

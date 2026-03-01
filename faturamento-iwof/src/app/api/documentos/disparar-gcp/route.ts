@@ -414,66 +414,49 @@ export async function POST(req: NextRequest) {
             headers["Authorization"] = `Bearer ${gcpToken}`;
         }
 
-        const gcpRequests: (() => Promise<Response>)[] = [];
+        // Usaremos um array de 'Tasks' para disparar
+        const gcpFetchTasks: (() => Promise<Response>)[] = [];
 
-        // 1. DISPARO PARA HCs (Loop Individual com RootFolder pre-criada)
+        // 1. TAREFA HC (PACOTE ÚNICO)
         if ((!tipo || tipo === "HC") && pubHCUrl && payloadHC.length > 0) {
-            for (const lojaHC of payloadHC) {
-                const envioHCLoja = {
-                    nome_pasta_ciclo: cycleNameStr,
-                    ciclo_mensal: cyclePeriodStr,
-                    rootFolderId: rootFolderId,
-                    ...lojaHC
-                };
-                gcpRequests.push(() => fetch(pubHCUrl, { method: "POST", headers, body: JSON.stringify(envioHCLoja) }));
-            }
+            const masterHCPayload = {
+                nome_pasta_ciclo: cycleNameStr,
+                ciclo_mensal: cyclePeriodStr,
+                lote_id: lote.id,
+                data_faturamento: new Date().toLocaleDateString("pt-BR"),
+                lojas: payloadHC
+            };
+            gcpFetchTasks.push(() => fetch(pubHCUrl, { method: "POST", headers, body: JSON.stringify(masterHCPayload) }));
+            console.log(`[GCP HC] Disparando 1 pacote global com ${payloadHC.length} lojas.`);
         }
 
-        // 2. DISPARO PARA NCs (Loop Individual com RootFolder pre-criada)
+        // 2. TAREFA NC (PACOTE ÚNICO)
         if ((!tipo || tipo === "NC") && pubNCUrl && payloadNC.length > 0) {
-            for (const lojaNC of payloadNC) {
-                // FIX: Adicionado ciclo_mensal para o GCP agrupar corretamente a pasta do mês
-                const envioNCLoja = {
-                    nome_pasta_ciclo: cycleNameStr,
-                    ciclo_mensal: cyclePeriodStr,
-                    rootFolderId: rootFolderId,
-                    ...lojaNC
-                };
-                gcpRequests.push(() => fetch(pubNCUrl, { method: "POST", headers, body: JSON.stringify(envioNCLoja) }));
-            }
+            const masterNCPayload = {
+                nome_pasta_ciclo: cycleNameStr,
+                ciclo_mensal: cyclePeriodStr,
+                lote_id: lote.id,
+                data_faturamento: new Date().toLocaleDateString("pt-BR"),
+                lojas: payloadNC
+            };
+            gcpFetchTasks.push(() => fetch(pubNCUrl, { method: "POST", headers, body: JSON.stringify(masterNCPayload) }));
+            console.log(`[GCP NC] Disparando 1 pacote global com ${payloadNC.length} lojas.`);
         }
 
-        if (gcpRequests.length === 0) {
-            throw new Error("Nenhum payload válido gerado para o tipo selecionado ou URLs Master não configuradas.");
+        if (gcpFetchTasks.length === 0) {
+            console.warn("⚠️ Nenhuma URL de GCP configurada no .env ou payload vazio.");
+            return NextResponse.json({ success: true, message: "Geração omitida (sem payload ou URL)." });
         }
-        // 3. Executa os disparos globais (Vanguarda + Chunks)
+
+        // 3. EXECUÇÃO PARALELA DIRETA (Sem Vanguarda, pois o GCP lidará com o pacote inteiro)
         try {
-            if (gcpRequests.length > 0) {
-                console.log(`⏳ Aguardando 10s para indexação total da pasta Lote Mestre no Google Drive (Eventual Consistency)...`);
-                await new Promise(resolve => setTimeout(resolve, 10000));
-
-                console.log(`💥 Disparando as ${gcpRequests.length} requisições restantes em Chunks (Lotes de 10)...`);
-                const chunkSize = 10;
-                const responses: Response[] = [];
-
-                for (let c = 0; c < gcpRequests.length; c += chunkSize) {
-                    const chunk = gcpRequests.slice(c, c + chunkSize);
-                    const restResponses = await Promise.all(chunk.map(task => task()));
-                    responses.push(...restResponses);
-
-                    // Pequena pausa entre lotes para manter a estabilidade do GCP
-                    if (c + chunkSize < gcpRequests.length) {
-                        await new Promise(resolve => setTimeout(resolve, 1500));
-                    }
-                }
-
-                for (let i = 0; i < responses.length; i++) {
-                    const res = responses[i];
-                    if (!res.ok) {
-                        const errorText = await res.text();
-                        console.error(`[ERRO GCP (Requisição ${i + 1})]: Status ${res.status} ->`, errorText);
-                        throw new Error(`Falha no Google Cloud (Status ${res.status}). Verifique o terminal para detalhes.`);
-                    }
+            const responses = await Promise.all(gcpFetchTasks.map(task => task()));
+            for (let i = 0; i < responses.length; i++) {
+                const res = responses[i];
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    console.error(`[ERRO GCP (Requisição ${i + 1})]: Status ${res.status} ->`, errorText);
+                    throw new Error(`Falha no Google Cloud (Status ${res.status}). Verifique o terminal para detalhes.`);
                 }
             }
         } catch (fetchErr: any) {
