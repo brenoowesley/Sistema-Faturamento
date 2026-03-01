@@ -556,20 +556,16 @@ export default function WizardFaturamento() {
                 };
             });
 
-            const pStartUTC = periodoInicio ? new Date(periodoInicio + "T00:00:00Z").toISOString() : null;
-            const pEndUTC = periodoFim ? new Date(periodoFim + "T23:59:59Z").toISOString() : null;
+            const dataCompetencia = periodoInicio || new Date().toISOString().split("T")[0];
+            const dataFim = periodoFim || new Date().toISOString().split("T")[0];
 
             const { data: loteObj, error: loteErr } = await supabase
                 .from("faturamentos_lote")
                 .insert({
-                    nome: nomePasta || `Lote ${new Date().toLocaleString("pt-BR")}`,
-                    periodo_inicio: pStartUTC,
-                    periodo_fim: pEndUTC,
-                    arquivo_origem: fileName,
-                    criado_por: user.id,
-                    status: "RASCUNHO",
-                    valor_total: valTotal,
-                    quantidade_agendamentos: agsInserir.length
+                    data_competencia: dataCompetencia,
+                    data_inicio_ciclo: dataCompetencia,
+                    data_fim_ciclo: dataFim,
+                    status: "RASCUNHO"
                 })
                 .select()
                 .single();
