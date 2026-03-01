@@ -536,29 +536,31 @@ export default function WizardFaturamento() {
                 (a.status === "OK" || a.status === "CORREÇÃO") && a.clienteId
             );
 
-            let valTotal = 0;
-            const agsInserir = validos.map(a => {
-                const finalVal = a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof);
-                valTotal += finalVal;
-                return {
-                    cliente_id: a.clienteId,
-                    nome_profissional: a.nome,
-                    vaga: a.vaga,
-                    inicio: a.inicio ? a.inicio.toISOString() : null,
-                    termino: a.termino ? a.termino.toISOString() : null,
-                    valor_iwof: finalVal,
-                    fracao_hora: a.status === "CORREÇÃO" ? (a.suggestedFracaoHora ?? a.fracaoHora) : a.fracaoHora,
-                    ref_agendamento: a.refAgendamento,
-                    data_cancelamento: a.dataCancelamento ? a.dataCancelamento.toISOString() : null,
-                    motivo_cancelamento: a.motivoCancelamento,
-                    responsavel_cancelamento: a.responsavelCancelamento,
-                    raw_data: a.rawRow
-                };
-            });
-
             const dataCompetencia = periodoInicio || new Date().toISOString().split("T")[0];
             const dataFim = periodoFim || new Date().toISOString().split("T")[0];
 
+            let valTotal = 0;
+
+            // ⚠️ MAPEAMENTO ESTRITO PARA O SCHEMA DO SUPABASE
+            // DE PARA: clienteId -> loja_id | inicio -> data_inicio | termino -> data_fim
+            const agsInserir = validos.map(a => {
+                const finalVal = a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof);
+                valTotal += finalVal;
+
+                return {
+                    loja_id: a.clienteId,
+                    cnpj_loja: a.cnpj,
+                    nome_profissional: a.nome,
+                    vaga: a.vaga,
+                    data_inicio: a.inicio ? a.inicio.toISOString() : new Date().toISOString(),
+                    data_fim: a.termino ? a.termino.toISOString() : new Date().toISOString(),
+                    valor_iwof: finalVal,
+                    fracao_hora: a.status === "CORREÇÃO" ? (a.suggestedFracaoHora ?? a.fracaoHora) : a.fracaoHora
+                    // ⛔ PROIBIDO ENVIAR: ref_agendamento, raw_data, motivos_cancelamento, status_validacao (deixa default)
+                };
+            });
+
+            // 1. CRIA O LOTE INICIAL ('faturamentos_lote')
             const { data: loteObj, error: loteErr } = await supabase
                 .from("faturamentos_lote")
                 .insert({
@@ -566,6 +568,7 @@ export default function WizardFaturamento() {
                     data_inicio_ciclo: dataCompetencia,
                     data_fim_ciclo: dataFim,
                     status: "RASCUNHO"
+                    // ⛔ PROIBIDO ENVIAR: arquivo_origem ou chaves do front.
                 })
                 .select()
                 .single();
@@ -576,6 +579,7 @@ export default function WizardFaturamento() {
             sessionStorage.setItem('currentLoteId', loteObj.id);
             console.log("✅ LOTE INICIAL CRIADO NO SUPABASE COM ID:", loteObj.id);
 
+            // 2. INSERE OS AGENDAMENTOS BRUTOS EM LOTES DE 1000
             const batchSize = 1000;
             for (let i = 0; i < agsInserir.length; i += batchSize) {
                 const chunk = agsInserir.slice(i, i + batchSize).map(x => ({ ...x, lote_id: loteObj.id }));
