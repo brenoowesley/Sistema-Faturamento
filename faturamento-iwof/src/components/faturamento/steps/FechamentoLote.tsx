@@ -266,15 +266,16 @@ export default function FechamentoLote({
             const consolidadosPayload = matchFiles.reports.map(r => ({
                 lote_id: currentLoteId,
                 cliente_id: r.id,
-                cnpj_filial: r.cnpjFilial || null,
                 valor_bruto: r.totalFaturar || 0,
                 acrescimos: 0,
                 descontos: 0,
                 valor_irrf: r.descontoIR || 0,
                 numero_nf: r.numeroNF || null,
                 valor_nf_emitida: r.statusNF === 'EMITIDA' ? r.totalFaturar : 0,
-                valor_nc_final: r.statusNC === 'EMITIDA' ? r.totalFaturar : 0,
-                valor_boleto_final: r.totalFaturar - (r.descontoIR || 0)
+                valor_nc_final: r.statusNF === 'PENDENTE' ? r.totalFaturar : 0, // FIX: Se não tem NF no XML, o valor é provisionado para NC
+                valor_boleto_final: r.totalFaturar - (r.descontoIR || 0),
+                cnpj_filial: r.cnpjFilial || null, // FIX: Gravando o emissor
+                valor_ir_xml: r.descontoIR || 0
             }));
 
             if (consolidadosPayload.length > 0) {
