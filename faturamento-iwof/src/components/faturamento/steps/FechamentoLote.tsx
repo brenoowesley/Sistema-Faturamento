@@ -58,7 +58,7 @@ export default function FechamentoLote({
 
     const boletosInputRef = useRef<HTMLInputElement>(null);
     const nfsInputRef = useRef<HTMLInputElement>(null);
-    const [xmlParsedData, setXmlParsedData] = useState<Record<string, { cnpj: string | null; irrf: number }>>({});
+    const [xmlParsedData, setXmlParsedData] = useState<Record<string, { cnpj: string | null; cnpjPrestador: string | null; irrf: number }>>({});
 
     useEffect(() => {
         console.log("🔍 LoteId recebido no Passo 5 (Props):", loteId, " | SaveResult:", saveResult?.loteId);
@@ -87,8 +87,13 @@ export default function FechamentoLote({
                         const irrfElement = xmlDoc.querySelector("ValorIr") || xmlDoc.querySelector("vIRRF");
                         const valorIRRF = irrfElement ? parseFloat(irrfElement.textContent?.trim() || "0") : 0;
 
+                        // Extrair CNPJ do Prestador (A filial que emitiu a nota)
+                        const prestadorElement = xmlDoc.querySelector("Prestador") || xmlDoc.querySelector("PrestadorServico");
+                        const cnpjPrestadorElement = prestadorElement ? (prestadorElement.querySelector("Cnpj") || prestadorElement.querySelector("CNPJ")) : null;
+                        const cnpjPrestador = cnpjPrestadorElement ? cnpjPrestadorElement.textContent?.replace(/\D/g, '') : null;
+
                         if (numeroNF && (!newParsedMap[numeroNF] || newParsedMap[numeroNF].cnpj !== cnpjTomador)) {
-                            newParsedMap[numeroNF] = { cnpj: cnpjTomador || null, irrf: valorIRRF };
+                            newParsedMap[numeroNF] = { cnpj: cnpjTomador || null, cnpjPrestador: cnpjPrestador || null, irrf: valorIRRF };
                             hasChanges = true;
                         }
                     } catch (err) {
@@ -134,6 +139,8 @@ export default function FechamentoLote({
             let descontoIR: number | undefined;
 
             let nfseMatch = null;
+            let cnpjFilial: string | null = null;
+
             if (loja.cnpj) {
                 // Find any XML NF that matches this store's CNPJ
                 const cnpjToMatch = loja.cnpj;
@@ -143,6 +150,7 @@ export default function FechamentoLote({
                     statusNF = 'EMITIDA';
                     numeroNF = nfNumber;
                     descontoIR = matchingNfEntry[1].irrf;
+                    cnpjFilial = matchingNfEntry[1].cnpjPrestador;
                     // Find the physical PDF file belonging to this NF number (usually Conta Azul PDFs have the NF number in the title)
                     nfseMatch = nfseFiles.find(f => f.name.includes(nfNumber)) || null;
                 }
@@ -167,7 +175,7 @@ export default function FechamentoLote({
                 if (actionState.ncsSuccess) numeroNC = "Gerada";
             }
 
-            return { ...loja, nfse: nfseMatch, boleto: boletoMatch, statusNF, numeroNF, descontoIR, statusNC, numeroNC };
+            return { ...loja, nfse: nfseMatch, boleto: boletoMatch, statusNF, numeroNF, descontoIR, cnpjFilial, statusNC, numeroNC };
         });
 
         const matchedNfseNames = new Set(reports.map(r => r.nfse?.name).filter(Boolean));
@@ -258,6 +266,7 @@ export default function FechamentoLote({
             const consolidadosPayload = matchFiles.reports.map(r => ({
                 lote_id: currentLoteId,
                 cliente_id: r.id,
+                cnpj_filial: r.cnpjFilial || null,
                 valor_bruto: r.totalFaturar || 0,
                 acrescimos: 0,
                 descontos: 0,
