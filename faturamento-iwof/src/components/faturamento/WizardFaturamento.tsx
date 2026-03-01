@@ -613,6 +613,8 @@ export default function WizardFaturamento() {
             await supabase.from("faturamentos_lote").update({ status: "FECHADO" }).eq("id", loteObj.id);
             setSaveResult({ ok: successCount, err: errorCount, loteId: loteObj.id });
             setLoteId(loteObj.id);
+            sessionStorage.setItem('currentLoteId', loteObj.id);
+            console.log("✅ LOTE CRIADO NO SUPABASE COM ID:", loteObj.id);
             return loteObj.id;
 
         } catch (e: any) {

@@ -63,6 +63,10 @@ export default function FechamentoLote({
     const [xmlParsedData, setXmlParsedData] = useState<Record<string, { cnpj: string | null; irrf: number }>>({});
 
     useEffect(() => {
+        console.log("🔍 LoteId recebido no Passo 5 (Props):", loteId, " | SaveResult:", saveResult?.loteId);
+    }, [loteId, saveResult]);
+
+    useEffect(() => {
         const parseXmls = async () => {
             const newParsedMap = { ...xmlParsedData };
             let hasChanges = false;
@@ -178,9 +182,10 @@ export default function FechamentoLote({
     }, [agendamentos, nfseFiles, boletoFiles, xmlParsedData, actionState.ncsSuccess]);
 
     const handleConsolidarLote = async () => {
-        let targetLoteId = loteId || saveResult?.loteId;
+        let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
         if (!targetLoteId) {
             alert("Erro: ID do lote não encontrado. Por favor, volte ao passo anterior e tente novamente.");
+            console.error("Estado atual do loteId:", loteId, "SessionStorage:", typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
             return;
         }
 
@@ -304,7 +309,7 @@ export default function FechamentoLote({
         setLoadingMap(p => ({ ...p, "boletosSuccess": true }));
         try {
             // Se ainda não fechou o lote, fecha agora
-            let targetLoteId = loteId || saveResult?.loteId;
+            let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
             if (!targetLoteId) {
                 targetLoteId = await handleFecharLote() as string;
                 if (!targetLoteId) throw new Error("Falha ao gerar o lote.");
@@ -336,7 +341,7 @@ export default function FechamentoLote({
     const handleUploadNfs = async () => {
         setLoadingMap(p => ({ ...p, "nfsSuccess": true }));
         try {
-            let targetLoteId = loteId || saveResult?.loteId;
+            let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
             if (!targetLoteId) {
                 targetLoteId = await handleFecharLote() as string;
                 if (!targetLoteId) throw new Error("Falha ao gerar o lote.");
@@ -367,7 +372,7 @@ export default function FechamentoLote({
     const handleCriarNCs = async () => {
         setLoadingMap(p => ({ ...p, "ncsSuccess": true }));
         try {
-            let targetLoteId = loteId || saveResult?.loteId;
+            let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
             if (!targetLoteId) {
                 targetLoteId = await handleFecharLote() as string;
                 if (!targetLoteId) throw new Error("Falha ao gerar o lote.");
@@ -398,7 +403,7 @@ export default function FechamentoLote({
     const handleCriarHCs = async () => {
         setLoadingMap(p => ({ ...p, "hcsSuccess": true }));
         try {
-            let targetLoteId = loteId || saveResult?.loteId;
+            let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
             if (!targetLoteId) {
                 targetLoteId = await handleFecharLote() as string;
                 if (!targetLoteId) throw new Error("Falha ao gerar o lote.");
@@ -429,7 +434,7 @@ export default function FechamentoLote({
     const handleDispararEmails = async () => {
         setLoadingMap(p => ({ ...p, "emailsSuccess": true }));
         try {
-            let targetLoteId = loteId || saveResult?.loteId;
+            let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
             if (!targetLoteId) throw new Error("Lote não encontrado. Processe uma das etapas anteriores primeiro.");
 
             const payload = { loteId: targetLoteId };
