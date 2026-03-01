@@ -567,8 +567,13 @@ export default function WizardFaturamento() {
                     data_competencia: dataCompetencia,
                     data_inicio_ciclo: dataCompetencia,
                     data_fim_ciclo: dataFim,
-                    status: "RASCUNHO"
-                    // ⛔ PROIBIDO ENVIAR: arquivo_origem ou chaves do front.
+                    status: "RASCUNHO",
+                    // Novos campos restaurados mapeando os estados do Wizard:
+                    nome_pasta: nomePasta || null,
+                    ciclo_faturamento_id: selectedCicloIds.length === 1 ? selectedCicloIds[0] : null,
+                    queiroz_split_date: queirozConfig?.splitDate || null,
+                    queiroz_comp_anterior: queirozConfig?.compAnterior || null,
+                    queiroz_comp_atual: queirozConfig?.compAtual || null
                 })
                 .select()
                 .single();
