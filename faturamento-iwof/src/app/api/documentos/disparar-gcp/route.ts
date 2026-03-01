@@ -416,6 +416,8 @@ export async function POST(req: NextRequest) {
             headers["Authorization"] = `Bearer ${gcpToken}`;
         }
 
+        const gcpRequests: Promise<Response>[] = [];
+
         // 1. DISPARO ÚNICO PARA HCs (Gatilho Master)
         if ((!tipo || tipo === "HC") && pubMasterHCUrl && payloadHC.length > 0) {
             const masterHCPayload = {
