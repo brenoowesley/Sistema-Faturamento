@@ -525,20 +525,16 @@ export default function WizardFaturamento() {
         }));
     };
 
-    const handleFecharLote = async () => {
+    const handleSaveLoteInicial = async () => {
         setSaving(true);
-
-        let validosCount = 1;
-
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error("Usuário não autenticado");
 
             const validos = agendamentos.filter(a =>
                 !a.isRemoved &&
-                (a.status === "OK" || a.status === "CORREÇÃO" || a.status === "CICLO_INCORRETO")
+                (a.status === "OK" || a.status === "CORREÇÃO") && a.clienteId
             );
-            validosCount = validos.length;
 
             let valTotal = 0;
             const agsInserir = validos.map(a => {
@@ -571,7 +567,7 @@ export default function WizardFaturamento() {
                     periodo_fim: pEndUTC,
                     arquivo_origem: fileName,
                     criado_por: user.id,
-                    status: "PROCESSANDO",
+                    status: "RASCUNHO",
                     valor_total: valTotal,
                     quantidade_agendamentos: agsInserir.length
                 })
@@ -580,47 +576,24 @@ export default function WizardFaturamento() {
 
             if (loteErr || !loteObj) throw loteErr || new Error("Erro ao criar o lote.");
 
-            const batchSize = 1000;
-            let successCount = 0;
-            let errorCount = 0;
+            setLoteId(loteObj.id);
+            sessionStorage.setItem('currentLoteId', loteObj.id);
+            console.log("✅ LOTE INICIAL CRIADO NO SUPABASE COM ID:", loteObj.id);
 
+            const batchSize = 1000;
             for (let i = 0; i < agsInserir.length; i += batchSize) {
                 const chunk = agsInserir.slice(i, i + batchSize).map(x => ({ ...x, lote_id: loteObj.id }));
                 const { error: insErr } = await supabase.from("agendamentos_brutos").insert(chunk);
                 if (insErr) {
                     console.error("Erro no chunk", i, insErr);
-                    errorCount += chunk.length;
-                } else {
-                    successCount += chunk.length;
+                    throw new Error("Falha ao salvar agendamentos: " + insErr.message);
                 }
             }
 
-            const activeClientsInLote = Array.from(new Set(agsInserir.map(a => a.cliente_id).filter(id => id)));
-            const lotesAbertos = activeClientsInLote.map(cid => ({
-                lote_id: loteObj.id,
-                cliente_id: cid,
-                status: "ABERTO",
-                valor_total: agsInserir.filter(a => a.cliente_id === cid).reduce((sum, a) => sum + a.valor_iwof, 0)
-            }));
-
-            if (lotesAbertos.length > 0) {
-                for (let i = 0; i < lotesAbertos.length; i += batchSize) {
-                    const chunk = lotesAbertos.slice(i, i + batchSize);
-                    await supabase.from("faturamento_consolidados").insert(chunk);
-                }
-            }
-
-            await supabase.from("faturamentos_lote").update({ status: "FECHADO" }).eq("id", loteObj.id);
-            setSaveResult({ ok: successCount, err: errorCount, loteId: loteObj.id });
-            setLoteId(loteObj.id);
-            sessionStorage.setItem('currentLoteId', loteObj.id);
-            console.log("✅ LOTE CRIADO NO SUPABASE COM ID:", loteObj.id);
-            return loteObj.id;
-
+            setCurrentStep(3);
         } catch (e: any) {
-            console.error("Erro ao consolidar:", e);
-            setSaveResult({ ok: 0, err: validosCount, loteId: undefined });
-            alert(e.message || "Erro desconhecido ao consolidar");
+            console.error("Erro ao gerar lote inicial:", e);
+            alert(e.message || "Erro desconhecido ao gerar lote inicial");
         } finally {
             setSaving(false);
         }
@@ -643,12 +616,15 @@ export default function WizardFaturamento() {
         processing, processFile,
         duplicates, setDuplicates,
         dbClientes, handleManualStoreMatch,
-        financialSummary, handleFecharLote,
-        saving, saveResult,
-        loteId, setLoteId,
+        financialSummary,
         queirozConfig, setQueirozConfig,
         lojasSemNf, setLojasSemNf,
-        nfseFiles, setNfseFiles
+        nfseFiles, setNfseFiles,
+        handleSaveLoteInicial,
+        saving,
+        saveResult,
+        loteId,
+        setLoteId
     };
 
     return (

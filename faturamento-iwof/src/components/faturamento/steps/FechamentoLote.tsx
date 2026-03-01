@@ -13,7 +13,6 @@ interface FechamentoLoteProps {
     nfseFiles: { name: string; blob: Blob; buffer: ArrayBuffer }[]; // Preserving standard nfse state if already generated
     setNfseFiles?: React.Dispatch<React.SetStateAction<{ name: string; blob: Blob; buffer: ArrayBuffer }[]>>;
     financialSummary: FinancialSummary;
-    handleFecharLote: () => Promise<void | string>;
     saving: boolean;
     saveResult?: { ok: number; err: number; loteId?: string } | null;
     loteId?: string | null;
@@ -29,7 +28,6 @@ export default function FechamentoLote({
     nfseFiles,
     setNfseFiles,
     financialSummary,
-    handleFecharLote,
     saving,
     saveResult,
     loteId,
@@ -182,49 +180,116 @@ export default function FechamentoLote({
     }, [agendamentos, nfseFiles, boletoFiles, xmlParsedData, actionState.ncsSuccess]);
 
     const handleConsolidarLote = async () => {
-        let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
-        if (!targetLoteId) {
-            alert("Erro: ID do lote não encontrado. Por favor, volte ao passo anterior e tente novamente.");
-            console.error("Estado atual do loteId:", loteId, "SessionStorage:", typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
-            return;
-        }
-
-        setLoadingMap(prev => ({ ...prev, consolidar: true }));
         try {
-            const updatesList = matchFiles.reports.filter(r => r.numeroNF || r.descontoIR).map(r => {
-                return {
-                    lote_id: targetLoteId!,
-                    loja_id: r.id,
-                    numero_nf: r.numeroNF || null,
-                    desconto_irrf: r.descontoIR || 0
-                };
-            });
+            setLoadingMap(prev => ({ ...prev, consolidar: true }));
 
-            if (updatesList.length > 0) {
-                // Upsert on faturamento_consolidados requires matching the primary key or unique constraints.
-                // Assuming (lote_id, loja_id) is unique, we can iterate or use upsert if configured.
-                // We'll update sequentially to ensure precise patching:
-                for (const update of updatesList) {
-                    const { error } = await supabase
-                        .from('faturamento_consolidados')
-                        .update({
-                            numero_nf: update.numero_nf,
-                            desconto_irrf: update.desconto_irrf
-                        })
-                        .eq('lote_id', targetLoteId)
-                        .eq('loja_id', update.loja_id);
+            const { data: { session } } = await supabase.auth.getSession();
+            const user = session?.user;
+            if (!user) throw new Error("Usuário não autenticado para consolidar o lote.");
 
-                    if (error) {
-                        console.error("Erro ao atualizar NF da loja", update.loja_id, error);
+            // 1. CRIAR O LOTE (se ainda não existir)
+            let currentLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
+
+            if (!currentLoteId) {
+                const validos = agendamentos.filter(a => !a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO") && a.clienteId);
+                let valTotal = 0;
+
+                const agsInserir = validos.map(a => {
+                    const finalVal = a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof);
+                    valTotal += finalVal;
+                    return {
+                        cliente_id: a.clienteId,
+                        nome_profissional: a.nome,
+                        vaga: a.vaga,
+                        inicio: a.inicio ? a.inicio.toISOString() : null,
+                        termino: a.termino ? a.termino.toISOString() : null,
+                        valor_iwof: finalVal,
+                        fracao_hora: a.status === "CORREÇÃO" ? (a.suggestedFracaoHora ?? a.fracaoHora) : a.fracaoHora,
+                        ref_agendamento: a.refAgendamento,
+                        data_cancelamento: a.dataCancelamento ? a.dataCancelamento.toISOString() : null,
+                        motivo_cancelamento: a.motivoCancelamento,
+                        responsavel_cancelamento: a.responsavelCancelamento,
+                        raw_data: a.rawRow
+                    };
+                });
+
+                const pStartUTC = periodoInicio ? new Date(periodoInicio + "T00:00:00Z").toISOString() : null;
+                const pEndUTC = periodoFim ? new Date(periodoFim + "T23:59:59Z").toISOString() : null;
+
+                const { data: lote, error: loteErr } = await supabase
+                    .from('faturamentos_lote')
+                    .insert({
+                        nome: nomePasta || `Lote ${new Date().toLocaleString("pt-BR")}`,
+                        periodo_inicio: pStartUTC,
+                        periodo_fim: pEndUTC,
+                        status: 'FECHADO',
+                        quantidade_agendamentos: agsInserir.length,
+                        valor_total: valTotal,
+                        criado_por: user.id
+                    })
+                    .select('id').single();
+
+                if (loteErr) {
+                    console.error("🚨 ERRO LOTE:", loteErr);
+                    alert("Falha ao criar o Lote no banco de dados: " + loteErr.message);
+                    return;
+                }
+
+                currentLoteId = lote.id;
+
+                if (setLoteId) setLoteId(currentLoteId);
+                if (typeof window !== "undefined") sessionStorage.setItem('currentLoteId', currentLoteId!);
+                console.log("✅ LOTE CRIADO NO SUPABASE COM ID:", currentLoteId);
+
+                // 2. INSERIR AGENDAMENTOS BRUTOS
+                const batchSize = 1000;
+                for (let i = 0; i < agsInserir.length; i += batchSize) {
+                    const chunk = agsInserir.slice(i, i + batchSize).map(x => ({ ...x, lote_id: currentLoteId }));
+                    const { error: agendamentosErr } = await supabase.from("agendamentos_brutos").insert(chunk);
+                    if (agendamentosErr) {
+                        console.error("🚨 ERRO AGENDAMENTOS:", agendamentosErr);
+                        alert("Falha ao salvar agendamentos extraídos: " + agendamentosErr.message);
+                        return;
                     }
                 }
             }
 
-            // Also check agendamentos_brutos to just stamp them if needed, but consolidados is usually enough.
+            // 3. INSERIR CONSOLIDADOS FISCAIS (Faturamento por Loja Final)
+            const consolidadosPayload = matchFiles.reports.map(r => ({
+                lote_id: currentLoteId,
+                cliente_id: r.id,
+                valor_bruto: r.totalFaturar || 0,
+                acrescimos: 0,
+                descontos: 0,
+                valor_irrf: r.descontoIR || 0,
+                numero_nf: r.numeroNF || null,
+                valor_nf_emitida: r.statusNF === 'EMITIDA' ? r.totalFaturar : 0,
+                valor_nc_final: r.statusNC === 'EMITIDA' ? r.totalFaturar : 0,
+                valor_boleto_final: r.totalFaturar - (r.descontoIR || 0)
+            }));
+
+            if (consolidadosPayload.length > 0) {
+                // Remove antigos antes de re-inserir para garantir idempotência ao clicar múltiplas vezes
+                await supabase.from('faturamento_consolidados').delete().eq('lote_id', currentLoteId);
+
+                const { error: consolidadosErr } = await supabase
+                    .from('faturamento_consolidados')
+                    .insert(consolidadosPayload);
+
+                if (consolidadosErr) {
+                    console.error("🚨 ERRO CONSOLIDADOS:", consolidadosErr);
+                    alert("Falha ao criar painel de consolidados (IRRF e Totais da NF): " + consolidadosErr.message);
+                    return;
+                }
+            }
+
+            alert("✅ Lote, agendamentos e consolidados fiscais gravados com pleno sucesso!");
+            console.log("🟢 Consolidação Definitiva Executada no Lote:", currentLoteId);
             setIsLoteConsolidado(true);
+
         } catch (error: any) {
-            console.error("Erro geral na consolidação", error);
-            alert("Falha ao consolidar o lote. Verifique o console.");
+            console.error("🚨 ERRO CRÍTICO NO CÓDIGO DA CONSOLIDAÇÃO:", error);
+            alert("Erro interno ao processar o salvamento. Verifique o F12 (Console) para mais detalhes tecnológicos.");
         } finally {
             setLoadingMap(prev => ({ ...prev, consolidar: false }));
         }
@@ -308,11 +373,9 @@ export default function FechamentoLote({
     const handleUploadBoletos = async () => {
         setLoadingMap(p => ({ ...p, "boletosSuccess": true }));
         try {
-            // Se ainda não fechou o lote, fecha agora
             let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
             if (!targetLoteId) {
-                targetLoteId = await handleFecharLote() as string;
-                if (!targetLoteId) throw new Error("Falha ao gerar o lote.");
+                throw new Error("Falha ao encontrar o lote inicial gerado. Retorne aos passos anteriores.");
             }
 
             const formData = new FormData();
@@ -343,8 +406,7 @@ export default function FechamentoLote({
         try {
             let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
             if (!targetLoteId) {
-                targetLoteId = await handleFecharLote() as string;
-                if (!targetLoteId) throw new Error("Falha ao gerar o lote.");
+                throw new Error("Falha ao encontrar o lote inicial gerado. Retorne aos passos anteriores.");
             }
 
             const formData = new FormData();
@@ -374,8 +436,7 @@ export default function FechamentoLote({
         try {
             let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
             if (!targetLoteId) {
-                targetLoteId = await handleFecharLote() as string;
-                if (!targetLoteId) throw new Error("Falha ao gerar o lote.");
+                throw new Error("Falha ao encontrar o lote inicial gerado. Retorne aos passos anteriores.");
             }
 
             const payload = { loteId: targetLoteId, tipo: "NC" };
@@ -405,8 +466,7 @@ export default function FechamentoLote({
         try {
             let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
             if (!targetLoteId) {
-                targetLoteId = await handleFecharLote() as string;
-                if (!targetLoteId) throw new Error("Falha ao gerar o lote.");
+                throw new Error("Falha ao encontrar o lote inicial gerado. Retorne aos passos anteriores.");
             }
 
             const payload = { loteId: targetLoteId, tipo: "HC" };

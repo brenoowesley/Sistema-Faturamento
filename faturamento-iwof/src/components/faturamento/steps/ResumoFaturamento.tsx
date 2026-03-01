@@ -12,6 +12,8 @@ interface ResumoFaturamentoProps {
     agendamentos: Agendamento[];
     setAgendamentos: React.Dispatch<React.SetStateAction<Agendamento[]>>;
     duplicates: { identical: Agendamento[][], suspicious: Agendamento[][] };
+    handleSaveLoteInicial: () => Promise<void>;
+    saving: boolean;
 }
 
 export default function ResumoFaturamento({
@@ -20,7 +22,9 @@ export default function ResumoFaturamento({
     conciliation,
     agendamentos,
     setAgendamentos,
-    duplicates
+    duplicates,
+    handleSaveLoteInicial,
+    saving
 }: ResumoFaturamentoProps) {
 
     const [openCategories, setOpenCategories] = useState<Record<string, boolean>>({});
@@ -112,10 +116,11 @@ export default function ResumoFaturamento({
                 </button>
                 <button
                     className="btn btn-primary"
-                    onClick={() => setCurrentStep(3)}
-                    disabled={totalFaturar === 0}
+                    onClick={handleSaveLoteInicial}
+                    disabled={totalFaturar === 0 || saving}
                 >
-                    Avançar para Seleção Fiscal <ChevronRight size={16} />
+                    {saving ? <span className="loading loading-spinner loading-xs"></span> : null}
+                    {saving ? "Gerando Lote Inicial..." : "Avançar para Seleção Fiscal"} <ChevronRight size={16} />
                 </button>
             </div>
 
