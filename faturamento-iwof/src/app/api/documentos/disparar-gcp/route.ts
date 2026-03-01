@@ -416,65 +416,36 @@ export async function POST(req: NextRequest) {
             headers["Authorization"] = `Bearer ${gcpToken}`;
         }
 
-        const gcpRequests: Promise<Response>[] = [];
-
-        // LOOP HC: Disparar MENSAGEM INDIVIDUAL p/ CADA LOJA
-        if (!tipo || tipo === "HC") {
-            for (const lojaHC of payloadHC) {
-                const envioHCLoja = {
-                    nome_pasta_ciclo: cycleNameStr,
-                    ciclo_mensal: cyclePeriodStr,
-                    rootFolderId: rootFolderId,
-                    ...lojaHC // info_loja, lista_acrescimos, itens_faturados_rows... at raiz
-                };
-                gcpRequests.push(fetch(pubHCUrl, { method: "POST", headers, body: JSON.stringify(envioHCLoja) }));
-            }
-
-            // GATILHO GLOBAL (MASTER HC)
-            if (pubMasterHCUrl && payloadHC.length > 0) {
-                const masterHCPayload = {
-                    nome_pasta_ciclo: cycleNameStr,
-                    ciclo_mensal: cyclePeriodStr,
-                    rootFolderId: rootFolderId,
-                    lote_id: lote.id,
-                    data_faturamento: new Date().toLocaleDateString("pt-BR"),
-                    lojas: payloadHC
-                };
-                gcpRequests.push(fetch(pubMasterHCUrl, { method: "POST", headers, body: JSON.stringify(masterHCPayload) }));
-                console.log(`[MASTER HC] Disparando gatilho global para o ciclo: ${cycleNameStr}`);
-            }
+        // 1. DISPARO ÚNICO PARA HCs (Gatilho Master)
+        if ((!tipo || tipo === "HC") && pubMasterHCUrl && payloadHC.length > 0) {
+            const masterHCPayload = {
+                nome_pasta_ciclo: cycleNameStr,
+                ciclo_mensal: cyclePeriodStr,
+                lote_id: lote.id,
+                data_faturamento: new Date().toLocaleDateString("pt-BR"),
+                lojas: payloadHC // As matrizes de agendamentos brutos já estão mapeadas aqui dentro
+            };
+            gcpRequests.push(fetch(pubMasterHCUrl, { method: "POST", headers, body: JSON.stringify(masterHCPayload) }));
+            console.log(`[MASTER HC] Disparando 1 pacote global com ${payloadHC.length} lojas.`);
         }
 
-        // LOOP NC: Disparar MENSAGEM INDIVIDUAL p/ CADA LOJA
-        if (!tipo || tipo === "NC") {
-            for (const lojaNC of payloadNC) {
-                const envioNCLoja = {
-                    nome_pasta_ciclo: cycleNameStr,
-                    rootFolderId: rootFolderId,
-                    ...lojaNC // 'LOJA', 'CNPJ', 'NC'... at raiz
-                };
-                gcpRequests.push(fetch(pubNCUrl, { method: "POST", headers, body: JSON.stringify(envioNCLoja) }));
-            }
-
-            // GATILHO GLOBAL (MASTER NC)
-            if (pubMasterNCUrl && payloadNC.length > 0) {
-                const masterNCPayload = {
-                    nome_pasta_ciclo: cycleNameStr,
-                    ciclo_mensal: cyclePeriodStr,
-                    rootFolderId: rootFolderId,
-                    lote_id: lote.id,
-                    data_faturamento: new Date().toLocaleDateString("pt-BR"),
-                    lojas: payloadNC
-                };
-                gcpRequests.push(fetch(pubMasterNCUrl, { method: "POST", headers, body: JSON.stringify(masterNCPayload) }));
-                console.log(`[MASTER NC] Disparando gatilho global para o ciclo: ${cycleNameStr}`);
-            }
+        // 2. DISPARO ÚNICO PARA NCs (Gatilho Master)
+        if ((!tipo || tipo === "NC") && pubMasterNCUrl && payloadNC.length > 0) {
+            const masterNCPayload = {
+                nome_pasta_ciclo: cycleNameStr,
+                ciclo_mensal: cyclePeriodStr,
+                lote_id: lote.id,
+                data_faturamento: new Date().toLocaleDateString("pt-BR"),
+                lojas: payloadNC
+            };
+            gcpRequests.push(fetch(pubMasterNCUrl, { method: "POST", headers, body: JSON.stringify(masterNCPayload) }));
+            console.log(`[MASTER NC] Disparando 1 pacote global com ${payloadNC.length} lojas.`);
         }
 
-        // Debug Payload p/ loggar a quantidade de disparos individuais (Apenas Exemplo Length)
-        console.log(`RAIO-X: Disparando ${payloadHC.length} payloads HC e ${payloadNC.length} payloads NC individualmente.`);
-
-        // 5. Fire parallel POSTs to GCP Pub/Sub triggers per Store Object
+        if (gcpRequests.length === 0) {
+            throw new Error("Nenhum payload válido gerado para o tipo selecionado ou URLs Master não configuradas.");
+        }
+        // 3. Executa os disparos globais
         try {
             const responses = await Promise.all(gcpRequests);
             for (let i = 0; i < responses.length; i++) {
