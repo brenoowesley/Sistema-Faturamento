@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useMemo, useRef, useEffect } from "react";
-import { ArrowLeft, CheckCircle2, ShieldCheck, FileText, UploadCloud, CloudLightning, Mail, AlertTriangle, Info, FileStack, X, FileArchive, Search, Send, FileCode2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ShieldCheck, FileText, UploadCloud, CloudLightning, Mail, AlertTriangle, Info, FileStack, X, FileArchive, Search, Send, FileCode2, Lock, Save } from "lucide-react";
 import { Agendamento, FinancialSummary } from "../types";
 import { fmtCurrency, normalizarNome } from "../utils";
 import JSZip from "jszip";
+import { createClient } from "@/lib/supabase/client";
 
 interface FechamentoLoteProps {
     setCurrentStep: (s: number) => void;
@@ -46,6 +47,8 @@ export default function FechamentoLote({
     });
 
     const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
+    const [isLoteConsolidado, setIsLoteConsolidado] = useState(false);
+    const supabase = createClient();
 
     // MODAL STATE
     const [activeModal, setActiveModal] = useState<string | null>(null);
@@ -170,6 +173,54 @@ export default function FechamentoLote({
         return { reports, orphanNfses, orphanBoletos };
     }, [agendamentos, nfseFiles, boletoFiles, xmlParsedData, actionState.ncsSuccess]);
 
+    const handleConsolidarLote = async () => {
+        if (!saveResult?.loteId) {
+            alert("Erro: ID do lote não encontrado. Por favor, volte ao passo anterior e tente novamente.");
+            return;
+        }
+
+        setLoadingMap(prev => ({ ...prev, consolidar: true }));
+        try {
+            const updatesList = matchFiles.reports.filter(r => r.numeroNF || r.descontoIR).map(r => {
+                return {
+                    lote_id: saveResult.loteId!,
+                    loja_id: r.id,
+                    numero_nf: r.numeroNF || null,
+                    desconto_irrf: r.descontoIR || 0
+                };
+            });
+
+            if (updatesList.length > 0) {
+                // Upsert on faturamento_consolidados requires matching the primary key or unique constraints.
+                // Assuming (lote_id, loja_id) is unique, we can iterate or use upsert if configured.
+                // We'll update sequentially to ensure precise patching:
+                for (const update of updatesList) {
+                    const { error } = await supabase
+                        .from('faturamento_consolidados')
+                        .update({
+                            numero_nf: update.numero_nf,
+                            desconto_irrf: update.desconto_irrf
+                        })
+                        .eq('lote_id', saveResult.loteId)
+                        .eq('loja_id', update.loja_id);
+
+                    if (error) {
+                        console.error("Erro ao atualizar NF da loja", update.loja_id, error);
+                    }
+                }
+            }
+
+            // Also check agendamentos_brutos to just stamp them if needed, but consolidados is usually enough.
+            setIsLoteConsolidado(true);
+        } catch (error: any) {
+            console.error("Erro geral na consolidação", error);
+            alert("Falha ao consolidar o lote. Verifique o console.");
+        } finally {
+            setLoadingMap(prev => ({ ...prev, consolidar: false }));
+        }
+    };
+
+    /** FILE UPLOAD HANDLERS **/
     const handleBoletoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files?.length) return;
         setLoadingMap(p => ({ ...p, "zipBoletos": true }));
@@ -537,98 +588,123 @@ export default function FechamentoLote({
                 <div className="lg:col-span-1 flex flex-col gap-4 sticky top-6">
                     <h3 className="text-lg font-bold text-[var(--fg)] mb-2 flex items-center gap-2">Ações Definitivas</h3>
 
-                    {/* Botão 1: Boletos */}
+                    {/* Botão 1: Consolidar Lote */}
                     <button
-                        onClick={() => setActiveModal("boletos")}
-                        disabled={actionState.boletosSuccess || loadingMap["boletosSuccess"]}
-                        className={`flex items-center gap-4 p-4 rounded-2xl border text-left transition-all ${actionState.boletosSuccess ? "bg-[var(--bg-card)] border-[var(--border)] opacity-60" : "bg-[var(--bg-sidebar)] border-[var(--border)] hover:border-[var(--accent)] shadow-sm hover:shadow-md"
+                        onClick={handleConsolidarLote}
+                        disabled={isLoteConsolidado || loadingMap["consolidar"]}
+                        className={`flex items-center gap-4 p-4 rounded-2xl border text-left transition-all ${isLoteConsolidado ? "bg-[var(--bg-card)] border-[var(--border)] opacity-60" : "bg-[var(--bg-sidebar)] border-[var(--border)] hover:border-[var(--accent)] shadow-sm hover:shadow-md"
                             }`}
                     >
-                        <div className={`p-3 rounded-xl ${actionState.boletosSuccess ? "bg-green-500/10 text-green-500" : "bg-[var(--accent)]/10 text-[var(--accent)]"}`}>
-                            <UploadCloud size={24} />
+                        <div className={`p-3 rounded-xl ${isLoteConsolidado ? "bg-green-500/10 text-green-500" : "bg-[var(--accent)]/10 text-[var(--accent)]"}`}>
+                            <Save size={24} />
                         </div>
                         <div className="flex-1">
-                            <h4 className="font-bold text-sm text-[var(--fg)]">1. Enviar Boletos</h4>
-                            <p className="text-xs text-[var(--fg-dim)] mt-0.5">Upload de PDFs</p>
+                            <h4 className="font-bold text-sm text-[var(--fg)]">1. Consolidar Lote</h4>
+                            <p className="text-xs text-[var(--fg-dim)] mt-0.5">Grava IRRF e NFs no Banco</p>
                         </div>
-                        {actionState.boletosSuccess && <span className="text-xs font-bold px-2 py-1 bg-green-500/20 text-green-500 rounded-lg">Concluído</span>}
+                        {isLoteConsolidado && <span className="text-xs font-bold px-2 py-1 bg-green-500/20 text-green-500 rounded-lg flex items-center gap-1"><CheckCircle2 size={12} /> Sucesso</span>}
+                        {loadingMap["consolidar"] && <span className="loading loading-spinner w-4 h-4 text-[var(--accent)]"></span>}
                     </button>
 
-                    {/* Botão 2: NFs */}
+                    {/* Botão 2: HCs */}
                     <button
-                        onClick={() => setActiveModal("nfs")}
-                        disabled={actionState.nfsSuccess || loadingMap["nfsSuccess"]}
-                        className={`flex items-center gap-4 p-4 rounded-2xl border text-left transition-all ${actionState.nfsSuccess ? "bg-[var(--bg-card)] border-[var(--border)] opacity-60" : "bg-[var(--bg-sidebar)] border-[var(--border)] hover:border-[var(--accent)] shadow-sm hover:shadow-md"
-                            }`}
-                    >
-                        <div className={`p-3 rounded-xl ${actionState.nfsSuccess ? "bg-green-500/10 text-green-500" : "bg-[var(--accent)]/10 text-[var(--accent)]"}`}>
-                            <FileArchive size={24} />
-                        </div>
-                        <div className="flex-1">
-                            <h4 className="font-bold text-sm text-[var(--fg)]">2. Enviar NFs</h4>
-                            <p className="text-xs text-[var(--fg-dim)] mt-0.5">Upload ZIP NFE.io</p>
-                        </div>
-                        {actionState.nfsSuccess && <span className="text-xs font-bold px-2 py-1 bg-green-500/20 text-green-500 rounded-lg">Concluído</span>}
-                    </button>
-
-                    {/* Botão 3: NCs */}
-                    <button
-                        onClick={() => setActiveModal("ncs")}
-                        disabled={actionState.ncsSuccess || loadingMap["ncsSuccess"]}
-                        className={`flex items-center gap-4 p-4 rounded-2xl border text-left transition-all ${actionState.ncsSuccess ? "bg-[var(--bg-card)] border-[var(--border)] opacity-60" : "bg-[var(--bg-sidebar)] border-[var(--border)] hover:border-[var(--accent)] shadow-sm hover:shadow-md"
-                            }`}
-                    >
-                        <div className={`p-3 rounded-xl ${actionState.ncsSuccess ? "bg-green-500/10 text-green-500" : "bg-amber-500/10 text-amber-500"}`}>
-                            <FileCode2 size={24} />
-                        </div>
-                        <div className="flex-1">
-                            <h4 className="font-bold text-sm text-[var(--fg)]">3. Criar NCs</h4>
-                            <p className="text-xs text-[var(--fg-dim)] mt-0.5">Notas de Crédito</p>
-                        </div>
-                        {actionState.ncsSuccess && <span className="text-xs font-bold px-2 py-1 bg-green-500/20 text-green-500 rounded-lg">Concluído</span>}
-                    </button>
-
-                    {/* Botão 4: HCs */}
-                    <button
+                        title={!isLoteConsolidado ? "Consolide o lote primeiro" : ""}
                         onClick={() => setActiveModal("hcs")}
-                        disabled={actionState.hcsSuccess || loadingMap["hcsSuccess"]}
+                        disabled={!isLoteConsolidado || actionState.hcsSuccess || loadingMap["hcsSuccess"]}
                         className={`flex items-center gap-4 p-4 rounded-2xl border text-left transition-all ${actionState.hcsSuccess ? "bg-[var(--bg-card)] border-[var(--border)] opacity-60" : "bg-[var(--bg-sidebar)] border-[var(--border)] hover:border-[var(--accent)] shadow-sm hover:shadow-md"
-                            }`}
+                            } ${!isLoteConsolidado && "opacity-50 grayscale cursor-not-allowed pointer-events-none"}`}
                     >
                         <div className={`p-3 rounded-xl ${actionState.hcsSuccess ? "bg-green-500/10 text-green-500" : "bg-purple-500/10 text-purple-500"}`}>
                             <FileText size={24} />
                         </div>
                         <div className="flex-1">
-                            <h4 className="font-bold text-sm text-[var(--fg)]">4. Criar HCs</h4>
-                            <p className="text-xs text-[var(--fg-dim)] mt-0.5">Honorários Cont.</p>
+                            <h4 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">2. Criar HCs {!isLoteConsolidado && <Lock size={14} className="text-[var(--fg-dim)]" />}</h4>
+                            <p className="text-xs text-[var(--fg-dim)] mt-0.5">Recibos Honorários</p>
                         </div>
-                        {actionState.hcsSuccess && <span className="text-xs font-bold px-2 py-1 bg-green-500/20 text-green-500 rounded-lg">Concluído</span>}
+                        {actionState.hcsSuccess && <span className="text-xs font-bold px-2 py-1 bg-green-500/20 text-green-500 rounded-lg flex items-center gap-1"><CheckCircle2 size={12} /> Concluído</span>}
                     </button>
 
-                    {/* Botão 5: EMAIL */}
-                    <div className="mt-4 flex flex-col gap-2">
-                        <button
-                            onClick={() => setActiveModal("emails")}
-                            disabled={actionState.emailsSuccess || loadingMap["emailsSuccess"]}
-                            className={`group flex items-center gap-4 p-4 rounded-2xl border text-left transition-all ${actionState.emailsSuccess ? "bg-green-500/5 border-green-500/20 opacity-60" : "bg-green-500/10 border-green-500/30 hover:bg-green-500 hover:text-white hover:border-green-500 hover:shadow-[0_0_20px_rgba(34,197,94,0.4)]"
-                                }`}
-                        >
-                            <div className={`p-3 rounded-xl ${actionState.emailsSuccess ? "bg-green-500/10 text-green-500" : "bg-[var(--bg-sidebar)] text-green-500 group-hover:text-green-500 group-hover:bg-white"}`}>
-                                <Send size={24} />
-                            </div>
-                            <div className="flex-1">
-                                <h4 className={`font-bold text-sm ${actionState.emailsSuccess ? "text-green-500" : "text-[var(--fg)] group-hover:text-white"}`}>5. Enviar E-mails</h4>
-                                <p className={`text-xs mt-0.5 ${actionState.emailsSuccess ? "text-green-500/70" : "text-[var(--fg-dim)] group-hover:text-white/80"}`}>Ação crítica final</p>
-                            </div>
-                            {actionState.emailsSuccess && <span className="text-xs font-bold px-2 py-1 bg-green-500/20 text-green-500 rounded-lg">Concluído</span>}
-                        </button>
+                    {/* Botão 3: NCs */}
+                    <button
+                        title={!isLoteConsolidado ? "Consolide o lote primeiro" : ""}
+                        onClick={() => setActiveModal("ncs")}
+                        disabled={!isLoteConsolidado || actionState.ncsSuccess || loadingMap["ncsSuccess"]}
+                        className={`flex items-center gap-4 p-4 rounded-2xl border text-left transition-all ${actionState.ncsSuccess ? "bg-[var(--bg-card)] border-[var(--border)] opacity-60" : "bg-[var(--bg-sidebar)] border-[var(--border)] hover:border-[var(--accent)] shadow-sm hover:shadow-md"
+                            } ${!isLoteConsolidado && "opacity-50 grayscale cursor-not-allowed pointer-events-none"}`}
+                    >
+                        <div className={`p-3 rounded-xl ${actionState.ncsSuccess ? "bg-green-500/10 text-green-500" : "bg-amber-500/10 text-amber-500"}`}>
+                            <FileCode2 size={24} />
+                        </div>
+                        <div className="flex-1">
+                            <h4 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">3. Criar NCs {!isLoteConsolidado && <Lock size={14} className="text-[var(--fg-dim)]" />}</h4>
+                            <p className="text-xs text-[var(--fg-dim)] mt-0.5">Notas de Crédito</p>
+                        </div>
+                        {actionState.ncsSuccess && <span className="text-xs font-bold px-2 py-1 bg-green-500/20 text-green-500 rounded-lg flex items-center gap-1"><CheckCircle2 size={12} /> Concluído</span>}
+                    </button>
 
-                        {pendingNfCount > 0 && (
-                            <div className="text-xs text-[var(--danger)] text-center font-bold px-3 py-2 bg-red-500/10 rounded-xl border border-red-500/20 flex flex-col items-center gap-1">
-                                <span>Atenção: {pendingNfCount} {pendingNfCount === 1 ? 'loja ainda está' : 'lojas ainda estão'} sem Nota Fiscal.</span>
-                            </div>
-                        )}
-                    </div>
+                    {/* Botão 4: NFs */}
+                    <button
+                        title={!isLoteConsolidado ? "Consolide o lote primeiro" : ""}
+                        onClick={() => setActiveModal("nfs")}
+                        disabled={!isLoteConsolidado || actionState.nfsSuccess || loadingMap["nfsSuccess"]}
+                        className={`flex items-center gap-4 p-4 rounded-2xl border text-left transition-all ${actionState.nfsSuccess ? "bg-[var(--bg-card)] border-[var(--border)] opacity-60" : "bg-[var(--bg-sidebar)] border-[var(--border)] hover:border-[var(--accent)] shadow-sm hover:shadow-md"
+                            } ${!isLoteConsolidado && "opacity-50 grayscale cursor-not-allowed pointer-events-none"}`}
+                    >
+                        <div className={`p-3 rounded-xl ${actionState.nfsSuccess ? "bg-green-500/10 text-green-500" : "bg-[var(--accent)]/10 text-[var(--accent)]"}`}>
+                            <FileArchive size={24} />
+                        </div>
+                        <div className="flex-1">
+                            <h4 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">4. Organizar NFs {!isLoteConsolidado && <Lock size={14} className="text-[var(--fg-dim)]" />}</h4>
+                            <p className="text-xs text-[var(--fg-dim)] mt-0.5">Upload ZIP NFE.io</p>
+                        </div>
+                        {actionState.nfsSuccess && <span className="text-xs font-bold px-2 py-1 bg-green-500/20 text-green-500 rounded-lg flex items-center gap-1"><CheckCircle2 size={12} /> Concluído</span>}
+                    </button>
+
+                    {/* Botão 5: Boletos */}
+                    <button
+                        title={!isLoteConsolidado ? "Consolide o lote primeiro" : ""}
+                        onClick={() => setActiveModal("boletos")}
+                        disabled={!isLoteConsolidado || actionState.boletosSuccess || loadingMap["boletosSuccess"]}
+                        className={`flex items-center gap-4 p-4 rounded-2xl border text-left transition-all ${actionState.boletosSuccess ? "bg-[var(--bg-card)] border-[var(--border)] opacity-60" : "bg-[var(--bg-sidebar)] border-[var(--border)] hover:border-[var(--accent)] shadow-sm hover:shadow-md"
+                            } ${!isLoteConsolidado && "opacity-50 grayscale cursor-not-allowed pointer-events-none"}`}
+                    >
+                        <div className={`p-3 rounded-xl ${actionState.boletosSuccess ? "bg-green-500/10 text-green-500" : "bg-[var(--accent)]/10 text-[var(--accent)]"}`}>
+                            <UploadCloud size={24} />
+                        </div>
+                        <div className="flex-1">
+                            <h4 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">5. Organizar Boletos {!isLoteConsolidado && <Lock size={14} className="text-[var(--fg-dim)]" />}</h4>
+                            <p className="text-xs text-[var(--fg-dim)] mt-0.5">Upload de PDFs</p>
+                        </div>
+                        {actionState.boletosSuccess && <span className="text-xs font-bold px-2 py-1 bg-green-500/20 text-green-500 rounded-lg flex items-center gap-1"><CheckCircle2 size={12} /> Concluído</span>}
+                    </button>
+
+                    {/* Botão 6: EMAILS */}
+                    <button
+                        title={!isLoteConsolidado ? "Consolide o lote primeiro" : ""}
+                        onClick={() => setActiveModal("emails")}
+                        disabled={!isLoteConsolidado || actionState.emailsSuccess || loadingMap["emailsSuccess"]}
+                        className={`flex items-center gap-4 p-4 rounded-2xl border text-left transition-all mt-4 ${actionState.emailsSuccess ? "bg-green-900/30 border-green-500/50 opacity-60" : "bg-[var(--danger)]/10 border-[var(--danger)]/30 hover:bg-[var(--danger)]/20 hover:border-[var(--danger)] shadow-sm hover:shadow-lg"
+                            } ${!isLoteConsolidado && "opacity-30 grayscale cursor-not-allowed pointer-events-none"}`}
+                    >
+                        <div className={`p-3 rounded-xl ${actionState.emailsSuccess ? "bg-green-500 text-white" : "bg-[var(--danger)] text-white"}`}>
+                            <Mail size={24} />
+                        </div>
+                        <div className="flex-1">
+                            <h4 className={`font-bold text-sm flex items-center gap-2 ${actionState.emailsSuccess ? "text-green-500" : "text-[var(--danger)]"}`}>
+                                6. Disparar E-mails {!isLoteConsolidado && <Lock size={14} className="opacity-50" />}
+                            </h4>
+                            <p className={`text-xs mt-0.5 ${actionState.emailsSuccess ? "text-green-500/70" : "text-[var(--danger)]/70"}`}>
+                                Encerra o Ciclo
+                            </p>
+                        </div>
+                        {actionState.emailsSuccess && <span className="text-xs font-bold px-2 py-1 bg-green-500/20 text-green-500 rounded-lg flex items-center gap-1"><CheckCircle2 size={12} /> Enviado</span>}
+                    </button>
+
+                    {pendingNfCount > 0 && (
+                        <div className="text-xs text-[var(--danger)] text-center font-bold px-3 py-2 bg-red-500/10 rounded-xl border border-red-500/20 flex flex-col items-center gap-1">
+                            <span>Atenção: {pendingNfCount} {pendingNfCount === 1 ? 'loja ainda está' : 'lojas ainda estão'} sem Nota Fiscal.</span>
+                        </div>
+                    )}
                 </div>
 
                 {/* Tabela Relatório de Conferência */}
@@ -748,31 +824,33 @@ export default function FechamentoLote({
             </div>
 
             {/* Orfans Alert */}
-            {(matchFiles.orphanBoletos.length > 0 || matchFiles.orphanNfses.length > 0) && (
-                <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl flex items-start gap-4 mt-6">
-                    <AlertTriangle className="text-amber-500 shrink-0 mt-1" />
-                    <div>
-                        <h4 className="text-amber-500 font-bold mb-1">Arquivos Órfãos na Memória</h4>
-                        <p className="text-xs text-amber-200/80 mb-2">Os seguintes arquivos não encontraram lojas no sistema via nome da nota:</p>
-                        <div className="grid grid-cols-2 gap-4 mt-2">
-                            <div>
-                                <strong className="text-[10px] uppercase tracking-wider text-amber-500/80 mb-1 block">NFs Órfãs ({matchFiles.orphanNfses.length})</strong>
-                                <ul className="text-[10px] text-amber-100/60 list-disc list-inside">
-                                    {matchFiles.orphanNfses.slice(0, 5).map(f => <li key={f.name}>{f.name}</li>)}
-                                    {matchFiles.orphanNfses.length > 5 && <li>...</li>}
-                                </ul>
-                            </div>
-                            <div>
-                                <strong className="text-[10px] uppercase tracking-wider text-amber-500/80 mb-1 block">Boletos Órfãos ({matchFiles.orphanBoletos.length})</strong>
-                                <ul className="text-[10px] text-amber-100/60 list-disc list-inside">
-                                    {matchFiles.orphanBoletos.slice(0, 5).map(f => <li key={f.name}>{f.name}</li>)}
-                                    {matchFiles.orphanBoletos.length > 5 && <li>...</li>}
-                                </ul>
+            {
+                (matchFiles.orphanBoletos.length > 0 || matchFiles.orphanNfses.length > 0) && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl flex items-start gap-4 mt-6">
+                        <AlertTriangle className="text-amber-500 shrink-0 mt-1" />
+                        <div>
+                            <h4 className="text-amber-500 font-bold mb-1">Arquivos Órfãos na Memória</h4>
+                            <p className="text-xs text-amber-200/80 mb-2">Os seguintes arquivos não encontraram lojas no sistema via nome da nota:</p>
+                            <div className="grid grid-cols-2 gap-4 mt-2">
+                                <div>
+                                    <strong className="text-[10px] uppercase tracking-wider text-amber-500/80 mb-1 block">NFs Órfãs ({matchFiles.orphanNfses.length})</strong>
+                                    <ul className="text-[10px] text-amber-100/60 list-disc list-inside">
+                                        {matchFiles.orphanNfses.slice(0, 5).map(f => <li key={f.name}>{f.name}</li>)}
+                                        {matchFiles.orphanNfses.length > 5 && <li>...</li>}
+                                    </ul>
+                                </div>
+                                <div>
+                                    <strong className="text-[10px] uppercase tracking-wider text-amber-500/80 mb-1 block">Boletos Órfãos ({matchFiles.orphanBoletos.length})</strong>
+                                    <ul className="text-[10px] text-amber-100/60 list-disc list-inside">
+                                        {matchFiles.orphanBoletos.slice(0, 5).map(f => <li key={f.name}>{f.name}</li>)}
+                                        {matchFiles.orphanBoletos.length > 5 && <li>...</li>}
+                                    </ul>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     );
 }

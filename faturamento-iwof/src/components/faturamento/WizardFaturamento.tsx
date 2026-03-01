@@ -563,7 +563,7 @@ export default function WizardFaturamento() {
             const pEndUTC = periodoFim ? new Date(periodoFim + "T23:59:59Z").toISOString() : null;
 
             const { data: loteObj, error: loteErr } = await supabase
-                .from("faturamento_lotes")
+                .from("faturamentos_lote")
                 .insert({
                     nome: nomePasta || `Lote ${new Date().toLocaleString("pt-BR")}`,
                     periodo_inicio: pStartUTC,
@@ -585,7 +585,7 @@ export default function WizardFaturamento() {
 
             for (let i = 0; i < agsInserir.length; i += batchSize) {
                 const chunk = agsInserir.slice(i, i + batchSize).map(x => ({ ...x, lote_id: loteObj.id }));
-                const { error: insErr } = await supabase.from("faturamento_agendamentos").insert(chunk);
+                const { error: insErr } = await supabase.from("agendamentos_brutos").insert(chunk);
                 if (insErr) {
                     console.error("Erro no chunk", i, insErr);
                     errorCount += chunk.length;
@@ -605,11 +605,11 @@ export default function WizardFaturamento() {
             if (lotesAbertos.length > 0) {
                 for (let i = 0; i < lotesAbertos.length; i += batchSize) {
                     const chunk = lotesAbertos.slice(i, i + batchSize);
-                    await supabase.from("faturamento_lote_clientes").insert(chunk);
+                    await supabase.from("faturamento_consolidados").insert(chunk);
                 }
             }
 
-            await supabase.from("faturamento_lotes").update({ status: "FECHADO" }).eq("id", loteObj.id);
+            await supabase.from("faturamentos_lote").update({ status: "FECHADO" }).eq("id", loteObj.id);
             setSaveResult({ ok: successCount, err: errorCount, loteId: loteObj.id });
             return loteObj.id;
 
