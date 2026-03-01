@@ -43,6 +43,7 @@ export default function WizardFaturamento() {
     /* --- Save state --- */
     const [saving, setSaving] = useState(false);
     const [saveResult, setSaveResult] = useState<{ ok: number; err: number; loteId?: string } | null>(null);
+    const [loteId, setLoteId] = useState<string | null>(null);
 
     /* --- New Steps State --- */
     const [lojasSemNf, setLojasSemNf] = useState<Set<string>>(new Set());
@@ -611,6 +612,7 @@ export default function WizardFaturamento() {
 
             await supabase.from("faturamentos_lote").update({ status: "FECHADO" }).eq("id", loteObj.id);
             setSaveResult({ ok: successCount, err: errorCount, loteId: loteObj.id });
+            setLoteId(loteObj.id);
             return loteObj.id;
 
         } catch (e: any) {
@@ -641,6 +643,7 @@ export default function WizardFaturamento() {
         dbClientes, handleManualStoreMatch,
         financialSummary, handleFecharLote,
         saving, saveResult,
+        loteId, setLoteId,
         queirozConfig, setQueirozConfig,
         lojasSemNf, setLojasSemNf,
         nfseFiles, setNfseFiles

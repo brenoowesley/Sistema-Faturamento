@@ -403,27 +403,25 @@ export default function EmissaoNotas({
                             </button>
                         </div>
                     ) : (
-                        <div className="flex flex-col items-center gap-4 relative z-10">
+                        <div className="flex flex-col items-center justify-center p-4 relative z-10 w-full h-full">
                             <div className="absolute top-0 right-0 p-8 opacity-5 transition-opacity transform group-hover:scale-110 duration-500 pointer-events-none">
                                 <FileArchive size={180} />
                             </div>
                             <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-6 border transition-all duration-300 ${isDragActive ? "bg-[var(--accent)] text-white border-[var(--accent)] scale-110 shadow-[0_0_40px_rgba(33,118,255,0.4)]" : "bg-[var(--bg-card)] text-[var(--fg-dim)] border-[var(--border)]"}`}>
                                 <UploadCloud size={40} className={isDragActive ? "animate-bounce" : ""} />
                             </div>
-                            <h3 className="text-2xl font-bold text-[var(--fg)] mb-2">Devolver ZIP com XML/PDFs</h3>
-                            <p className="text-[var(--fg-dim)] text-sm max-w-[280px] leading-relaxed mb-4">
-                                Após gerar as notas na plataforma, baixe o arquivo comprimido (.zip) e jogue aqui.
-                            </p>
 
                             {extractError && (
-                                <div className="bg-[rgba(239,68,68,0.1)] text-[var(--danger)] text-xs px-4 py-2 rounded-lg flex items-center gap-2 mb-2 animate-in slide-in-from-bottom-2">
+                                <div className="bg-[rgba(239,68,68,0.1)] text-[var(--danger)] text-xs px-4 py-2 rounded-lg flex items-center gap-2 mb-4 animate-in slide-in-from-bottom-2">
                                     <AlertCircle size={14} /> {extractError}
                                 </div>
                             )}
 
-                            <span className="btn btn-outline border-[var(--border)] text-[var(--fg-dim)] hover:border-[var(--fg)] hover:text-[var(--fg)] transition-colors">
-                                Selecionar Arquivo
-                            </span>
+                            <p className="text-sm font-semibold text-[var(--fg)] mb-1">Arraste o ZIP dos XMLs aqui</p>
+                            <p className="text-xs text-[var(--fg-dim)] mb-4">ou</p>
+                            <button type="button" className="btn btn-ghost border border-[var(--border)] text-[var(--fg-dim)] hover:border-[var(--fg)] hover:text-[var(--fg)] transition-colors pointer-events-none">
+                                Procurar nas Pastas
+                            </button>
                         </div>
                     )}
                 </div>

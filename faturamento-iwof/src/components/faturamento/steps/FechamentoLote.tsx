@@ -16,6 +16,8 @@ interface FechamentoLoteProps {
     handleFecharLote: () => Promise<void | string>;
     saving: boolean;
     saveResult?: { ok: number; err: number; loteId?: string } | null;
+    loteId?: string | null;
+    setLoteId?: (id: string | null) => void;
     periodoInicio: string;
     periodoFim: string;
     nomePasta: string;
@@ -30,6 +32,8 @@ export default function FechamentoLote({
     handleFecharLote,
     saving,
     saveResult,
+    loteId,
+    setLoteId,
     periodoInicio,
     periodoFim,
     nomePasta
@@ -174,7 +178,8 @@ export default function FechamentoLote({
     }, [agendamentos, nfseFiles, boletoFiles, xmlParsedData, actionState.ncsSuccess]);
 
     const handleConsolidarLote = async () => {
-        if (!saveResult?.loteId) {
+        let targetLoteId = loteId || saveResult?.loteId;
+        if (!targetLoteId) {
             alert("Erro: ID do lote não encontrado. Por favor, volte ao passo anterior e tente novamente.");
             return;
         }
@@ -183,7 +188,7 @@ export default function FechamentoLote({
         try {
             const updatesList = matchFiles.reports.filter(r => r.numeroNF || r.descontoIR).map(r => {
                 return {
-                    lote_id: saveResult.loteId!,
+                    lote_id: targetLoteId!,
                     loja_id: r.id,
                     numero_nf: r.numeroNF || null,
                     desconto_irrf: r.descontoIR || 0
@@ -201,7 +206,7 @@ export default function FechamentoLote({
                             numero_nf: update.numero_nf,
                             desconto_irrf: update.desconto_irrf
                         })
-                        .eq('lote_id', saveResult.loteId)
+                        .eq('lote_id', targetLoteId)
                         .eq('loja_id', update.loja_id);
 
                     if (error) {
@@ -299,7 +304,7 @@ export default function FechamentoLote({
         setLoadingMap(p => ({ ...p, "boletosSuccess": true }));
         try {
             // Se ainda não fechou o lote, fecha agora
-            let targetLoteId = saveResult?.loteId;
+            let targetLoteId = loteId || saveResult?.loteId;
             if (!targetLoteId) {
                 targetLoteId = await handleFecharLote() as string;
                 if (!targetLoteId) throw new Error("Falha ao gerar o lote.");
@@ -331,7 +336,7 @@ export default function FechamentoLote({
     const handleUploadNfs = async () => {
         setLoadingMap(p => ({ ...p, "nfsSuccess": true }));
         try {
-            let targetLoteId = saveResult?.loteId;
+            let targetLoteId = loteId || saveResult?.loteId;
             if (!targetLoteId) {
                 targetLoteId = await handleFecharLote() as string;
                 if (!targetLoteId) throw new Error("Falha ao gerar o lote.");
@@ -362,7 +367,7 @@ export default function FechamentoLote({
     const handleCriarNCs = async () => {
         setLoadingMap(p => ({ ...p, "ncsSuccess": true }));
         try {
-            let targetLoteId = saveResult?.loteId;
+            let targetLoteId = loteId || saveResult?.loteId;
             if (!targetLoteId) {
                 targetLoteId = await handleFecharLote() as string;
                 if (!targetLoteId) throw new Error("Falha ao gerar o lote.");
@@ -393,7 +398,7 @@ export default function FechamentoLote({
     const handleCriarHCs = async () => {
         setLoadingMap(p => ({ ...p, "hcsSuccess": true }));
         try {
-            let targetLoteId = saveResult?.loteId;
+            let targetLoteId = loteId || saveResult?.loteId;
             if (!targetLoteId) {
                 targetLoteId = await handleFecharLote() as string;
                 if (!targetLoteId) throw new Error("Falha ao gerar o lote.");
@@ -424,7 +429,7 @@ export default function FechamentoLote({
     const handleDispararEmails = async () => {
         setLoadingMap(p => ({ ...p, "emailsSuccess": true }));
         try {
-            let targetLoteId = saveResult?.loteId;
+            let targetLoteId = loteId || saveResult?.loteId;
             if (!targetLoteId) throw new Error("Lote não encontrado. Processe uma das etapas anteriores primeiro.");
 
             const payload = { loteId: targetLoteId };
