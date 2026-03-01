@@ -398,8 +398,6 @@ export async function POST(req: NextRequest) {
 
         const pubNCUrl = process.env.GCP_PUB_NC_URL;
         const pubHCUrl = process.env.GCP_PUB_HC_URL;
-        const pubMasterNCUrl = process.env.GCP_PUB_MASTER_NC_URL;
-        const pubMasterHCUrl = process.env.GCP_PUB_MASTER_HC_URL;
         const gcpToken = process.env.GCP_AUTH_TOKEN;
 
         if (!pubNCUrl || !pubHCUrl) {
@@ -419,7 +417,7 @@ export async function POST(req: NextRequest) {
         const gcpRequests: Promise<Response>[] = [];
 
         // 1. DISPARO ÚNICO PARA HCs (Gatilho Master)
-        if ((!tipo || tipo === "HC") && pubMasterHCUrl && payloadHC.length > 0) {
+        if ((!tipo || tipo === "HC") && pubHCUrl && payloadHC.length > 0) {
             const masterHCPayload = {
                 nome_pasta_ciclo: cycleNameStr,
                 ciclo_mensal: cyclePeriodStr,
@@ -427,12 +425,12 @@ export async function POST(req: NextRequest) {
                 data_faturamento: new Date().toLocaleDateString("pt-BR"),
                 lojas: payloadHC // As matrizes de agendamentos brutos já estão mapeadas aqui dentro
             };
-            gcpRequests.push(fetch(pubMasterHCUrl, { method: "POST", headers, body: JSON.stringify(masterHCPayload) }));
+            gcpRequests.push(fetch(pubHCUrl, { method: "POST", headers, body: JSON.stringify(masterHCPayload) }));
             console.log(`[MASTER HC] Disparando 1 pacote global com ${payloadHC.length} lojas.`);
         }
 
         // 2. DISPARO ÚNICO PARA NCs (Gatilho Master)
-        if ((!tipo || tipo === "NC") && pubMasterNCUrl && payloadNC.length > 0) {
+        if ((!tipo || tipo === "NC") && pubNCUrl && payloadNC.length > 0) {
             const masterNCPayload = {
                 nome_pasta_ciclo: cycleNameStr,
                 ciclo_mensal: cyclePeriodStr,
@@ -440,7 +438,7 @@ export async function POST(req: NextRequest) {
                 data_faturamento: new Date().toLocaleDateString("pt-BR"),
                 lojas: payloadNC
             };
-            gcpRequests.push(fetch(pubMasterNCUrl, { method: "POST", headers, body: JSON.stringify(masterNCPayload) }));
+            gcpRequests.push(fetch(pubNCUrl, { method: "POST", headers, body: JSON.stringify(masterNCPayload) }));
             console.log(`[MASTER NC] Disparando 1 pacote global com ${payloadNC.length} lojas.`);
         }
 
