@@ -328,7 +328,7 @@ export default function WizardFaturamento() {
             }
 
             if (status === "OK") {
-                if (fracaoHora < 0.16 && fracaoHora > 0) {
+                if (fracaoHora < 0.17 && fracaoHora > 0) {
                     status = "CANCELAR";
                 } else if (fracaoHora > 6) {
                     status = "CORREÇÃO";

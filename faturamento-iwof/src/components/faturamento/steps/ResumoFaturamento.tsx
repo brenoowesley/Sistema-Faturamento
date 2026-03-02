@@ -28,9 +28,14 @@ export default function ResumoFaturamento({
 }: ResumoFaturamentoProps) {
 
     const [openCategories, setOpenCategories] = useState<Record<string, boolean>>({});
+    const [openUFs, setOpenUFs] = useState<Record<string, boolean>>({});
 
     const toggleCategory = (title: string) => {
         setOpenCategories(prev => ({ ...prev, [title]: !prev[title] }));
+    };
+
+    const toggleUF = (uf: string) => {
+        setOpenUFs(prev => ({ ...prev, [uf]: !prev[uf] }));
     };
 
     const handleActionItem = (id: string, actionDesc: "REMOVE" | "RESTORE" | "APPROVE", suggestedVal?: number) => {
@@ -73,7 +78,7 @@ export default function ResumoFaturamento({
             items: [] // handled in tables
         },
         {
-            title: "Sessões Irrelevantes (< 0.16h)",
+            title: "Sessões Irrelevantes (< 0.17h)",
             count: listSubMiny.length,
             message: "Agendamentos curtíssimos marcados para Cancelamento. Você pode confirmar a remoção ou forçar faturamento.",
             critical: false,
@@ -107,6 +112,18 @@ export default function ResumoFaturamento({
     ];
 
     const hasBlockers = conciliation.naoCadastrados.length > 0 || listDivergentes.length > 0;
+
+    // Derived values for UFs triage
+    const listAjustesUF = [...listSubMiny, ...listCorrecoes];
+    const ajustesPorUF = listAjustesUF.reduce((acc, a) => {
+        const uf = a.estado || 'NI'; // Não Informada
+        if (!acc[uf]) acc[uf] = [];
+        acc[uf].push(a);
+        return acc;
+    }, {} as Record<string, Agendamento[]>);
+
+    // Sort UFs by number of adjustments (descending)
+    const sortedUFs = Object.keys(ajustesPorUF).sort((a, b) => ajustesPorUF[b].length - ajustesPorUF[a].length);
 
     return (
         <div className="flex flex-col gap-6 max-w-5xl mx-auto">
@@ -316,7 +333,7 @@ export default function ResumoFaturamento({
                                                                 <button className="btn btn-sm btn-ghost text-[var(--danger)] text-xs" onClick={() => handleActionItem(a.id, "REMOVE")}>Remover</button>
                                                                 <button className="btn btn-sm bg-[var(--accent)] text-white text-xs border-none" onClick={() => handleActionItem(a.id, "APPROVE", a.suggestedValorIwof)}>Aprovar ({fmtCurrency(a.suggestedValorIwof || 0)})</button>
                                                             </>
-                                                        ) : issue.title.includes("< 0.16") ? (
+                                                        ) : issue.title.includes("< 0.17") ? (
                                                             <>
                                                                 <button className="btn btn-sm btn-ghost text-[var(--danger)] text-xs" onClick={() => handleActionItem(a.id, "REMOVE")}>Confirmar Remoção</button>
                                                                 <button className="btn btn-sm btn-ghost text-[var(--success)] text-xs border border-[var(--success)]" onClick={() => handleActionItem(a.id, "RESTORE")}>Forçar (Ignorar)</button>
@@ -335,6 +352,121 @@ export default function ResumoFaturamento({
                     })}
                 </div>
             </div>
+
+            {/* Triagem de Ajustes por UF */}
+            {sortedUFs.length > 0 && (
+                <div className="bg-[var(--bg-sidebar)] border border-[var(--border)] rounded-2xl overflow-hidden mt-6">
+                    <div className="px-6 py-5 border-b border-[var(--border)] bg-[rgba(0,0,0,0.2)] flex items-center justify-between">
+                        <div>
+                            <h3 className="text-lg font-bold text-[var(--fg)]">Triagem de Ajustes por UF</h3>
+                            <p className="text-sm text-[var(--fg-dim)] mt-1">
+                                FHC &lt; 0.17h ou FHC &gt; 6h agrupados por Estado.
+                            </p>
+                        </div>
+                        <div className="px-3 py-1 bg-[var(--danger)]/10 text-[var(--danger)] font-bold rounded flex items-center gap-2 text-sm border border-[var(--danger)]/20 shadow-sm">
+                            <AlertTriangle size={16} /> {listAjustesUF.length} Ajustes Pendentes
+                        </div>
+                    </div>
+
+                    <div className="divide-y divide-[var(--border)]">
+                        {sortedUFs.map(uf => {
+                            const items = ajustesPorUF[uf];
+                            const isOpen = openUFs[uf];
+                            return (
+                                <div key={uf} className="flex flex-col border-l-4 border-l-amber-500 transition-colors">
+                                    <div
+                                        className={`p-5 flex items-center justify-between hover:bg-[var(--bg-card-hover)] cursor-pointer select-none transition-colors ${isOpen ? 'bg-[rgba(0,0,0,0.1)]' : ''}`}
+                                        onClick={() => toggleUF(uf)}
+                                    >
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center font-bold text-amber-500 border border-amber-500/20">
+                                                {uf}
+                                            </div>
+                                            <div>
+                                                <h4 className="font-bold text-[var(--fg)]">Estado: {uf}</h4>
+                                                <p className="text-xs text-[var(--fg-dim)]">{items.length} agendamento(s) exigem conferência.</p>
+                                            </div>
+                                        </div>
+                                        <ChevronDown size={20} className={`text-[var(--fg-dim)] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                                    </div>
+
+                                    {isOpen && (
+                                        <div className="bg-[var(--bg-card)] border-t border-[var(--border)] p-4 max-h-[600px] overflow-y-auto">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                {items.map(a => (
+                                                    <div key={a.id} className="flex flex-col p-4 rounded-xl border border-[var(--border)] bg-[rgba(255,255,255,0.02)] gap-3 relative overflow-hidden group shadow-sm hover:shadow-md transition-shadow">
+                                                        <div className="flex items-start justify-between">
+                                                            <div>
+                                                                <p className="font-bold text-[var(--fg)] text-sm pr-12 line-clamp-1" title={a.nome}>{a.nome}</p>
+                                                                <p className="text-xs text-[var(--fg-dim)] truncate mt-0.5">{a.loja} • {a.vaga}</p>
+                                                            </div>
+                                                            {a.status === "CANCELAR" ? (
+                                                                <span className="text-[10px] font-bold px-2 py-1 bg-[var(--danger)]/10 text-[var(--danger)] rounded border border-[var(--danger)]/20 absolute top-4 right-4 shadow-sm">CANCELAR</span>
+                                                            ) : (
+                                                                <span className="text-[10px] font-bold px-2 py-1 bg-amber-500/10 text-amber-500 rounded border border-amber-500/20 absolute top-4 right-4 shadow-sm">CORREÇÃO</span>
+                                                            )}
+                                                        </div>
+
+                                                        <div className="grid grid-cols-2 gap-2 text-xs bg-[var(--bg-sidebar)] p-2.5 rounded-lg border border-[var(--border)]">
+                                                            <div>
+                                                                <span className="text-[var(--fg-dim)] block text-[9px] font-semibold uppercase tracking-wider mb-0.5">Planejado</span>
+                                                                <span className="text-[var(--fg)] font-medium block leading-tight">{a.inicio?.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) || '--:--'} às {a.termino?.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) || '--:--'}</span>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-[var(--fg-dim)] block text-[9px] font-semibold uppercase tracking-wider mb-0.5">Realizado</span>
+                                                                <span className="text-[var(--fg)] font-medium block leading-tight">{a.iniciadoEm?.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) || '--:--'} às {a.concluidoEm?.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) || '--:--'}</span>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex items-center justify-between mt-1">
+                                                            <div className="flex gap-4">
+                                                                <div>
+                                                                    <span className="text-[var(--fg-dim)] block text-[9px] font-semibold uppercase tracking-wider mb-0.5">FHC</span>
+                                                                    <span className={`font-mono font-bold text-xs ${a.fracaoHora < 0.17 ? 'text-[var(--danger)]' : 'text-amber-500'}`}>{a.fracaoHora.toFixed(2)}h</span>
+                                                                </div>
+                                                                <div>
+                                                                    <span className="text-[var(--fg-dim)] block text-[9px] font-semibold uppercase tracking-wider mb-0.5">Bruto</span>
+                                                                    <span className="font-mono font-bold text-xs text-[var(--fg)]">{fmtCurrency(a.valorIwof)}</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex gap-2 w-full pt-1 border-t border-[var(--border)] mt-1">
+                                                            {a.status === "CORREÇÃO" ? (
+                                                                <>
+                                                                    <button className="btn btn-sm btn-ghost hover:bg-[var(--danger)] hover:text-white text-[var(--danger)] flex-1 text-xs" onClick={() => handleActionItem(a.id, "REMOVE")}>Remover</button>
+                                                                    <button className="btn btn-sm bg-[var(--accent)] text-white font-bold border-none flex-1 text-xs" onClick={() => handleActionItem(a.id, "APPROVE", a.suggestedValorIwof)}>Aprovar ({fmtCurrency(a.suggestedValorIwof || 0)})</button>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <button className="btn btn-sm btn-ghost text-[var(--success)] border border-[var(--success)]/20 flex-1 text-[11px] font-semibold" onClick={() => handleActionItem(a.id, "RESTORE")}>Forçar</button>
+                                                                    <button className="btn btn-sm bg-[var(--danger)] text-white font-bold border-none flex-1 text-[11px]" onClick={() => handleActionItem(a.id, "REMOVE")}>Zerar</button>
+                                                                </>
+                                                            )}
+                                                        </div>
+
+                                                        {/* Link to Audit User */}
+                                                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none group-hover:pointer-events-auto">
+                                                            <a
+                                                                href={`https://sistema.iwof.com.br/admin/profissionais?search=${encodeURIComponent(a.nome)}`}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="text-xs font-bold text-[var(--bg-card)] bg-[var(--fg)] shadow-lg px-4 py-2 rounded-full hover:scale-105 transition-transform"
+                                                            >
+                                                                Auditar Profissional
+                                                            </a>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
 
             {/* Conciliation / Perdas Board */}
             <div className="bg-[var(--bg-sidebar)] border border-[var(--border)] rounded-2xl overflow-hidden mt-2">
