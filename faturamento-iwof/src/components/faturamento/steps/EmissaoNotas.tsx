@@ -170,13 +170,16 @@ export default function EmissaoNotas({
         try {
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(xmlText, "text/xml");
-            const numero = xmlDoc.getElementsByTagName("Numero")[0]?.textContent || xmlDoc.getElementsByTagName("numero")[0]?.textContent || "";
+            // Focus on InfNfse or IdentificacaoNfse to get the actual invoice number, not the Lot number
+            const nfseInfo = xmlDoc.getElementsByTagName("InfNfse")[0] || xmlDoc.getElementsByTagName("infNfse")[0] || xmlDoc.getElementsByTagName("IdentificacaoNfse")[0] || xmlDoc;
+            const numero = nfseInfo.getElementsByTagName("Numero")[0]?.textContent || nfseInfo.getElementsByTagName("numero")[0]?.textContent || "";
+
             const valorIrStr = xmlDoc.getElementsByTagName("ValorIr")[0]?.textContent || xmlDoc.getElementsByTagName("valor_ir")[0]?.textContent || "0";
 
             // Search specifically for Tomador/Recipient CNPJ
-            const tomadorNode = xmlDoc.getElementsByTagName("TomadorServico")[0] || xmlDoc.getElementsByTagName("tomador_servico")[0] || xmlDoc.getElementsByTagName("Tomador")[0];
+            const tomadorNode = xmlDoc.getElementsByTagName("TomadorServico")[0] || xmlDoc.getElementsByTagName("tomador_servico")[0] || xmlDoc.getElementsByTagName("Tomador")[0] || xmlDoc.getElementsByTagName("dest")[0];
             const cnpjTomador = tomadorNode
-                ? (tomadorNode.getElementsByTagName("Cnpj")[0]?.textContent || tomadorNode.getElementsByTagName("cnpj")[0]?.textContent || "")
+                ? (tomadorNode.getElementsByTagName("Cnpj")[0]?.textContent || tomadorNode.getElementsByTagName("cnpj")[0]?.textContent || tomadorNode.getElementsByTagName("CPF")[0]?.textContent || "")
                 : (xmlDoc.getElementsByTagName("Cnpj")[1]?.textContent || xmlDoc.getElementsByTagName("Cnpj")[0]?.textContent || "");
 
             const valorServicosStr = xmlDoc.getElementsByTagName("ValorServicos")[0]?.textContent || xmlDoc.getElementsByTagName("valor_servicos")[0]?.textContent || "0";
