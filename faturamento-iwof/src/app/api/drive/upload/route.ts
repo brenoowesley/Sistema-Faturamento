@@ -74,48 +74,59 @@ export async function POST(request: Request) {
         const rootFolderId = getRootFolderId();
 
         if (!rootFolderId) {
-            console.error("ERRO: Variáveis DRIVE_FOLDER_ID ou DRIVE_FOLDER_URL ausentes.");
+            console.error("ERRO: Variável de ambiente DRIVE_ROOT_FOLDER_ID ou similar ausente.");
             return NextResponse.json(
-                { success: false, error: "A variável do Google Drive (URL ou ID) não está configurada no servidor." },
+                { success: false, error: "Google Drive Root Folder não configurado." },
                 { status: 500 }
             );
         }
 
         const formData = await request.formData();
-        const loteId = formData.get('loteId') as string;
-        const consolidadoId = formData.get('consolidadoId') as string;
-        const docType = formData.get('docType') as string;
-        const storeName = formData.get('storeName') as string;
-        const cycleName = formData.get('cycleName') as string;
+        const metadataStr = formData.get('metadata') as string;
+        if (!metadataStr) throw new Error("Metadados não fornecidos.");
 
-        const entries = formData.getAll('file').length > 0 ? formData.getAll('file') : formData.getAll('files');
+        const metadataArray = JSON.parse(metadataStr);
+        const entries = formData.getAll('files');
         const files = entries as File[];
 
-        if (!loteId) throw new Error("ID do Lote não fornecido.");
         if (!files || files.length === 0) throw new Error("Nenhum arquivo recebido.");
 
-        console.log(`[Next.js API] Upload para Lote ${loteId} | Consolidado: ${consolidadoId || 'Geral'} | Tipo: ${docType || 'N/A'}`);
+        console.log(`[Drive API] Processando lote de ${files.length} arquivos.`);
 
-        // 3. Hierarquia Dinâmica de Pastas
-        const now = new Date();
-        const year = now.getFullYear().toString();
-        const month = (now.getMonth() + 1).toString().padStart(2, '0');
-
-        // Define os segmentos da hierarquia
-        const segments = [year, month, storeName, cycleName].filter(Boolean);
-        const finalFolderId = await findOrCreatePath(rootFolderId, segments);
-
-        if (!finalFolderId) throw new Error("Falha ao obter o Folder ID final no Google Drive");
-
-        // 4. Processamento de Uploads
         const { Readable } = require('stream');
         const results = [];
 
-        for (const file of files) {
+        // Cache de IDs de pastas para evitar chamadas duplicadas na mesma requisição
+        const folderCache: Record<string, string> = {};
+
+        for (const meta of metadataArray) {
+            const file = files.find(f => f.name === meta.filename);
+            if (!file) {
+                console.warn(`Arquivo ${meta.filename} não encontrado no FormData.`);
+                continue;
+            }
+
+            // 1. Construir árvore de pastas: [Ano] -> [Mês] -> [Empresa] -> [Ciclo]
+            const segments = [
+                meta.ano,
+                meta.mes,
+                meta.nome_conta_azul,
+                meta.ciclo
+            ].map(s => String(s || "Indefinido").trim());
+
+            const cacheKey = segments.join('/');
+            let targetFolderId = folderCache[cacheKey];
+
+            if (!targetFolderId) {
+                targetFolderId = await findOrCreatePath(rootFolderId, segments);
+                folderCache[cacheKey] = targetFolderId;
+            }
+
+            // 2. Upload para o Drive
             const buffer = Buffer.from(await file.arrayBuffer());
             const fileMetadata = {
                 name: file.name,
-                parents: [finalFolderId as string]
+                parents: [targetFolderId]
             };
             const media = {
                 mimeType: file.type || 'application/pdf',
@@ -132,13 +143,13 @@ export async function POST(request: Request) {
             const driveId = driveRes.data.id;
             results.push({ name: file.name, driveId });
 
-            // 5. Feedback Loop p/ Supabase (Se houver consolidadoId)
-            if (consolidadoId && driveId && docType) {
+            // 3. Feedback Loop p/ Supabase
+            if (meta.consolidadoId && driveId) {
                 const updateData: any = {};
-                if (docType === 'nf') {
+                if (meta.docType === 'nf') {
                     updateData.drive_id_nf = driveId;
                     updateData.status_drive_nf = 'SINCRONIZADO';
-                } else if (docType === 'hc') {
+                } else if (meta.docType === 'hc' || meta.docType === 'boleto') {
                     updateData.drive_id_hc = driveId;
                     updateData.status_drive_hc = 'SINCRONIZADO';
                 }
@@ -146,9 +157,9 @@ export async function POST(request: Request) {
                 const { error: upErr } = await supabaseAdmin
                     .from('faturamento_consolidados')
                     .update(updateData)
-                    .eq('id', consolidadoId);
+                    .eq('id', meta.consolidadoId);
 
-                if (upErr) console.error(`[Supabase Feedback Error] ${consolidadoId}:`, upErr);
+                if (upErr) console.error(`[Supabase Error] ${meta.consolidadoId}:`, upErr);
             }
         }
 

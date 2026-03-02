@@ -56,63 +56,43 @@ export default function FechamentoLote({
     const [activeModal, setActiveModal] = useState<string | null>(null);
     const [filterStatus, setFilterStatus] = useState<string>("TODAS");
     const [dbConsolidados, setDbConsolidados] = useState<Record<string, string>>({}); // uniqueKey -> consolidadoId
+    const [existingConsolidados, setExistingConsolidados] = useState<any[]>([]);
 
     const boletosInputRef = useRef<HTMLInputElement>(null);
     const nfsInputRef = useRef<HTMLInputElement>(null);
-    const [xmlParsedData, setXmlParsedData] = useState<Record<string, { cnpj: string | null; cnpjPrestador: string | null; irrf: number }>>({});
 
     // Manual Mapping for Orphans
     const [manualMappings, setManualMappings] = useState<Record<string, { consolidadoId: string; type: 'nfse' | 'boleto' }>>({});
 
     useEffect(() => {
-        console.log("🔍 LoteId recebido no Passo 5 (Props):", loteId, " | SaveResult:", saveResult?.loteId);
-    }, [loteId, saveResult]);
+        const fetchExisting = async () => {
+            const currentLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
+            if (!currentLoteId) return;
 
-    useEffect(() => {
-        const parseXmls = async () => {
-            const newParsedMap = { ...xmlParsedData };
-            let hasChanges = false;
+            const { data, error } = await supabase
+                .from('faturamento_consolidados')
+                .select('*')
+                .eq('lote_id', currentLoteId);
 
-            for (const fileObj of nfseFiles) {
-                if (fileObj.name.toLowerCase().endsWith('.xml')) {
-                    try {
-                        const textDecoder = new TextDecoder('utf-8');
-                        const xmlString = textDecoder.decode(fileObj.buffer);
-                        const parser = new DOMParser();
-                        const xmlDoc = parser.parseFromString(xmlString, "application/xml");
+            if (!error && data) {
+                setExistingConsolidados(data);
+                setIsLoteConsolidado(true);
 
-                        const numeroElement = xmlDoc.querySelector("Numero") || xmlDoc.querySelector("nNF");
-                        const numeroNF = numeroElement ? numeroElement.textContent?.trim() : null;
-
-                        const tomadorElement = xmlDoc.querySelector("Tomador") || xmlDoc.querySelector("TomadorServico");
-                        const cnpjElement = tomadorElement ? tomadorElement.querySelector("Cnpj") || tomadorElement.querySelector("CNPJ") : null;
-                        const cnpjTomador = cnpjElement ? cnpjElement.textContent?.replace(/\D/g, '') : null;
-
-                        const irrfElement = xmlDoc.querySelector("ValorIr") || xmlDoc.querySelector("vIRRF");
-                        const valorIRRF = irrfElement ? parseFloat(irrfElement.textContent?.trim() || "0") : 0;
-
-                        // Extrair CNPJ do Prestador (A filial que emitiu a nota)
-                        const prestadorElement = xmlDoc.querySelector("Prestador") || xmlDoc.querySelector("PrestadorServico");
-                        const cnpjPrestadorElement = prestadorElement ? (prestadorElement.querySelector("Cnpj") || prestadorElement.querySelector("CNPJ")) : null;
-                        const cnpjPrestador = cnpjPrestadorElement ? cnpjPrestadorElement.textContent?.replace(/\D/g, '') : null;
-
-                        if (numeroNF && (!newParsedMap[numeroNF] || newParsedMap[numeroNF].cnpj !== cnpjTomador)) {
-                            newParsedMap[numeroNF] = { cnpj: cnpjTomador || null, cnpjPrestador: cnpjPrestador || null, irrf: valorIRRF };
-                            hasChanges = true;
-                        }
-                    } catch (err) {
-                        console.error("Failed parsing XML:", fileObj.name, err);
-                    }
-                }
-            }
-            if (hasChanges) {
-                setXmlParsedData(newParsedMap);
+                // Also populate dbConsolidados map for upload handlers
+                const idMap: Record<string, string> = {};
+                data.forEach(row => {
+                    const client = agendamentos.find(v => v.clienteId === row.cliente_id);
+                    const isQueiroz = client?.loja.includes('(Mês Anterior)') || client?.loja.includes('(Mês Atual)');
+                    const key = isQueiroz ? `${row.cliente_id}_${client?.loja}` : (row.cliente_id || "");
+                    idMap[key] = row.id;
+                });
+                setDbConsolidados(idMap);
             }
         };
 
-        parseXmls();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [nfseFiles]);
+        fetchExisting();
+    }, [loteId, saveResult, agendamentos]);
+
 
     interface StoreData {
         consolidadoId: string;
@@ -128,6 +108,8 @@ export default function FechamentoLote({
         data_competencia?: string;
         ciclo: string;
         numero_nf?: string | null;
+        descontoIR: number;
+        cnpjFilial?: string | null;
     }
 
     const matchFiles = useMemo(() => {
@@ -153,7 +135,8 @@ export default function FechamentoLote({
                     cnpj: a.cnpj?.replace(/\D/g, ''),
                     data_competencia: a.data_competencia || a.dataCompetencia,
                     ciclo: (a as any).ciclo || "-", // Captura o ciclo para a hierarquia do Drive
-                    numero_nf: (a as any).numero_nf || (a as any).numeroNF, // Preserva numero_nf se vier de faturamento_consolidados
+                    numero_nf: null,
+                    descontoIR: 0,
                     valorBase: 0,
                     totalFaturar: 0,
                     valorAcrescimos: 0,
@@ -162,6 +145,22 @@ export default function FechamentoLote({
             }
 
             const lojaEntry = lojasUnicas.get(uniqueKey)!;
+
+            // Try to find if we already have this in Supabase
+            const existing = existingConsolidados.find(ec =>
+                ec.cliente_id === a.clienteId &&
+                (!lojaEntry.data_competencia || ec.data_competencia?.slice(0, 7) === lojaEntry.data_competencia?.slice(0, 7))
+            );
+
+            if (existing) {
+                lojaEntry.numero_nf = existing.numero_nf;
+                lojaEntry.descontoIR = existing.valor_irrf || 0;
+                lojaEntry.cnpjFilial = existing.cnpj_filial || null;
+                // Preserve ciclo if coming from existing
+                if ((existing as any).ciclo) {
+                    lojaEntry.ciclo = (existing as any).ciclo;
+                }
+            }
             const baseVal = a.originalValorIwof ?? a.valorIwof;
             const finalVal = a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof);
 
@@ -179,17 +178,23 @@ export default function FechamentoLote({
             let statusNF: 'PENDENTE' | 'EMITIDA' = 'PENDENTE';
             let nfseMatch = null;
 
+            // 0. Manual Mapping Priority (NFSE)
+            const manualNF = Object.entries(manualMappings).find(([name, m]) => m.consolidadoId === loja.consolidadoId && m.type === 'nfse');
+            if (manualNF) {
+                nfseMatch = nfseFiles.find(f => f.name === manualNF[0]) || null;
+            }
+
             // 1. SMART MATCH NF BY NUMBER extracted from PDF filename
-            // User rule: Extraia o número numérico do nome do arquivo (ex: 1234-nfse.pdf -> 1234)
-            if (loja.numero_nf) {
+            if (!nfseMatch && loja.numero_nf) {
                 nfseMatch = nfseFiles.find(f => {
                     const extractedNum = f.name.match(/\d+/)?.[0];
                     return f.name.toLowerCase().endsWith(".pdf") && extractedNum === loja.numero_nf;
                 }) || null;
+            }
 
-                if (nfseMatch) {
-                    statusNF = 'EMITIDA';
-                }
+            if (nfseMatch) {
+                statusNF = 'EMITIDA';
+                matchedNfseNames.add(nfseMatch.name);
             }
 
             // Fallback: manual mapping for NF
@@ -201,15 +206,13 @@ export default function FechamentoLote({
                 }
             }
 
-            const xmlData = loja.numero_nf ? xmlParsedData[loja.numero_nf] : null;
-
             return {
                 ...loja,
                 nfse: nfseMatch,
                 statusNF,
                 numeroNF: loja.numero_nf,
-                descontoIR: xmlData?.irrf || 0,
-                cnpjFilial: xmlData?.cnpjPrestador || null
+                descontoIR: loja.descontoIR,
+                cnpjFilial: loja.cnpjFilial
             };
         });
 
@@ -233,10 +236,14 @@ export default function FechamentoLote({
             const normalizedStoreName = normalizarNome(report.nomeContaAzul);
             const normalizedRazao = normalizarNome(report.razaoSocial);
 
+            // SEQUENTIAL ALLOCATION (Senior Rule): find the first available boleto that matches the store
             const boletoMatch = boletoFiles.find(f => {
                 if (matchedBoletoNames.has(f.name)) return false;
-                if (!f.name.toLowerCase().endsWith(".pdf")) return false; // Somente PDFs
+                if (!f.name.toLowerCase().endsWith(".pdf")) return false; // PDF only (Senior Rule)
+
+                // Normalization Rule: replace _, remove ', remove accents, lowercase
                 const normalizedFile = normalizarNome(f.name.replace(/\.pdf$/i, ""));
+
                 return normalizedFile === normalizedStoreName || normalizedFile === normalizedRazao ||
                     normalizedFile.includes(normalizedStoreName) || normalizedStoreName.includes(normalizedFile);
             });
@@ -263,7 +270,7 @@ export default function FechamentoLote({
         });
 
         return { reports: finalReports, orphanNfses, orphanBoletos };
-    }, [agendamentos, nfseFiles, boletoFiles, xmlParsedData, actionState.ncsSuccess, manualMappings]);
+    }, [agendamentos, nfseFiles, boletoFiles, actionState.ncsSuccess, manualMappings]);
 
     const handleConsolidarLote = async () => {
         try {
@@ -476,26 +483,41 @@ export default function FechamentoLote({
     const handleUploadBoletos = async () => {
         setLoadingMap(p => ({ ...p, "boletosSuccess": true }));
         try {
-            let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
+            const targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
             if (!targetLoteId) throw new Error("Falha ao encontrar o lote.");
 
-            const uploadBatch = matchFiles.reports
-                .filter(r => r.boleto)
-                .map(async r => {
-                    const formData = new FormData();
-                    formData.append("loteId", targetLoteId!);
-                    const dbId = dbConsolidados[r.id] || r.consolidadoId;
-                    formData.append("consolidadoId", dbId);
-                    formData.append("docType", "hc");
-                    formData.append("storeName", r.nomeContaAzul || r.razaoSocial || r.nome);
-                    formData.append("cycleName", (r as any).ciclo || "Geral");
-                    formData.append("file", r.boleto!.file, r.boleto!.name);
+            const formData = new FormData();
+            formData.append("loteId", targetLoteId);
 
-                    const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
-                    if (!res.ok) throw new Error(`Erro enviando boleto de ${r.nome}`);
-                });
+            const metadataArray: any[] = [];
+            const [ano, mes] = (periodoInicio || "").split("-");
 
-            await Promise.all(uploadBatch);
+            for (const r of matchFiles.reports) {
+                if (r.boleto) {
+                    formData.append("files", r.boleto.file, r.boleto.name);
+                    metadataArray.push({
+                        filename: r.boleto.name,
+                        clienteId: r.id,
+                        consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
+                        nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
+                        ciclo: r.ciclo || "Geral",
+                        ano: ano || new Date().getFullYear().toString(),
+                        mes: mes || (new Date().getMonth() + 1).toString().padStart(2, '0'),
+                        docType: "hc"
+                    });
+                }
+            }
+
+            if (metadataArray.length === 0) {
+                alert("Nenhum boleto pareado para upload.");
+                return;
+            }
+
+            formData.append("metadata", JSON.stringify(metadataArray));
+
+            const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
+            if (!res.ok) throw new Error("Erro no upload dos boletos.");
+
             setActionState(p => ({ ...p, boletosSuccess: true }));
             alert("Boletos enviados e vinculados com sucesso!");
         } catch (error: any) {
@@ -510,26 +532,42 @@ export default function FechamentoLote({
     const handleUploadNfs = async () => {
         setLoadingMap(p => ({ ...p, "nfsSuccess": true }));
         try {
-            let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
+            const targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
             if (!targetLoteId) throw new Error("Falha ao encontrar o lote.");
 
-            const uploadBatch = matchFiles.reports
-                .filter(r => r.nfse)
-                .map(async r => {
-                    const formData = new FormData();
-                    formData.append("loteId", targetLoteId!);
-                    const dbId = dbConsolidados[r.id] || r.consolidadoId;
-                    formData.append("consolidadoId", dbId);
-                    formData.append("docType", "nf");
-                    formData.append("storeName", r.nomeContaAzul || r.razaoSocial || r.nome);
-                    formData.append("cycleName", (r as any).ciclo || "Geral");
-                    formData.append("file", r.nfse!.blob, r.nfse!.name);
+            const formData = new FormData();
+            formData.append("loteId", targetLoteId);
 
-                    const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
-                    if (!res.ok) throw new Error(`Erro enviando NF de ${r.nome}`);
-                });
+            const metadataArray: any[] = [];
+            const [ano, mes] = (periodoInicio || "").split("-");
 
-            await Promise.all(uploadBatch);
+            for (const r of matchFiles.reports) {
+                if (r.nfse) {
+                    const file = new File([r.nfse.blob], r.nfse.name, { type: "application/pdf" });
+                    formData.append("files", file, r.nfse.name);
+                    metadataArray.push({
+                        filename: r.nfse.name,
+                        clienteId: r.id,
+                        consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
+                        nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
+                        ciclo: r.ciclo || "Geral",
+                        ano: ano || new Date().getFullYear().toString(),
+                        mes: mes || (new Date().getMonth() + 1).toString().padStart(2, '0'),
+                        docType: "nf"
+                    });
+                }
+            }
+
+            if (metadataArray.length === 0) {
+                alert("Nenhuma NF pareada para upload.");
+                return;
+            }
+
+            formData.append("metadata", JSON.stringify(metadataArray));
+
+            const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
+            if (!res.ok) throw new Error("Erro no upload das NFs.");
+
             setActionState(p => ({ ...p, nfsSuccess: true }));
             alert("Notas Fiscais enviadas e vinculadas com sucesso!");
         } catch (error: any) {
@@ -1030,6 +1068,7 @@ export default function FechamentoLote({
                                             <span className="text-xs font-mono font-bold truncate text-[var(--fg)]">{file.name}</span>
                                             <select
                                                 className="select select-xs bg-[var(--bg-card)] border-[var(--border)] text-[11px]"
+                                                value={manualMappings[file.name]?.consolidadoId || ""}
                                                 onChange={(e) => {
                                                     if (e.target.value) {
                                                         setManualMappings(prev => ({ ...prev, [file.name]: { consolidadoId: e.target.value, type: 'nfse' } }));
@@ -1038,7 +1077,7 @@ export default function FechamentoLote({
                                             >
                                                 <option value="">Vincular a uma loja...</option>
                                                 {matchFiles.reports.map(r => (
-                                                    <option key={r.consolidadoId} value={r.consolidadoId}>{r.nome} ({r.numeroNF || 'Sem NF'})</option>
+                                                    <option key={r.id + r.nome} value={r.consolidadoId}>{r.nome} ({r.numeroNF || 'Sem NF'})</option>
                                                 ))}
                                             </select>
                                         </div>
@@ -1057,6 +1096,7 @@ export default function FechamentoLote({
                                             <span className="text-xs font-mono font-bold truncate text-[var(--fg)]">{file.name}</span>
                                             <select
                                                 className="select select-xs bg-[var(--bg-card)] border-[var(--border)] text-[11px]"
+                                                value={manualMappings[file.name]?.consolidadoId || ""}
                                                 onChange={(e) => {
                                                     if (e.target.value) {
                                                         setManualMappings(prev => ({ ...prev, [file.name]: { consolidadoId: e.target.value, type: 'boleto' } }));
@@ -1065,7 +1105,7 @@ export default function FechamentoLote({
                                             >
                                                 <option value="">Vincular a uma loja...</option>
                                                 {matchFiles.reports.map(r => (
-                                                    <option key={r.consolidadoId} value={r.consolidadoId}>{r.nome} ({fmtCurrency(r.totalFaturar)})</option>
+                                                    <option key={r.id + r.nome} value={r.consolidadoId}>{r.nome} ({fmtCurrency(r.totalFaturar)})</option>
                                                 ))}
                                             </select>
                                         </div>
@@ -1074,8 +1114,22 @@ export default function FechamentoLote({
                             </div>
                         )}
                     </div>
+
+                    <div className="mt-8 flex justify-center border-t border-amber-500/20 pt-6">
+                        <button
+                            onClick={async () => {
+                                await handleUploadNfs();
+                                await handleUploadBoletos();
+                            }}
+                            disabled={!isLoteConsolidado || loadingMap["boletosSuccess"] || loadingMap["nfsSuccess"]}
+                            className="btn btn-primary btn-lg shadow-lg hover:shadow-amber-500/20 gap-3 px-12"
+                        >
+                            <Send size={20} />
+                            {loadingMap["boletosSuccess"] || loadingMap["nfsSuccess"] ? "Enviando para o Drive..." : "Confirmar e Enviar Todos para o Drive"}
+                        </button>
+                    </div>
                 </div>
             )}
-        </div >
+        </div>
     );
 }
