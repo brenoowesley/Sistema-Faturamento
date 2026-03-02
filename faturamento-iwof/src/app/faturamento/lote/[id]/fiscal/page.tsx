@@ -59,6 +59,9 @@ interface LojaConsolidada {
     descontos: number;
     ajustesDetalhes: AjusteItem[];
     loja_mae_id?: string | null;
+    loja_id_real: string;
+    ciclo: string;
+    active?: boolean;
     children?: any[];
     // Drive Observability
     drive_id_nf?: string;
@@ -492,7 +495,7 @@ export default function FiscalProcessingPage() {
                         status_drive_hc: a.status_drive_hc,
                         error_drive_nf: a.error_drive_nf,
                         error_drive_hc: a.error_drive_hc
-                    } as LojaConsolidada & { loja_id_real: string; ciclo: string });
+                    });
                 } else {
                     const store = consolidatedMap.get(uniqueKey)!;
                     store.valorBruto += (a.valorBruto || 0);
@@ -517,7 +520,7 @@ export default function FiscalProcessingPage() {
 
             const finalMapping = new Map<string, any>();
             Array.from(consolidatedMap.values()).forEach(st => {
-                const cicloNome: string = (st as any).ciclo || "";
+                const cicloNome: string = st.ciclo || "";
                 const nomeContaAzul: string = (st.nome_conta_azul || "").toUpperCase();
                 const isLeta = cicloNome.toUpperCase().includes("LETA") || nomeContaAzul.includes("LETA") || nomeContaAzul.includes("ARCO-MIX");
                 const targetKey = (isLeta && st.loja_mae_id) ? st.loja_mae_id : st.loja_id_real;
