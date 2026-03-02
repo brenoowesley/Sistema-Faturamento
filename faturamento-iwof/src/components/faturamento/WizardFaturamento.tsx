@@ -393,32 +393,39 @@ export default function WizardFaturamento() {
         const dataCompetencia = periodoInicio || new Date().toISOString().split("T")[0];
 
         for (const a of parsed) {
-            // 1. Valores padrão para 99% das lojas (Fluxo Normal)
-            let compAtribuida = dataCompetencia;
-            let nomeLojaAtribuida = a.loja;
+            // 1. Valores padrão INTACTOS para as lojas normais
+            let nomeLojaAtribuida = a.loja; // Mantém o nome original
+            let compAtribuida = undefined; // NÃO preenche para outras lojas
 
-            // 2. Barreira de Proteção: Apenas executa o split se for ciclo QUEIROZ
-            const isLinhaQueiroz = a.cicloNome && a.cicloNome.toUpperCase().includes('QUEIROZ');
+            // 2. Barreira de Proteção: Identifica o Queiroz pelo NOME DA LOJA (string)
+            const isLinhaQueiroz = nomeLojaAtribuida.toUpperCase().includes('QUEIROZ');
 
             if (isQueirozSelected && splitDate && isLinhaQueiroz && a.inicio) {
-                const dataInicioAgend = new Date(a.inicio);
-                const dataCorte = new Date(splitDate + "T23:59:59");
+                // Resolve o Fuso Horário extraindo apenas a data (YYYY-MM-DD)
+                const dataInicioFormatada = new Date(a.inicio).toISOString().split('T')[0];
 
-                if (dataInicioAgend <= dataCorte) {
-                    compAtribuida = compAnterior || dataCompetencia;
+                if (dataInicioFormatada <= splitDate) {
+                    compAtribuida = compAnterior;
                     nomeLojaAtribuida = `${a.loja} (Mês Anterior)`;
                 } else {
-                    compAtribuida = compAtual || dataCompetencia;
+                    compAtribuida = compAtual;
                     nomeLojaAtribuida = `${a.loja} (Mês Atual)`;
                 }
             }
 
-            finalParsed.push({
+            // 3. Monta o objeto final. Só injeta a data de competência se ela foi definida (Queiroz).
+            const agendamentoFinal: Agendamento = {
                 ...a,
-                loja: nomeLojaAtribuida,
-                data_competencia: compAtribuida,
-                rawRow: { ...a.rawRow, data_competencia: compAtribuida }
-            });
+                loja: nomeLojaAtribuida
+            };
+
+            if (compAtribuida) {
+                agendamentoFinal.data_competencia = compAtribuida;
+                agendamentoFinal.dataCompetencia = compAtribuida;
+                agendamentoFinal.rawRow = { ...a.rawRow, data_competencia: compAtribuida };
+            }
+
+            finalParsed.push(agendamentoFinal);
         }
 
         const identicalMap: Map<string, Agendamento[]> = new Map();

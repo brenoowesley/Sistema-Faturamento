@@ -118,6 +118,7 @@ export default function FechamentoLote({
         );
 
         const lojasUnicas = new Map<string, { nome: string; id: string; razaoSocial: string; cnpj: string | undefined; totalFaturar: number; valorBase: number; valorAcrescimos: number; valorDescontos: number; data_competencia?: string }>();
+
         for (const a of validados) {
             // Verifica se a loja atual passou pelo processo de split do Queiroz no Passo 1
             const isQueirozSplit = a.loja.includes('(Mês Anterior)') || a.loja.includes('(Mês Atual)');
@@ -130,10 +131,10 @@ export default function FechamentoLote({
             if (!lojasUnicas.has(uniqueKey)) {
                 lojasUnicas.set(uniqueKey, {
                     id: a.clienteId!,
-                    nome: a.loja, // Mantém o sufixo (Mês Atual)/(Mês Anterior)
+                    nome: a.loja, // Preserva o nome original ou o nome com sufixo
                     razaoSocial: a.razaoSocial || a.loja,
                     cnpj: a.cnpj?.replace(/\D/g, ''),
-                    data_competencia: a.data_competencia,
+                    data_competencia: a.data_competencia || a.dataCompetencia, // Puxa a competência injetada
                     totalFaturar: 0,
                     valorBase: 0,
                     valorAcrescimos: 0,
