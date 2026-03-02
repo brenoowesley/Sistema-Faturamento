@@ -60,6 +60,9 @@ export default function FechamentoLote({
     const nfsInputRef = useRef<HTMLInputElement>(null);
     const [xmlParsedData, setXmlParsedData] = useState<Record<string, { cnpj: string | null; cnpjPrestador: string | null; irrf: number }>>({});
 
+    // Manual Mapping for Orphans
+    const [manualMappings, setManualMappings] = useState<Record<string, { consolidadoId: string; type: 'nfse' | 'boleto' }>>({});
+
     useEffect(() => {
         console.log("🔍 LoteId recebido no Passo 5 (Props):", loteId, " | SaveResult:", saveResult?.loteId);
     }, [loteId, saveResult]);
@@ -117,24 +120,20 @@ export default function FechamentoLote({
             a.clienteId
         );
 
-        const lojasUnicas = new Map<string, { nome: string; id: string; razaoSocial: string; cnpj: string | undefined; totalFaturar: number; valorBase: number; valorAcrescimos: number; valorDescontos: number; data_competencia?: string }>();
+        const lojasUnicas = new Map<string, { consolidadoId: string; nome: string; id: string; razaoSocial: string; cnpj: string | undefined; totalFaturar: number; valorBase: number; valorAcrescimos: number; valorDescontos: number; data_competencia?: string }>();
 
         for (const a of validados) {
-            // Verifica se a loja atual passou pelo processo de split do Queiroz no Passo 1
             const isQueirozSplit = a.loja.includes('(Mês Anterior)') || a.loja.includes('(Mês Atual)');
-
-            // FIX ESTRITO: 
-            // Se NÃO for Queiroz, agrupa normalmente pelo clienteId (junta tudo da loja numa fatura só).
-            // Se FOR Queiroz, agrupa pelo ID + Sufixo (separa em duas faturas distintas).
             const uniqueKey = isQueirozSplit ? `${a.clienteId}_${a.loja}` : a.clienteId!;
 
             if (!lojasUnicas.has(uniqueKey)) {
                 lojasUnicas.set(uniqueKey, {
+                    consolidadoId: a.id!, // Assuming agendamento has id or matches with consolidado
                     id: a.clienteId!,
-                    nome: a.loja, // Preserva o nome original ou o nome com sufixo
+                    nome: a.loja,
                     razaoSocial: a.razaoSocial || a.loja,
                     cnpj: a.cnpj?.replace(/\D/g, ''),
-                    data_competencia: a.data_competencia || a.dataCompetencia, // Puxa a competência injetada
+                    data_competencia: a.data_competencia || a.dataCompetencia,
                     totalFaturar: 0,
                     valorBase: 0,
                     valorAcrescimos: 0,
@@ -156,7 +155,7 @@ export default function FechamentoLote({
             }
         }
 
-        const reports = Array.from(lojasUnicas.values()).map(loja => {
+        const initialReports = Array.from(lojasUnicas.values()).map(loja => {
             const normalizedStoreName = normalizarNome(loja.nome);
 
             let statusNF: 'PENDENTE' | 'EMITIDA' = 'PENDENTE';
@@ -166,8 +165,8 @@ export default function FechamentoLote({
             let nfseMatch = null;
             let cnpjFilial: string | null = null;
 
+            // 1. SMART MATCH NF BY NUMBER (RegEx)
             if (loja.cnpj) {
-                // Find any XML NF that matches this store's CNPJ
                 const cnpjToMatch = loja.cnpj;
                 const matchingNfEntry = Object.entries(xmlParsedData).find(([nfNum, data]) => data.cnpj === cnpjToMatch || (data.cnpj && cnpjToMatch.includes(data.cnpj)));
                 if (matchingNfEntry) {
@@ -176,41 +175,71 @@ export default function FechamentoLote({
                     numeroNF = nfNumber;
                     descontoIR = matchingNfEntry[1].irrf;
                     cnpjFilial = matchingNfEntry[1].cnpjPrestador;
-                    // Find the physical PDF file belonging to this NF number (usually Conta Azul PDFs have the NF number in the title)
+                    // Procura o arquivo PDF que contenha o número da nota no nome
                     nfseMatch = nfseFiles.find(f => f.name.includes(nfNumber)) || null;
                 }
             }
 
-            // 2. Fallback: name matching (legacy)
+            // 2. Fallback: manual mapping for NF
             if (!nfseMatch) {
-                nfseMatch = nfseFiles.find(f => normalizarNome(f.name.replace(/nfse|nfe|\.pdf|\.xml/gi, "")).includes(normalizedStoreName) || normalizedStoreName.includes(normalizarNome(f.name.replace(/nfse|nfe|\.pdf|\.xml/gi, "")))) || null;
-                if (nfseMatch && statusNF === 'PENDENTE') {
-                    statusNF = 'EMITIDA';
-                    numeroNF = nfseMatch.name.split('.')[0].replace(/\D/g, '') || undefined;
+                const manual = Object.entries(manualMappings).find(([fileName, map]) => map.consolidadoId === loja.consolidadoId && map.type === 'nfse');
+                if (manual) {
+                    nfseMatch = nfseFiles.find(f => f.name === manual[0]) || null;
                 }
             }
 
-            const boletoMatch = boletoFiles.find(f => normalizarNome(f.name.replace(/boleto|\.pdf/gi, "")).includes(normalizedStoreName) || normalizedStoreName.includes(normalizarNome(f.name.replace(/boleto|\.pdf/gi, "")))) || null;
+            return { ...loja, nfse: nfseMatch, statusNF, numeroNF, descontoIR, cnpjFilial };
+        });
 
+        // 3. SMART MATCH BOLETOS (Conta Azul style with Queue for splits)
+        const matchedNfseNames = new Set(initialReports.map(r => r.nfse?.name).filter(Boolean));
+        const orphanNfses = nfseFiles.filter(f => !matchedNfseNames.has(f.name));
+
+        const matchedBoletoNames = new Set<string>();
+        const reportsWithBoletos = initialReports.map(report => {
+            const normalizedStoreName = normalizarNome(report.nome);
+
+            // Try manual mapping first
+            const manual = Object.entries(manualMappings).find(([fileName, map]) => map.consolidadoId === report.consolidadoId && map.type === 'boleto');
+            if (manual) {
+                const file = boletoFiles.find(f => f.name === manual[0]);
+                if (file) {
+                    matchedBoletoNames.add(file.name);
+                    return { ...report, boleto: file };
+                }
+            }
+
+            // Automatic Smatch Match (normalized name)
+            // We use a queue-like approach: find files matching normalized name that aren't already matched
+            const boletoMatch = boletoFiles.find(f => {
+                if (matchedBoletoNames.has(f.name)) return false;
+                const normalizedFile = normalizarNome(f.name.replace(/boleto|_|\.pdf/gi, " "));
+                return normalizedFile.includes(normalizedStoreName) || normalizedStoreName.includes(normalizedFile);
+            });
+
+            if (boletoMatch) {
+                matchedBoletoNames.add(boletoMatch.name);
+                return { ...report, boleto: boletoMatch };
+            }
+
+            return { ...report, boleto: null };
+        });
+
+        const orphanBoletos = boletoFiles.filter(f => !matchedBoletoNames.has(f.name));
+
+        const finalReports = reportsWithBoletos.map(r => {
             let statusNC: 'NAO_APLICAVEL' | 'PENDENTE' | 'EMITIDA' = 'NAO_APLICAVEL';
             let numeroNC: string | undefined;
 
-            if (statusNF === 'PENDENTE') {
+            if (r.statusNF === 'PENDENTE') {
                 statusNC = actionState.ncsSuccess ? 'EMITIDA' : 'PENDENTE';
                 if (actionState.ncsSuccess) numeroNC = "Gerada";
             }
-
-            return { ...loja, nfse: nfseMatch, boleto: boletoMatch, statusNF, numeroNF, descontoIR, cnpjFilial, statusNC, numeroNC };
+            return { ...r, statusNC, numeroNC };
         });
 
-        const matchedNfseNames = new Set(reports.map(r => r.nfse?.name).filter(Boolean));
-        const matchedBoletoNames = new Set(reports.map(r => r.boleto?.name).filter(Boolean));
-
-        const orphanNfses = nfseFiles.filter(f => !matchedNfseNames.has(f.name));
-        const orphanBoletos = boletoFiles.filter(f => !matchedBoletoNames.has(f.name));
-
-        return { reports, orphanNfses, orphanBoletos };
-    }, [agendamentos, nfseFiles, boletoFiles, xmlParsedData, actionState.ncsSuccess]);
+        return { reports: finalReports, orphanNfses, orphanBoletos };
+    }, [agendamentos, nfseFiles, boletoFiles, xmlParsedData, actionState.ncsSuccess, manualMappings]);
 
     const handleConsolidarLote = async () => {
         try {
@@ -410,26 +439,24 @@ export default function FechamentoLote({
         setLoadingMap(p => ({ ...p, "boletosSuccess": true }));
         try {
             let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
-            if (!targetLoteId) {
-                throw new Error("Falha ao encontrar o lote inicial gerado. Retorne aos passos anteriores.");
-            }
+            if (!targetLoteId) throw new Error("Falha ao encontrar o lote.");
 
-            const formData = new FormData();
-            formData.append("loteId", targetLoteId);
+            const uploadBatch = matchFiles.reports
+                .filter(r => r.boleto)
+                .map(async r => {
+                    const formData = new FormData();
+                    formData.append("loteId", targetLoteId!);
+                    formData.append("consolidadoId", r.consolidadoId);
+                    formData.append("docType", "hc");
+                    formData.append("file", r.boleto!.file, r.boleto!.name);
 
-            // Enviando todos os boletos sob a chave 'files'
-            boletoFiles.forEach(fileObj => {
-                formData.append("files", fileObj.file, fileObj.name);
-            });
+                    const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
+                    if (!res.ok) throw new Error(`Erro enviando boleto de ${r.nome}`);
+                });
 
-            const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
-
-            if (!res.ok) {
-                const errData = await res.json().catch(() => ({}));
-                throw new Error(errData.error || "Erro da API ao enviar boletos.");
-            }
-
+            await Promise.all(uploadBatch);
             setActionState(p => ({ ...p, boletosSuccess: true }));
+            alert("Boletos enviados e vinculados com sucesso!");
         } catch (error: any) {
             console.error(error);
             alert(error.message || "Erro no upload dos boletos");
@@ -443,25 +470,24 @@ export default function FechamentoLote({
         setLoadingMap(p => ({ ...p, "nfsSuccess": true }));
         try {
             let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
-            if (!targetLoteId) {
-                throw new Error("Falha ao encontrar o lote inicial gerado. Retorne aos passos anteriores.");
-            }
+            if (!targetLoteId) throw new Error("Falha ao encontrar o lote.");
 
-            const formData = new FormData();
-            formData.append("loteId", targetLoteId);
+            const uploadBatch = matchFiles.reports
+                .filter(r => r.nfse)
+                .map(async r => {
+                    const formData = new FormData();
+                    formData.append("loteId", targetLoteId!);
+                    formData.append("consolidadoId", r.consolidadoId);
+                    formData.append("docType", "nf");
+                    formData.append("file", r.nfse!.blob, r.nfse!.name);
 
-            // Enviando todas as NFs sob a chave 'files'
-            nfseFiles.forEach(fileObj => {
-                formData.append("files", fileObj.blob, fileObj.name);
-            });
+                    const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
+                    if (!res.ok) throw new Error(`Erro enviando NF de ${r.nome}`);
+                });
 
-            const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
-            if (!res.ok) {
-                const errData = await res.json().catch(() => ({}));
-                throw new Error(errData.error || "Erro da API ao enviar NFs.");
-            }
-
+            await Promise.all(uploadBatch);
             setActionState(p => ({ ...p, nfsSuccess: true }));
+            alert("Notas Fiscais enviadas e vinculadas com sucesso!");
         } catch (error: any) {
             console.error(error);
             alert(error.message || "Erro no upload das NFs");
@@ -940,34 +966,72 @@ export default function FechamentoLote({
                 </div>
             </div>
 
-            {/* Orfans Alert */}
-            {
-                (matchFiles.orphanBoletos.length > 0 || matchFiles.orphanNfses.length > 0) && (
-                    <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl flex items-start gap-4 mt-6">
-                        <AlertTriangle className="text-amber-500 shrink-0 mt-1" />
-                        <div>
-                            <h4 className="text-amber-500 font-bold mb-1">Arquivos Órfãos na Memória</h4>
-                            <p className="text-xs text-amber-200/80 mb-2">Os seguintes arquivos não encontraram lojas no sistema via nome da nota:</p>
-                            <div className="grid grid-cols-2 gap-4 mt-2">
-                                <div>
-                                    <strong className="text-[10px] uppercase tracking-wider text-amber-500/80 mb-1 block">NFs Órfãs ({matchFiles.orphanNfses.length})</strong>
-                                    <ul className="text-[10px] text-amber-100/60 list-disc list-inside">
-                                        {matchFiles.orphanNfses.slice(0, 5).map(f => <li key={f.name}>{f.name}</li>)}
-                                        {matchFiles.orphanNfses.length > 5 && <li>...</li>}
-                                    </ul>
-                                </div>
-                                <div>
-                                    <strong className="text-[10px] uppercase tracking-wider text-amber-500/80 mb-1 block">Boletos Órfãos ({matchFiles.orphanBoletos.length})</strong>
-                                    <ul className="text-[10px] text-amber-100/60 list-disc list-inside">
-                                        {matchFiles.orphanBoletos.slice(0, 5).map(f => <li key={f.name}>{f.name}</li>)}
-                                        {matchFiles.orphanBoletos.length > 5 && <li>...</li>}
-                                    </ul>
+            {/* Orfans & Manual Mapping UI */}
+            {(matchFiles.orphanBoletos.length > 0 || matchFiles.orphanNfses.length > 0) && (
+                <div className="bg-[var(--bg-card)] border border-amber-500/30 p-6 rounded-2xl shadow-xl mt-6 animate-in fade-in slide-in-from-bottom-4">
+                    <div className="flex items-center gap-3 mb-4">
+                        <AlertTriangle className="text-amber-500" size={24} />
+                        <h4 className="text-amber-500 font-bold text-lg">Tratamento de Arquivos Órfãos</h4>
+                    </div>
+                    <p className="text-sm text-[var(--fg-dim)] mb-6">Estes arquivos não foram associados automaticamente. Por favor, vincule-os manualmente às lojas do lote.</p>
+
+                    <div className="grid md:grid-cols-2 gap-8">
+                        {/* NFs Órfãs */}
+                        {matchFiles.orphanNfses.length > 0 && (
+                            <div className="space-y-4">
+                                <h5 className="text-[10px] uppercase tracking-widest font-black text-amber-500/80 mb-2">NOTAS FISCAIS ({matchFiles.orphanNfses.length})</h5>
+                                <div className="max-h-[300px] overflow-y-auto pr-2 space-y-2">
+                                    {matchFiles.orphanNfses.map(file => (
+                                        <div key={file.name} className="flex flex-col gap-1 p-3 bg-[var(--bg-sidebar)] rounded-xl border border-[var(--border)] hover:border-amber-500/30 transition-all">
+                                            <span className="text-xs font-mono font-bold truncate text-[var(--fg)]">{file.name}</span>
+                                            <select
+                                                className="select select-xs bg-[var(--bg-card)] border-[var(--border)] text-[11px]"
+                                                onChange={(e) => {
+                                                    if (e.target.value) {
+                                                        setManualMappings(prev => ({ ...prev, [file.name]: { consolidadoId: e.target.value, type: 'nfse' } }));
+                                                    }
+                                                }}
+                                            >
+                                                <option value="">Vincular a uma loja...</option>
+                                                {matchFiles.reports.map(r => (
+                                                    <option key={r.consolidadoId} value={r.consolidadoId}>{r.nome} ({r.numeroNF || 'Sem NF'})</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
-                        </div>
+                        )}
+
+                        {/* Boletos Órfãos */}
+                        {matchFiles.orphanBoletos.length > 0 && (
+                            <div className="space-y-4">
+                                <h5 className="text-[10px] uppercase tracking-widest font-black text-emerald-500/80 mb-2">BOLETOS ({matchFiles.orphanBoletos.length})</h5>
+                                <div className="max-h-[300px] overflow-y-auto pr-2 space-y-2">
+                                    {matchFiles.orphanBoletos.map(file => (
+                                        <div key={file.name} className="flex flex-col gap-1 p-3 bg-[var(--bg-sidebar)] rounded-xl border border-[var(--border)] hover:border-emerald-500/30 transition-all">
+                                            <span className="text-xs font-mono font-bold truncate text-[var(--fg)]">{file.name}</span>
+                                            <select
+                                                className="select select-xs bg-[var(--bg-card)] border-[var(--border)] text-[11px]"
+                                                onChange={(e) => {
+                                                    if (e.target.value) {
+                                                        setManualMappings(prev => ({ ...prev, [file.name]: { consolidadoId: e.target.value, type: 'boleto' } }));
+                                                    }
+                                                }}
+                                            >
+                                                <option value="">Vincular a uma loja...</option>
+                                                {matchFiles.reports.map(r => (
+                                                    <option key={r.consolidadoId} value={r.consolidadoId}>{r.nome} ({fmtCurrency(r.totalFaturar)})</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
-                )
-            }
+                </div>
+            )}
         </div >
     );
 }

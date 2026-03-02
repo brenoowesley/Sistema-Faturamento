@@ -74,70 +74,80 @@ export async function POST(request: Request) {
 
         const formData = await request.formData();
         const loteId = formData.get('loteId') as string;
+        const consolidadoId = formData.get('consolidadoId') as string; // Requerido para feedback individual
+        const docType = formData.get('docType') as string; // 'nf' ou 'hc'
 
-        // 2. Tratamento Unificado de Boletos e NFs
-        const files = [
-            ...formData.getAll('files'),
-            ...formData.getAll('file'),
-            ...formData.getAll('files[]'),
-            ...formData.getAll('boletos'),
-            ...formData.getAll('nfse'),
-            ...formData.getAll('nf')
-        ] as File[];
+        // 2. Coleta de arquivos (suporta 'file' individual ou 'files' array)
+        const entries = formData.getAll('file').length > 0 ? formData.getAll('file') : formData.getAll('files');
+        const files = entries as File[];
 
-        if (!loteId) throw new Error("ID do Lote não fornecido na requisição.");
-        if (!files || files.length === 0) throw new Error("Nenhum arquivo recebido para upload.");
+        if (!loteId) throw new Error("ID do Lote não fornecido.");
+        if (!files || files.length === 0) throw new Error("Nenhum arquivo recebido.");
 
-        console.log(`[Next.js API] Iniciando upload de ${files.length} arquivos para o lote: ${loteId}`);
+        console.log(`[Next.js API] Upload para Lote ${loteId} | Consolidado: ${consolidadoId || 'Geral'} | Tipo: ${docType || 'N/A'}`);
 
-        // 3. Busca o nome oficial da pasta do Lote no Supabase
+        // 3. Busca informações do Lote
         const { data: lote, error: loteErr } = await supabaseAdmin
             .from('faturamentos_lote')
-            .select('nome_pasta, data_competencia')
+            .select('nome_pasta, data_competencia, drive_folder_id')
             .eq('id', loteId)
             .single();
 
-        if (loteErr || !lote) throw new Error("Lote não encontrado no banco de dados.");
+        if (loteErr || !lote) throw new Error("Lote não encontrado.");
 
-        const folderName = lote.nome_pasta || `Lote ${lote.data_competencia}`;
+        let loteFolderId = lote.drive_folder_id;
+        if (!loteFolderId) {
+            const folderName = lote.nome_pasta || `Lote ${lote.data_competencia}`;
+            loteFolderId = await findOrCreateFolder(folderName, rootFolderId);
+            await supabaseAdmin.from('faturamentos_lote').update({ drive_folder_id: loteFolderId }).eq('id', loteId);
+        }
 
-        // 4. Encontra ou Cria a pasta no Google Drive usando o rootFolderId inteligente
-        const loteFolderId = await findOrCreateFolder(folderName, rootFolderId);
-
-        if (!loteFolderId) throw new Error("Falha ao obter o Folder ID do Google Drive");
-
-        // Salva a tag no banco pra próxima
-        await supabaseAdmin.from('faturamentos_lote').update({ drive_folder_id: loteFolderId }).eq('id', loteId);
-
-        // 5. Envia os binários transformando as instâncias nativas `File` da Edge pra Buffers e depois Readable Streams
+        // 4. Processamento de Uploads
         const { Readable } = require('stream');
+        const results = [];
 
-        const uploadPromises = files.map(async (file) => {
+        for (const file of files) {
             const buffer = Buffer.from(await file.arrayBuffer());
-
             const fileMetadata = {
                 name: file.name,
                 parents: [loteFolderId as string]
             };
-
             const media = {
                 mimeType: file.type || 'application/pdf',
                 body: Readable.from(buffer)
             };
 
-            return drive.files.create({
+            const driveRes = await drive.files.create({
                 requestBody: fileMetadata,
                 media: media,
                 fields: 'id',
                 supportsAllDrives: true
             });
-        });
 
-        await Promise.all(uploadPromises);
+            const driveId = driveRes.data.id;
+            results.push({ name: file.name, driveId });
 
-        console.log(`[Next.js Drive] 🚀 Upload de ${files.length} PDFs Concluído na pasta ${folderName}`);
+            // 5. Feedback Loop p/ Supabase (Se houver consolidadoId)
+            if (consolidadoId && driveId && docType) {
+                const updateData: any = {};
+                if (docType === 'nf') {
+                    updateData.drive_id_nf = driveId;
+                    updateData.status_drive_nf = 'SINCRONIZADO';
+                } else if (docType === 'hc') {
+                    updateData.drive_id_hc = driveId;
+                    updateData.status_drive_hc = 'SINCRONIZADO';
+                }
 
-        return NextResponse.json({ success: true, message: `Upload realizado para ${files.length} arquivos` });
+                const { error: upErr } = await supabaseAdmin
+                    .from('faturamento_consolidados')
+                    .update(updateData)
+                    .eq('id', consolidadoId);
+
+                if (upErr) console.error(`[Supabase Feedback Error] ${consolidadoId}:`, upErr);
+            }
+        }
+
+        return NextResponse.json({ success: true, results });
 
     } catch (error: any) {
         console.error("Erro no API /drive/upload:", error);
