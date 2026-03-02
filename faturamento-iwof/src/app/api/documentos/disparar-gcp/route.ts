@@ -131,6 +131,13 @@ export async function POST(req: NextRequest) {
         const payloadHC: any[] = [];
         const lojaAgendamentosMap = new Map<string, any[]>();
 
+        // Evita erro de offset UTC (Ex 11-02-2025T03:00 vs 10-02-2025T21:00)
+        const formatDataSegura = (isoString: string) => {
+            if (!isoString) return '';
+            const [ano, mes, dia] = isoString.split('T')[0].split('-');
+            return `${dia}/${mes}/${ano}`;
+        };
+
         // 4.5 Fetch Ajustes Faturamentos (Acrescimos/Descontos detalhados)
         const storeIds = Array.from(new Set(agendamentos.map((a: any) => a.loja_id)));
         const { data: ajustes, error: ajesErr } = await supabase
@@ -204,8 +211,27 @@ export async function POST(req: NextRequest) {
             const valorIRRF = Number(cons.valor_ir_xml || 0);
             const valorLiquido = valorBase - valorIRRF;
 
+            // ==========================================
+            // CÁLCULO DE PERÍODO ESPECÍFICO (QUEIROZ SPLIT)
+            // ==========================================
+            let periodoCustom = `${formatDataSegura(lote.data_inicio_ciclo)} à ${formatDataSegura(lote.data_fim_ciclo)}`;
+
+            if (isQueiroz && lote.queiroz_split_date) {
+                const splitDt = new Date(lote.queiroz_split_date + "T12:00:00");
+
+                if (cliente.nome_conta_azul?.includes('(Mês Anterior)') || cliente.razao_social?.includes('(Mês Anterior)')) {
+                    periodoCustom = `${formatDataSegura(lote.data_inicio_ciclo)} à ${formatDataSegura(lote.queiroz_split_date)}`;
+                } else if (cliente.nome_conta_azul?.includes('(Mês Atual)') || cliente.razao_social?.includes('(Mês Atual)')) {
+                    // Dia seguinte ao corte
+                    const nextDay = new Date(splitDt);
+                    nextDay.setDate(splitDt.getDate() + 1);
+                    periodoCustom = `${formatDataSegura(nextDay.toISOString())} à ${formatDataSegura(lote.data_fim_ciclo)}`;
+                }
+            }
+
             // Calcula matrizes financeiras
             const financeiroPayload = {
+                consolidado_id: cons.id, // ID ÚNICO PARA FEEDBACK DO DRIVE
                 lote_id: lote.id,
                 cliente_id: cliente.id,
                 razao_social: cliente.razao_social,
@@ -221,6 +247,7 @@ export async function POST(req: NextRequest) {
                 valor_liquido_boleto: formatarParaGCP(valorLiquido),
                 valor_nc_final: formatarParaGCP(valorNC),
                 data_competencia: cons.data_competencia || lote.data_competencia,
+                periodo_custom: periodoCustom, // Injeta o período preciso para o PDF
                 observacoes_descritivo: cons.observacao_report || ""
             };
             // ==========================================
@@ -299,7 +326,8 @@ export async function POST(req: NextRequest) {
                                 "IRRF": financeiroPayload.irrf_presumido,
                                 "VALOR_LIQUIDO": financeiroPayload.valor_liquido_boleto,
                                 "NF": financeiroPayload.valor_nf_emitida,
-                                "NC": financeiroPayload.valor_nc_final
+                                "NC": financeiroPayload.valor_nc_final,
+                                "PERIODO": financeiroPayload.periodo_custom
                             },
                             lista_acrescimos: lista_acrescimos,
                             lista_descontos: lista_descontos,
@@ -345,7 +373,8 @@ export async function POST(req: NextRequest) {
                                     "IRRF": formatarParaGCP(0),
                                     "VALOR_LIQUIDO": formatarParaGCP(baseFilialVirtual),
                                     "NF": formatarParaGCP(baseFilialVirtual * 0.115),
-                                    "NC": formatarParaGCP(baseFilialVirtual * 0.885)
+                                    "NC": formatarParaGCP(baseFilialVirtual * 0.885),
+                                    "PERIODO": `${formatDataSegura(lote.data_inicio_ciclo)} à ${formatDataSegura(lote.data_fim_ciclo)}`
                                 },
                                 lista_acrescimos: filialListaAcrescimos,
                                 lista_descontos: filialListaDescontos,
@@ -370,7 +399,8 @@ export async function POST(req: NextRequest) {
                             "IRRF": financeiroPayload.irrf_presumido,
                             "VALOR_LIQUIDO": financeiroPayload.valor_liquido_boleto,
                             "NF": financeiroPayload.valor_nf_emitida,
-                            "NC": financeiroPayload.valor_nc_final
+                            "NC": financeiroPayload.valor_nc_final,
+                            "PERIODO": financeiroPayload.periodo_custom
                         },
                         lista_acrescimos: lista_acrescimos,
                         lista_descontos: lista_descontos,
@@ -387,11 +417,7 @@ export async function POST(req: NextRequest) {
             : { data: null };
 
         // Evita erro de offset UTC (Ex 11-02-2025T03:00 vs 10-02-2025T21:00)
-        const formatDataSegura = (isoString: string) => {
-            if (!isoString) return '';
-            const [ano, mes, dia] = isoString.split('T')[0].split('-');
-            return `${dia}/${mes}/${ano}`;
-        };
+
 
         const dInicio = formatDataSegura(lote.data_inicio_ciclo);
         const dFim = formatDataSegura(lote.data_fim_ciclo);

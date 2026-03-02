@@ -60,6 +60,13 @@ interface LojaConsolidada {
     ajustesDetalhes: AjusteItem[];
     loja_mae_id?: string | null;
     children?: any[];
+    // Drive Observability
+    drive_id_nf?: string;
+    drive_id_hc?: string;
+    status_drive_nf?: string;
+    status_drive_hc?: string;
+    error_drive_nf?: string;
+    error_drive_hc?: string;
 }
 
 interface XMLData {
@@ -229,6 +236,44 @@ const MonetaryFilterDropdown = ({ value, onChange, placeholder }: { value: strin
     );
 };
 
+const StatusDriveIcon = ({ status, driveId, label, error }: { status?: string, driveId?: string, label: string, error?: string }) => {
+    if (!status || status === 'PENDENTE') {
+        return (
+            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 text-[9px] font-bold border border-zinc-700/50" title="Aguardando disparo ou processamento">
+                <RefreshCcw size={10} className="animate-spin" /> {label}: AGUARDANDO
+            </div>
+        );
+    }
+    if (status === 'ENVIANDO') {
+        return (
+            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 text-[9px] font-bold border border-amber-500/20" title="GCP processando upload...">
+                <div className="w-2 h-2 border border-amber-500/30 border-t-amber-500 rounded-full animate-spin"></div> {label}: ENVIANDO
+            </div>
+        );
+    }
+    if (status === 'SINCRONIZADO' || !!driveId) {
+        return (
+            <a
+                href={`https://drive.google.com/file/d/${driveId}/view`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[9px] font-black border border-emerald-500/30 hover:bg-emerald-500 hover:text-black transition-all"
+                title="Ver PDF no Google Drive"
+            >
+                <CheckCircle2 size={10} /> {label}: SALVO
+            </a>
+        );
+    }
+    if (status === 'ERRO') {
+        return (
+            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/10 text-red-500 text-[9px] font-bold border border-red-500/20" title={error || "Erro desconhecido no upload"}>
+                <XCircle size={10} /> {label}: ERRO
+            </div>
+        );
+    }
+    return null;
+};
+
 /* ================================================================
    PAGE COMPONENT
    ================================================================ */
@@ -287,6 +332,45 @@ export default function FiscalProcessingPage() {
                 let hasMore = true;
                 while (hasMore) {
                     const { data: chunk, error: chunkErr } = await supabase
+                        .from("faturamento_consolidados")
+                        .select(`
+                                id,
+                                loja_id:cliente_id,
+                                valorBruto:valor_bruto,
+                                acrescimos,
+                                descontos,
+                                valor_ir_xml,
+                                numero_nf,
+                                status_drive_nf,
+                                status_drive_hc,
+                                drive_id_nf,
+                                drive_id_hc,
+                                error_drive_nf,
+                                error_drive_hc,
+                                clientes(razao_social, nome_fantasia, nome_conta_azul, cnpj, loja_mae_id, ciclos_faturamento(nome))
+                            `)
+                        .eq("lote_id", loteId)
+                        .range(from, from + step - 1);
+
+                    if (chunkErr) throw chunkErr;
+
+                    if (chunk && chunk.length > 0) {
+                        agendamentos = agendamentos.concat(chunk);
+                        from += step;
+                        hasMore = chunk.length === step;
+                    } else {
+                        hasMore = false;
+                    }
+                }
+            }
+
+            // Fallback para agendamentos brutos se não houver consolidação ainda
+            if (agendamentos.length === 0) {
+                let from = 0;
+                const step = 1000;
+                let hasMore = true;
+                while (hasMore) {
+                    const { data: chunk, error: chunkErr } = await supabase
                         .from("agendamentos_brutos")
                         .select("loja_id, cnpj_loja, valor_iwof, status_validacao, clientes(razao_social, nome_fantasia, nome_conta_azul, cnpj, loja_mae_id, ciclos_faturamento(nome))")
                         .eq("lote_id", loteId)
@@ -294,7 +378,12 @@ export default function FiscalProcessingPage() {
                         .range(from, from + step - 1);
                     if (chunkErr) throw chunkErr;
                     if (chunk && chunk.length > 0) {
-                        agendamentos = agendamentos.concat(chunk);
+                        agendamentos = agendamentos.concat(chunk.map(c => ({
+                            ...c,
+                            valorBruto: c.valor_iwof,
+                            acrescimos: 0,
+                            descontos: 0
+                        })));
                         from += step;
                         hasMore = chunk.length === step;
                     } else {
@@ -328,7 +417,6 @@ export default function FiscalProcessingPage() {
 
             if (missingRecords.length > 0) {
                 const missingMap = new Map<string, { loja_id: string; razao_social: string; cnpj: string; motivo: string }>();
-                // Track which loja_ids have at least one VALIDADO record with complete fiscal data
                 const confirmedValidated = new Set<string>();
 
                 missingRecords.forEach(rec => {
@@ -344,21 +432,18 @@ export default function FiscalProcessingPage() {
                     }
 
                     if (rec.status_validacao !== "VALIDADO") {
-                        // Only flag as missing if we haven't found a good VALIDADO record yet
                         if (!confirmedValidated.has(rec.loja_id)) {
                             missingMap.set(rec.loja_id, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: `Status do agendamento: ${rec.status_validacao}` });
                         }
                         return;
                     }
 
-                    // This is a VALIDADO record — check address completeness
                     const faltaEndereco = !client.endereco || !client.bairro || !client.cidade || !client.estado || !client.cep;
                     if (faltaEndereco) {
                         if (!confirmedValidated.has(rec.loja_id)) {
                             missingMap.set(rec.loja_id, { loja_id: rec.loja_id, razao_social: razao, cnpj, motivo: "Dados de endereço incompletos (Rua, Bairro, Cidade, UF ou CEP)" });
                         }
                     } else {
-                        // Fully valid record — this store should NOT appear in Pendentes
                         confirmedValidated.add(rec.loja_id);
                         missingMap.delete(rec.loja_id);
                     }
@@ -370,7 +455,7 @@ export default function FiscalProcessingPage() {
             // 3. Get unique store IDs involved
             const storeIds = Array.from(new Set((agendamentos || []).map(a => a.loja_id)));
 
-            // 4. Fetch Pending Adjustments for these stores
+            // 4. Fetch Pending Adjustments
             const { data: ajustes, error: ajErr } = await supabase
                 .from("ajustes_faturamento")
                 .select("*")
@@ -379,7 +464,7 @@ export default function FiscalProcessingPage() {
 
             if (ajErr) throw ajErr;
 
-            // 5. Group and Consolidate strictly by spreadsheet CNPJ (or fallback to lojaId)
+            // 5. Group and Consolidate
             const consolidatedMap = new Map<string, LojaConsolidada>();
 
             (agendamentos || []).forEach(a => {
@@ -388,34 +473,36 @@ export default function FiscalProcessingPage() {
 
                 if (!consolidatedMap.has(uniqueKey)) {
                     consolidatedMap.set(uniqueKey, {
-                        id: uniqueKey, // use the unique key so they stay distinct
+                        id: a.id || uniqueKey,
                         razao_social: client?.razao_social || "S/N",
                         nome_fantasia: client?.nome_fantasia || null,
                         nome_conta_azul: client?.nome_conta_azul || null,
                         cnpj: client?.cnpj || a.cnpj_loja || "00000000000000",
-                        valorBruto: 0,
-                        acrescimos: 0,
-                        descontos: 0,
+                        valorBruto: a.valorBruto || 0,
+                        acrescimos: a.acrescimos || 0,
+                        descontos: a.descontos || 0,
                         ajustesDetalhes: [],
                         active: true,
                         ciclo: client?.ciclos_faturamento?.nome || "-",
                         loja_mae_id: client?.loja_mae_id || null,
-                        // Add real loja_id for adjustment matching
-                        loja_id_real: a.loja_id
-                    } as LojaConsolidada & { loja_id_real: string; loja_mae_id: string | null; ciclo: string });
+                        loja_id_real: uniqueKey,
+                        drive_id_nf: a.drive_id_nf,
+                        drive_id_hc: a.drive_id_hc,
+                        status_drive_nf: a.status_drive_nf,
+                        status_drive_hc: a.status_drive_hc,
+                        error_drive_nf: a.error_drive_nf,
+                        error_drive_hc: a.error_drive_hc
+                    } as LojaConsolidada & { loja_id_real: string; ciclo: string });
+                } else {
+                    const store = consolidatedMap.get(uniqueKey)!;
+                    store.valorBruto += (a.valorBruto || 0);
                 }
-                const store = consolidatedMap.get(uniqueKey)!;
-                store.valorBruto += Number(a.valor_iwof) || 0;
             });
 
             (ajustes || []).forEach(aj => {
-                // Find all stores in our map that belong to this cliente_id
-                const matchingStores = Array.from(consolidatedMap.values()).filter(st => {
-                    return (st as any).loja_id_real === aj.cliente_id;
-                });
-
+                const matchingStores = Array.from(consolidatedMap.values()).filter(st => (st as any).loja_id_real === aj.cliente_id);
                 if (matchingStores.length > 0) {
-                    const store = matchingStores[0]; // Apply to the first one only, to avoid cloning the monetary value
+                    const store = matchingStores[0];
                     if (aj.tipo === "ACRESCIMO") store.acrescimos += Number(aj.valor) || 0;
                     if (aj.tipo === "DESCONTO") store.descontos += Number(aj.valor) || 0;
                     store.ajustesDetalhes.push({
@@ -430,12 +517,10 @@ export default function FiscalProcessingPage() {
 
             const finalMapping = new Map<string, any>();
             Array.from(consolidatedMap.values()).forEach(st => {
-                // Agrupamento por loja_mae somente para clientes LETA.
-                // Qualquer outra empresa sempre aparece como loja standalone.
                 const cicloNome: string = (st as any).ciclo || "";
                 const nomeContaAzul: string = (st.nome_conta_azul || "").toUpperCase();
-                const isLeta = cicloNome.toUpperCase().includes("LETA") || nomeContaAzul.includes("LETA") || nomeContaAzul.includes("ARCO-MIX") || nomeContaAzul.includes("ARCO MIX");
-                const targetKey = (isLeta && st.loja_mae_id) ? st.loja_mae_id : st.id;
+                const isLeta = cicloNome.toUpperCase().includes("LETA") || nomeContaAzul.includes("LETA") || nomeContaAzul.includes("ARCO-MIX");
+                const targetKey = (isLeta && st.loja_mae_id) ? st.loja_mae_id : st.loja_id_real;
 
                 if (!finalMapping.has(targetKey)) {
                     finalMapping.set(targetKey, { ...st, isMother: isLeta && !!st.loja_mae_id, children: [] });
@@ -454,34 +539,26 @@ export default function FiscalProcessingPage() {
             setLojas(finalLojas);
 
             // ── Dropout Diagnostics ──────────────────────────────────────────────────
-            // Identify stores that were saved to DB (any status) but are NOT in the
-            // VALIDADO fiscal consolidation. Helps diagnosing "missing" stores.
-            if (missingRecords) {
-                const validatedIds = new Set(finalLojas.flatMap(l => [l.id, ...(l.children || []).map((c: any) => c.id)]));
-                const byLoja = new Map<string, { razao: string; cnpj: string; statuses: Set<string>; total: number }>();
+            const validatedIds = new Set(finalLojas.flatMap(l => [l.loja_id_real, ...(l.children || []).map((c: any) => c.loja_id_real)]));
+            const byLoja = new Map<string, { razao: string; cnpj: string; statuses: Set<string>; total: number }>();
 
-                missingRecords.forEach((rec: any) => {
-                    if (validatedIds.has(rec.loja_id)) return; // already in fiscal — not a dropout
-                    const client = rec.clientes as any;
-                    const razao = client?.razao_social || "Empresa Desconhecida";
-                    const cnpj = client?.cnpj || rec.cnpj_loja || "Desconhecido";
-                    if (!byLoja.has(rec.loja_id)) {
-                        byLoja.set(rec.loja_id, { razao, cnpj, statuses: new Set(), total: 0 });
-                    }
-                    const entry = byLoja.get(rec.loja_id)!;
-                    entry.statuses.add(rec.status_validacao);
-                    entry.total += Number(rec.valor_iwof) || 0;
-                });
+            missingRecords.forEach((rec: any) => {
+                if (validatedIds.has(rec.loja_id)) return;
+                const client = rec.clientes as any;
+                const razao = client?.razao_social || "Empresa Desconhecida";
+                const cnpj = client?.cnpj || rec.cnpj_loja || "Desconhecido";
+                if (!byLoja.has(rec.loja_id)) byLoja.set(rec.loja_id, { razao, cnpj, statuses: new Set(), total: 0 });
+                const entry = byLoja.get(rec.loja_id)!;
+                entry.statuses.add(rec.status_validacao);
+                entry.total += Number(rec.valor_iwof) || 0;
+            });
 
-                const dropout = Array.from(byLoja.values()).map(e => ({
-                    razao_social: e.razao,
-                    cnpj: e.cnpj,
-                    statuses: Array.from(e.statuses).join(" | "),
-                    total_valor: Math.round(e.total * 100) / 100
-                }));
-                setDropoutStores(dropout);
-            }
-            // ────────────────────────────────────────────────────────────────────────
+            setDropoutStores(Array.from(byLoja.values()).map(e => ({
+                razao_social: e.razao,
+                cnpj: e.cnpj,
+                statuses: Array.from(e.statuses).join(" | "),
+                total_valor: Math.round(e.total * 100) / 100
+            })));
 
         } catch (err) {
             console.error("Error fetching data:", err);
@@ -493,7 +570,11 @@ export default function FiscalProcessingPage() {
 
     useEffect(() => {
         fetchData();
-    }, [fetchData]);
+        const interval = setInterval(() => {
+            if (lote?.status === "CONSOLIDADO") fetchData();
+        }, 10000);
+        return () => clearInterval(interval);
+    }, [fetchData, lote?.status]);
 
     // Audit Log for Fiscal Discrepancies
     useEffect(() => {
@@ -1148,6 +1229,7 @@ export default function FiscalProcessingPage() {
                                                     />
                                                 </div>
                                             </th>
+                                            <th className="p-4 text-center">Status Drive</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -1197,6 +1279,22 @@ export default function FiscalProcessingPage() {
                                                         </td>
                                                         <td className="p-4 text-right font-black text-white text-lg">
                                                             {fmtCurrency(item.boletoFinal)}
+                                                        </td>
+                                                        <td className="p-4">
+                                                            <div className="flex flex-col items-center gap-1">
+                                                                <StatusDriveIcon
+                                                                    status={item.loja.status_drive_nf}
+                                                                    driveId={item.loja.drive_id_nf}
+                                                                    label="NF"
+                                                                    error={item.loja.error_drive_nf}
+                                                                />
+                                                                <StatusDriveIcon
+                                                                    status={item.loja.status_drive_hc}
+                                                                    driveId={item.loja.drive_id_hc}
+                                                                    label="HC"
+                                                                    error={item.loja.error_drive_hc}
+                                                                />
+                                                            </div>
                                                         </td>
                                                     </tr>
                                                 );
