@@ -120,7 +120,7 @@ export default function FechamentoLote({
             a.clienteId
         );
 
-        const lojasUnicas = new Map<string, { consolidadoId: string; nome: string; id: string; razaoSocial: string; cnpj: string | undefined; totalFaturar: number; valorBase: number; valorAcrescimos: number; valorDescontos: number; data_competencia?: string }>();
+        const lojasUnicas = new Map<string, { consolidadoId: string; nome: string; id: string; razaoSocial: string; cnpj: string | undefined; totalFaturar: number; valorBase: number; valorAcrescimos: number; valorDescontos: number; data_competencia?: string; ciclo: string }>();
 
         for (const a of validados) {
             const isQueirozSplit = a.loja.includes('(Mês Anterior)') || a.loja.includes('(Mês Atual)');
@@ -128,14 +128,15 @@ export default function FechamentoLote({
 
             if (!lojasUnicas.has(uniqueKey)) {
                 lojasUnicas.set(uniqueKey, {
-                    consolidadoId: a.id!, // Assuming agendamento has id or matches with consolidado
+                    consolidadoId: a.id!,
                     id: a.clienteId!,
                     nome: a.loja,
                     razaoSocial: a.razaoSocial || a.loja,
                     cnpj: a.cnpj?.replace(/\D/g, ''),
                     data_competencia: a.data_competencia || a.dataCompetencia,
-                    totalFaturar: 0,
+                    ciclo: (a as any).ciclo || "-", // Captura o ciclo para a hierarquia do Drive
                     valorBase: 0,
+                    totalFaturar: 0,
                     valorAcrescimos: 0,
                     valorDescontos: 0
                 });
@@ -448,6 +449,8 @@ export default function FechamentoLote({
                     formData.append("loteId", targetLoteId!);
                     formData.append("consolidadoId", r.consolidadoId);
                     formData.append("docType", "hc");
+                    formData.append("storeName", r.razaoSocial || r.nome);
+                    formData.append("cycleName", (r as any).ciclo || "Geral");
                     formData.append("file", r.boleto!.file, r.boleto!.name);
 
                     const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
@@ -479,6 +482,8 @@ export default function FechamentoLote({
                     formData.append("loteId", targetLoteId!);
                     formData.append("consolidadoId", r.consolidadoId);
                     formData.append("docType", "nf");
+                    formData.append("storeName", r.razaoSocial || r.nome);
+                    formData.append("cycleName", (r as any).ciclo || "Geral");
                     formData.append("file", r.nfse!.blob, r.nfse!.name);
 
                     const res = await fetch("/api/drive/upload", { method: "POST", body: formData });

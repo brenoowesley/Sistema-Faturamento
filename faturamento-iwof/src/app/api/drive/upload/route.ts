@@ -60,6 +60,15 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string) {
     }
 }
 
+async function findOrCreatePath(rootFolderId: string, segments: string[]) {
+    let currentParentId = rootFolderId;
+    for (const segment of segments) {
+        if (!segment) continue;
+        currentParentId = (await findOrCreateFolder(segment.trim(), currentParentId)) as string;
+    }
+    return currentParentId;
+}
+
 export async function POST(request: Request) {
     try {
         const rootFolderId = getRootFolderId();
@@ -74,10 +83,11 @@ export async function POST(request: Request) {
 
         const formData = await request.formData();
         const loteId = formData.get('loteId') as string;
-        const consolidadoId = formData.get('consolidadoId') as string; // Requerido para feedback individual
-        const docType = formData.get('docType') as string; // 'nf' ou 'hc'
+        const consolidadoId = formData.get('consolidadoId') as string;
+        const docType = formData.get('docType') as string;
+        const storeName = formData.get('storeName') as string;
+        const cycleName = formData.get('cycleName') as string;
 
-        // 2. Coleta de arquivos (suporta 'file' individual ou 'files' array)
         const entries = formData.getAll('file').length > 0 ? formData.getAll('file') : formData.getAll('files');
         const files = entries as File[];
 
@@ -86,21 +96,16 @@ export async function POST(request: Request) {
 
         console.log(`[Next.js API] Upload para Lote ${loteId} | Consolidado: ${consolidadoId || 'Geral'} | Tipo: ${docType || 'N/A'}`);
 
-        // 3. Busca informações do Lote
-        const { data: lote, error: loteErr } = await supabaseAdmin
-            .from('faturamentos_lote')
-            .select('nome_pasta, data_competencia, drive_folder_id')
-            .eq('id', loteId)
-            .single();
+        // 3. Hierarquia Dinâmica de Pastas
+        const now = new Date();
+        const year = now.getFullYear().toString();
+        const month = (now.getMonth() + 1).toString().padStart(2, '0');
 
-        if (loteErr || !lote) throw new Error("Lote não encontrado.");
+        // Define os segmentos da hierarquia
+        const segments = [year, month, storeName, cycleName].filter(Boolean);
+        const finalFolderId = await findOrCreatePath(rootFolderId, segments);
 
-        let loteFolderId = lote.drive_folder_id;
-        if (!loteFolderId) {
-            const folderName = lote.nome_pasta || `Lote ${lote.data_competencia}`;
-            loteFolderId = await findOrCreateFolder(folderName, rootFolderId);
-            await supabaseAdmin.from('faturamentos_lote').update({ drive_folder_id: loteFolderId }).eq('id', loteId);
-        }
+        if (!finalFolderId) throw new Error("Falha ao obter o Folder ID final no Google Drive");
 
         // 4. Processamento de Uploads
         const { Readable } = require('stream');
@@ -110,7 +115,7 @@ export async function POST(request: Request) {
             const buffer = Buffer.from(await file.arrayBuffer());
             const fileMetadata = {
                 name: file.name,
-                parents: [loteFolderId as string]
+                parents: [finalFolderId as string]
             };
             const media = {
                 mimeType: file.type || 'application/pdf',

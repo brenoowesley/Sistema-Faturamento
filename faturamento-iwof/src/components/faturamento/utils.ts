@@ -72,6 +72,7 @@ export const normalizarNome = (nome?: string) => {
     if (!nome) return "";
     return nome
         .trim()
+        .replace(/_/g, " ") // Suporte Conta Azul: troca _ por espaço
         .toLowerCase()
         .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
         .replace(/\s+/g, " ");
