@@ -400,20 +400,26 @@ export default function WizardFaturamento() {
             // 2. Barreira de Proteção: Identifica o Queiroz pelo NOME DA LOJA (string)
             const isLinhaQueiroz = nomeLojaAtribuida.toUpperCase().includes('QUEIROZ');
 
-            if (isQueirozSelected && splitDate && isLinhaQueiroz && a.inicio) {
-                // Resolve o Fuso Horário extraindo apenas a data (YYYY-MM-DD)
-                const dataInicioFormatada = new Date(a.inicio).toISOString().split('T')[0];
+            // BYPASS DE CLOSURE: Se o usuário preencheu o painel (queirozConfig existe) e a loja é Queiroz, aplicamos.
+            if (queirozConfig?.splitDate && isLinhaQueiroz && a.inicio) {
 
-                if (dataInicioFormatada <= splitDate) {
-                    compAtribuida = compAnterior;
+                // Extração Cega de Data Local (Sem fuso horário UTC)
+                const dt = new Date(a.inicio);
+                const ano = dt.getFullYear();
+                const mes = String(dt.getMonth() + 1).padStart(2, '0');
+                const dia = String(dt.getDate()).padStart(2, '0');
+                const dataInicioFormatada = `${ano}-${mes}-${dia}`;
+
+                if (dataInicioFormatada <= queirozConfig.splitDate) {
+                    compAtribuida = queirozConfig.compAnterior;
                     nomeLojaAtribuida = `${a.loja} (Mês Anterior)`;
                 } else {
-                    compAtribuida = compAtual;
+                    compAtribuida = queirozConfig.compAtual;
                     nomeLojaAtribuida = `${a.loja} (Mês Atual)`;
                 }
             }
 
-            // 3. Monta o objeto final. Só injeta a data de competência se ela foi definida (Queiroz).
+            // 3. Monta o objeto final.
             const agendamentoFinal: Agendamento = {
                 ...a,
                 loja: nomeLojaAtribuida

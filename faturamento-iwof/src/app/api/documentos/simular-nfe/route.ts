@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
 
         if (ajErr) throw ajErr;
 
-        // Consolidate in memory strictly by client id
+        // Consolidate in memory strictly by client id + store name (to respect split)
         const consolidatedMap = new Map<string, any>();
         const clienteMap = new Map(allClients.map(c => [c.id, c]));
 
@@ -72,9 +72,14 @@ export async function POST(req: NextRequest) {
             const lojaId = a.clienteId;
             if (!lojaId) return;
 
-            if (!consolidatedMap.has(lojaId)) {
-                consolidatedMap.set(lojaId, {
+            // Se for split do Queiroz, a chave inclui o nome da loja
+            const isQueirozSplit = a.loja?.includes('(Mês Anterior)') || a.loja?.includes('(Mês Atual)');
+            const uniqueKey = isQueirozSplit ? `${lojaId}_${a.loja}` : lojaId;
+
+            if (!consolidatedMap.has(uniqueKey)) {
+                consolidatedMap.set(uniqueKey, {
                     cliente_id: lojaId,
+                    loja: a.loja,
                     valor_bruto: 0,
                     acrescimos: 0,
                     descontos: 0,
@@ -83,13 +88,15 @@ export async function POST(req: NextRequest) {
                     data_competencia: a.rawRow?.data_competencia || ""
                 });
             }
-            const store = consolidatedMap.get(lojaId)!;
+            const store = consolidatedMap.get(uniqueKey)!;
             store.valor_bruto += Number(a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof)) || 0;
         });
 
         ajustes?.forEach(aj => {
-            const store = consolidatedMap.get(aj.cliente_id);
-            if (store) {
+            // Aplica ajuste ao primeiro registro encontrado para o cliente (evita duplicar em split)
+            const keys = Array.from(consolidatedMap.keys()).filter(k => k.startsWith(`${aj.cliente_id}`));
+            if (keys.length > 0) {
+                const store = consolidatedMap.get(keys[0]);
                 if (aj.tipo === "ACRESCIMO") store.acrescimos += Number(aj.valor);
                 if (aj.tipo === "DESCONTO") store.descontos += Number(aj.valor);
             }
@@ -102,7 +109,10 @@ export async function POST(req: NextRequest) {
             // LETA Logic: If the store is part of the LETA cycle (or explicitly named LETA) and has a mother store, cluster under Mother.
             const isLeta = clientData.ciclos_faturamento?.nome?.toUpperCase().includes('LETA') || clientData.razao_social?.toUpperCase().includes('LETA');
 
-            let targetId = clientData.cnpj || r.cliente_id;
+            // targetId deve respeitar o split do Queiroz
+            const isQueirozSplit = r.loja?.includes('(Mês Anterior)') || r.loja?.includes('(Mês Atual)');
+            let targetId = isQueirozSplit ? `${clientData.cnpj || r.cliente_id}_${r.loja}` : (clientData.cnpj || r.cliente_id);
+
             let effectiveClientData = clientData;
 
             if (isLeta && clientData.loja_mae_id) {

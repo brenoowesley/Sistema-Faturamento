@@ -51,6 +51,7 @@ export default function EmissaoNotas({
                     valorIwof: a.valorIwof,
                     suggestedValorIwof: a.suggestedValorIwof,
                     manualValue: a.manualValue,
+                    loja: a.loja, // Passa o nome (com sufixo se for Queiroz)
                     rawRow: {
                         data_competencia: a.rawRow?.data_competencia
                     }
@@ -104,6 +105,7 @@ export default function EmissaoNotas({
                 valorIwof: a.valorIwof,
                 suggestedValorIwof: a.suggestedValorIwof,
                 manualValue: a.manualValue,
+                loja: a.loja, // Passa o nome (com sufixo se for Queiroz)
                 rawRow: {
                     data_competencia: a.rawRow?.data_competencia
                 }

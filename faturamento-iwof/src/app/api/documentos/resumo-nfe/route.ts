@@ -105,7 +105,10 @@ export async function POST(req: NextRequest) {
             // LETA Logic: If the store is part of the LETA cycle (or explicitly named LETA) and has a mother store, cluster under Mother.
             const isLeta = clientData.ciclos_faturamento?.nome?.toUpperCase().includes('LETA') || clientData.razao_social?.toUpperCase().includes('LETA');
 
-            let targetId = clientData.cnpj || r.cliente_id;
+            // targetId deve respeitar o split do Queiroz para não mesclar as linhas de volta
+            const isQueirozSplit = r.loja?.includes('(Mês Anterior)') || r.loja?.includes('(Mês Atual)');
+            let targetId = isQueirozSplit ? `${clientData.cnpj || r.cliente_id}_${r.loja}` : (clientData.cnpj || r.cliente_id);
+
             let effectiveClientData = clientData;
 
             if (isLeta && clientData.loja_mae_id) {
