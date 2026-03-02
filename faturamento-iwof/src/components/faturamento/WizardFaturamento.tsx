@@ -536,16 +536,20 @@ export default function WizardFaturamento() {
                 (a.status === "OK" || a.status === "CORREÇÃO") && a.clienteId
             );
 
-            const dataCompetencia = periodoInicio || new Date().toISOString().split("T")[0];
+            const dataCompetenciaBase = periodoInicio || new Date().toISOString().split("T")[0];
             const dataFim = periodoFim || new Date().toISOString().split("T")[0];
 
             let valTotal = 0;
 
-            // ⚠️ MAPEAMENTO ESTRITO PARA O SCHEMA DO SUPABASE
-            // DE PARA: clienteId -> loja_id | inicio -> data_inicio | termino -> data_fim
             const agsInserir = validos.map(a => {
                 const finalVal = a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof);
                 valTotal += finalVal;
+
+                // For the Queiroz Split, the rawRow.data_competencia might be "YYYY-MM"
+                let dataComp = dataCompetenciaBase;
+                if (a.rawRow.data_competencia) {
+                    dataComp = String(a.rawRow.data_competencia).length === 7 ? `${a.rawRow.data_competencia}-01` : String(a.rawRow.data_competencia);
+                }
 
                 return {
                     loja_id: a.clienteId,
@@ -556,25 +560,27 @@ export default function WizardFaturamento() {
                     data_fim: a.termino ? a.termino.toISOString() : new Date().toISOString(),
                     valor_iwof: finalVal,
                     fracao_hora: a.status === "CORREÇÃO" ? (a.suggestedFracaoHora ?? a.fracaoHora) : a.fracaoHora,
-                    data_competencia: dataCompetencia,
-                    status_validacao: "VALIDADO" // FIX: Oficializando a validação feita na memória
+                    data_competencia: dataComp,
+                    status_validacao: "VALIDADO"
                 };
             });
 
             // 1. CRIA O LOTE INICIAL ('faturamentos_lote')
+            const qzAnterior = queirozConfig?.compAnterior ? `${queirozConfig.compAnterior}-01` : null;
+            const qzAtual = queirozConfig?.compAtual ? `${queirozConfig.compAtual}-01` : null;
+
             const { data: loteObj, error: loteErr } = await supabase
                 .from("faturamentos_lote")
                 .insert({
-                    data_competencia: dataCompetencia,
-                    data_inicio_ciclo: dataCompetencia,
+                    data_competencia: dataCompetenciaBase,
+                    data_inicio_ciclo: dataCompetenciaBase,
                     data_fim_ciclo: dataFim,
                     status: "RASCUNHO",
-                    // Novos campos restaurados mapeando os estados do Wizard:
                     nome_pasta: nomePasta || null,
                     ciclo_faturamento_id: selectedCicloIds.length === 1 ? selectedCicloIds[0] : null,
                     queiroz_split_date: queirozConfig?.splitDate || null,
-                    queiroz_comp_anterior: queirozConfig?.compAnterior || null,
-                    queiroz_comp_atual: queirozConfig?.compAtual || null
+                    queiroz_comp_anterior: qzAnterior,
+                    queiroz_comp_atual: qzAtual
                 })
                 .select()
                 .single();

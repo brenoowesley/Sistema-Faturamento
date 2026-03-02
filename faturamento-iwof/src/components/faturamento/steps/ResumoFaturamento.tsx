@@ -379,7 +379,7 @@ export default function ResumoFaturamento({
                                         onClick={() => toggleUF(uf)}
                                     >
                                         <div className="flex items-center gap-4">
-                                            <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center font-bold text-amber-500 border border-amber-500/20">
+                                            <div className="px-3 h-10 min-w-10 rounded-xl bg-amber-500/10 flex items-center justify-center font-bold text-amber-500 border border-amber-500/20 whitespace-nowrap text-sm text-center">
                                                 {uf}
                                             </div>
                                             <div>
@@ -448,7 +448,7 @@ export default function ResumoFaturamento({
                                                         {/* Link to Audit User */}
                                                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none group-hover:pointer-events-auto">
                                                             <a
-                                                                href={`https://sistema.iwof.com.br/admin/profissionais?search=${encodeURIComponent(a.nome)}`}
+                                                                href={`https://administrativo.iwof.com.br/workers/${a.refAgendamento}`}
                                                                 target="_blank"
                                                                 rel="noopener noreferrer"
                                                                 className="text-xs font-bold text-[var(--bg-card)] bg-[var(--fg)] shadow-lg px-4 py-2 rounded-full hover:scale-105 transition-transform"
