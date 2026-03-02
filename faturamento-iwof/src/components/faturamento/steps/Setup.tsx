@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { UploadCloud, CheckCircle2, ChevronRight, FileSpreadsheet, X } from "lucide-react";
+import { UploadCloud, CheckCircle2, ChevronRight, FileSpreadsheet, X, AlertTriangle } from "lucide-react";
 import { useDropzone } from "react-dropzone";
 import * as Papa from "papaparse";
 import * as XLSX from "xlsx";
@@ -21,6 +21,8 @@ interface SetupProps {
     processFile: (rows: Record<string, string>[]) => Promise<void>;
     processing: boolean;
     setFileName: (name: string) => void;
+    queirozConfig: { splitDate: string; compAnterior: string; compAtual: string; } | null;
+    setQueirozConfig: React.Dispatch<React.SetStateAction<{ splitDate: string; compAnterior: string; compAtual: string; } | null>>;
 }
 
 export default function Setup({
@@ -36,7 +38,9 @@ export default function Setup({
     setNomePasta,
     processFile,
     processing,
-    setFileName
+    setFileName,
+    queirozConfig,
+    setQueirozConfig
 }: SetupProps) {
     const [files, setFiles] = useState<File[]>([]);
 
@@ -108,7 +112,11 @@ export default function Setup({
         await processFile(allRows);
     };
 
-    const isReady = files.length > 0 && periodoInicio && periodoFim && selectedCicloIds.length > 0 && nomePasta.trim().length > 0;
+    const d1_check = periodoInicio ? new Date(periodoInicio + "T12:00:00") : null;
+    const d2_check = periodoFim ? new Date(periodoFim + "T12:00:00") : null;
+    const isCrossMonth = d1_check && d2_check && (d1_check.getMonth() !== d2_check.getMonth() || d1_check.getFullYear() !== d2_check.getFullYear());
+
+    const isReady = files.length > 0 && periodoInicio && periodoFim && selectedCicloIds.length > 0 && nomePasta.trim().length > 0 && (!isCrossMonth || (queirozConfig?.splitDate && queirozConfig?.compAnterior && queirozConfig?.compAtual));
 
     return (
         <div className="flex flex-col gap-6 max-w-4xl mx-auto">
@@ -180,6 +188,52 @@ export default function Setup({
                     </div>
                 </div>
             </div>
+
+            {isCrossMonth && (
+                <div className="bg-[var(--bg-sidebar)] border border-amber-500/30 rounded-2xl p-6 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
+                        <AlertTriangle size={100} />
+                    </div>
+                    <h3 className="text-lg font-bold text-amber-500 mb-4 flex items-center gap-2 relative z-10">
+                        <AlertTriangle size={20} /> Lote Multi-Mês (Regra Queiroz)
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 relative z-10">
+                        <div>
+                            <label className="block text-sm font-semibold text-[var(--fg-dim)] mb-2 inline-flex items-center gap-2">
+                                Data de Corte
+                            </label>
+                            <input
+                                type="date"
+                                className="input w-full bg-[var(--bg-card)] border-[var(--border)] focus:border-amber-500 text-[var(--fg)]"
+                                value={queirozConfig?.splitDate || ""}
+                                onChange={(e) => setQueirozConfig(prev => ({ splitDate: e.target.value, compAnterior: prev?.compAnterior || "", compAtual: prev?.compAtual || "" }))}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-semibold text-[var(--fg-dim)] mb-2 inline-flex items-center gap-2">
+                                Comp. Anterior
+                            </label>
+                            <input
+                                type="month"
+                                className="input w-full bg-[var(--bg-card)] border-[var(--border)] focus:border-amber-500 text-[var(--fg)]"
+                                value={queirozConfig?.compAnterior || ""}
+                                onChange={(e) => setQueirozConfig(prev => ({ splitDate: prev?.splitDate || "", compAnterior: e.target.value, compAtual: prev?.compAtual || "" }))}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-semibold text-[var(--fg-dim)] mb-2 inline-flex items-center gap-2">
+                                Comp. Atual
+                            </label>
+                            <input
+                                type="month"
+                                className="input w-full bg-[var(--bg-card)] border-[var(--border)] focus:border-amber-500 text-[var(--fg)]"
+                                value={queirozConfig?.compAtual || ""}
+                                onChange={(e) => setQueirozConfig(prev => ({ splitDate: prev?.splitDate || "", compAnterior: prev?.compAnterior || "", compAtual: e.target.value }))}
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <div
                 {...getRootProps()}

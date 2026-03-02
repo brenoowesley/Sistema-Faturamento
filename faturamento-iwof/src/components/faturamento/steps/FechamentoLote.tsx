@@ -147,7 +147,8 @@ export default function FechamentoLote({
         }
 
         const reports = Array.from(lojasUnicas.values()).map(loja => {
-            const normalizedStoreName = normalizarNome(loja.nome);
+            const sanitizedNameForMatch = loja.nome.replace(/\(Mês Atual\)|\(Mês Anterior\)/gi, '').trim();
+            const normalizedStoreName = normalizarNome(sanitizedNameForMatch);
 
             let statusNF: 'PENDENTE' | 'EMITIDA' = 'PENDENTE';
             let numeroNF: string | undefined;
