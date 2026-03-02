@@ -117,7 +117,7 @@ export default function FechamentoLote({
             a.clienteId
         );
 
-        const lojasUnicas = new Map<string, { nome: string; id: string; razaoSocial: string; cnpj: string | undefined; totalFaturar: number }>();
+        const lojasUnicas = new Map<string, { nome: string; id: string; razaoSocial: string; cnpj: string | undefined; totalFaturar: number; valorBase: number; valorAcrescimos: number; valorDescontos: number; }>();
         for (const a of validados) {
             if (!lojasUnicas.has(a.clienteId!)) {
                 lojasUnicas.set(a.clienteId!, {
@@ -125,10 +125,25 @@ export default function FechamentoLote({
                     nome: a.loja,
                     razaoSocial: a.razaoSocial || a.loja,
                     cnpj: a.cnpj?.replace(/\D/g, ''),
-                    totalFaturar: 0
+                    totalFaturar: 0,
+                    valorBase: 0,
+                    valorAcrescimos: 0,
+                    valorDescontos: 0
                 });
             }
-            lojasUnicas.get(a.clienteId!)!.totalFaturar += a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof);
+
+            const lojaEntry = lojasUnicas.get(a.clienteId!)!;
+            const baseVal = a.originalValorIwof ?? a.valorIwof;
+            const finalVal = a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof);
+
+            lojaEntry.valorBase += baseVal;
+            lojaEntry.totalFaturar += finalVal;
+
+            if (finalVal > baseVal) {
+                lojaEntry.valorAcrescimos += (finalVal - baseVal);
+            } else if (finalVal < baseVal) {
+                lojaEntry.valorDescontos += (baseVal - finalVal);
+            }
         }
 
         const reports = Array.from(lojasUnicas.values()).map(loja => {
@@ -849,11 +864,15 @@ export default function FechamentoLote({
                         <table className="w-full text-left text-sm whitespace-nowrap min-w-[700px]">
                             <thead className="bg-[var(--bg-card)] sticky top-0 shadow-sm z-10 border-b border-[var(--border)]">
                                 <tr>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold uppercase text-[10px] tracking-wider">Cliente/Faturamento</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Valor Boleto</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-center uppercase text-[10px] tracking-wider">Nota Fiscal (NF)</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-center uppercase text-[10px] tracking-wider">Nota de Crédito (NC)</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Desconto IR</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold uppercase text-[10px] tracking-wider">Nome conta azul (CNPJ ABAIXO)</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Valor boleto base</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Valor boleto pós ajustes</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Valor descontos</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Valor acréscimos</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Valor NC</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Valor NF</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Valor IRRF</th>
+                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Boleto final</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[var(--border)]">
@@ -865,47 +884,31 @@ export default function FechamentoLote({
                                                 <span className="text-[10px] text-[var(--fg-muted)] font-mono">{r.cnpj ? r.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5") : r.nome}</span>
                                             </div>
                                         </td>
-                                        <td className="py-4 px-6 text-right">
-                                            <span className="font-mono text-[13px] font-bold text-[var(--fg)]">{fmtCurrency(r.totalFaturar)}</span>
+                                        <td className="py-4 px-6 text-right font-mono text-[12px] text-[var(--fg-muted)]">
+                                            {fmtCurrency(r.valorBase)}
                                         </td>
-                                        <td className="py-4 px-6 text-center">
-                                            {r.statusNF === 'EMITIDA' ? (
-                                                <div className="flex flex-col items-center gap-1">
-                                                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-green-500/10 text-green-400 border border-green-500/20">
-                                                        <CheckCircle2 size={12} /> Emitida
-                                                    </span>
-                                                    {r.numeroNF && <span className="font-mono text-[10px] text-green-500/80">NF: {r.numeroNF}</span>}
-                                                </div>
-                                            ) : (
-                                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-red-500/10 text-red-500 border border-red-500/20">
-                                                    <AlertTriangle size={12} /> Pendente
-                                                </span>
-                                            )}
+                                        <td className="py-4 px-6 text-right font-mono text-[13px] font-bold text-[var(--fg)]">
+                                            {fmtCurrency(r.totalFaturar)}
                                         </td>
-                                        <td className="py-4 px-6 text-center">
-                                            {r.statusNC === 'NAO_APLICAVEL' ? (
-                                                <span className="text-[14px] font-bold text-[var(--border)]">—</span>
-                                            ) : r.statusNC === 'PENDENTE' ? (
-                                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20">
-                                                    <Info size={12} /> Aguardando NC
-                                                </span>
-                                            ) : (
-                                                <div className="flex flex-col items-center gap-1">
-                                                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                                                        <CheckCircle2 size={12} /> Gerada
-                                                    </span>
-                                                    {r.numeroNC && <span className="font-mono text-[10px] text-blue-500/80">NC: {r.numeroNC}</span>}
-                                                </div>
-                                            )}
+                                        <td className="py-4 px-6 text-right font-mono text-[12px] text-red-400">
+                                            {r.valorDescontos > 0 ? `- ${fmtCurrency(r.valorDescontos)}` : '—'}
+                                        </td>
+                                        <td className="py-4 px-6 text-right font-mono text-[12px] text-green-400">
+                                            {r.valorAcrescimos > 0 ? `+ ${fmtCurrency(r.valorAcrescimos)}` : '—'}
+                                        </td>
+                                        <td className="py-4 px-6 text-right font-mono text-[12px] text-amber-500">
+                                            {r.statusNF === 'PENDENTE' ? fmtCurrency(r.totalFaturar) : '—'}
+                                        </td>
+                                        <td className="py-4 px-6 text-right font-mono text-[12px] text-blue-400">
+                                            {r.statusNF === 'EMITIDA' ? fmtCurrency(r.totalFaturar) : '—'}
+                                        </td>
+                                        <td className="py-4 px-6 text-right font-mono text-[12px] text-purple-400">
+                                            {r.descontoIR && r.descontoIR > 0 ? `- ${fmtCurrency(r.descontoIR)}` : '—'}
                                         </td>
                                         <td className="py-4 px-6 text-right">
-                                            {r.descontoIR && r.descontoIR > 0 ? (
-                                                <span className="font-mono text-[12px] font-bold text-red-400 bg-red-500/5 px-2 py-1 rounded-md">
-                                                    - {fmtCurrency(r.descontoIR)}
-                                                </span>
-                                            ) : (
-                                                <span className="font-mono text-[12px] font-medium text-[var(--fg-muted)]">R$ 0,00</span>
-                                            )}
+                                            <span className="font-mono text-[13px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-md">
+                                                {fmtCurrency(r.totalFaturar - (r.descontoIR || 0))}
+                                            </span>
                                         </td>
                                     </tr>
                                 ))}

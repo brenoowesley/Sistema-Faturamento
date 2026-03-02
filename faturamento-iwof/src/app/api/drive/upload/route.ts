@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from '@supabase/supabase-js';
 
+// 1. Configuração do Google Drive Auth
 const auth = new google.auth.GoogleAuth({
     credentials: {
         client_email: process.env.GOOGLE_CLIENT_EMAIL,
@@ -11,31 +12,35 @@ const auth = new google.auth.GoogleAuth({
 });
 
 const drive = google.drive({ version: 'v3', auth });
-const ROOT_FOLDER_ID = process.env.DRIVE_FATURAMENTO_ROOT_ID || 'dummy_root_id';
+
+// Extrai o ID da pasta quer venha da variável nova ou da URL antiga
+const extractFolderId = () => {
+    if (process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID) return process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID;
+    if (process.env.DRIVE_FOLDER_URL) {
+        const parts = process.env.DRIVE_FOLDER_URL.split('/');
+        return parts[parts.length - 1] || parts[parts.length - 2];
+    }
+    return null;
+};
+const ROOT_FOLDER_ID = extractFolderId();
+
+// 2. Configuração do Supabase Admin (Ignora RLS)
+const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 async function findOrCreateFolder(folderName: string, parentFolderId: string) {
     try {
         const q = `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`;
-        const res = await drive.files.list({
-            q,
-            fields: 'files(id, name)',
-            spaces: 'drive',
-            pageSize: 1
-        });
+        const res = await drive.files.list({ q, fields: 'files(id, name)', spaces: 'drive', pageSize: 1 });
 
         if (res.data.files && res.data.files.length > 0 && res.data.files[0].id) {
-            return res.data.files[0].id as string;
+            return res.data.files[0].id;
         } else {
-            const fileMetadata = {
-                name: folderName,
-                mimeType: 'application/vnd.google-apps.folder',
-                parents: [parentFolderId]
-            };
-            const createRes = await drive.files.create({
-                requestBody: fileMetadata,
-                fields: 'id'
-            });
-            return createRes.data.id as string;
+            const fileMetadata = { name: folderName, mimeType: 'application/vnd.google-apps.folder', parents: [parentFolderId] };
+            const createRes = await drive.files.create({ requestBody: fileMetadata, fields: 'id' });
+            return createRes.data.id;
         }
     } catch (error) {
         console.error('Erro ao procurar/criar pasta:', folderName, error);
@@ -45,69 +50,64 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string) {
 
 export async function POST(request: Request) {
     try {
+        if (!ROOT_FOLDER_ID) throw new Error("A variável do Google Drive (URL ou ID) não está configurada no servidor.");
+
         const formData = await request.formData();
-
         const loteId = formData.get('loteId') as string;
-        const targetFolderName = formData.get('targetFolderName') as string || `Lote ${new Date().toISOString().split('T')[0]}`;
+        const files = formData.getAll('files') as File[];
 
-        console.log(`[Next.js API] Recebido pedido de upload GCP. FormData.keys: ${Array.from(formData.keys()).join(', ')}`);
+        if (!loteId) throw new Error("ID do Lote não fornecido na requisição.");
+        if (!files || files.length === 0) throw new Error("Nenhum arquivo recebido para upload.");
 
-        let rootFolderId: string | null | undefined = 'dummy_ciclo_folder_id';
+        console.log(`[Next.js API] Iniciando upload de ${files.length} arquivos para o lote: ${loteId}`);
 
-        if (loteId) {
-            const supabase = createClient(
-                process.env.NEXT_PUBLIC_SUPABASE_URL!,
-                process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-            );
+        // 3. Busca o nome oficial da pasta do Lote no Supabase
+        const { data: lote, error: loteErr } = await supabaseAdmin
+            .from('faturamentos_lote')
+            .select('nome_pasta, data_competencia')
+            .eq('id', loteId)
+            .single();
 
-            const { data: lote } = await supabase.from('faturamentos_lote').select('*').eq('id', loteId).single();
+        if (loteErr || !lote) throw new Error("Lote não encontrado no banco de dados.");
 
-            if (lote) {
-                rootFolderId = lote.drive_folder_id;
+        const folderName = lote.nome_pasta || `Lote ${lote.data_competencia}`;
 
-                if (!rootFolderId && ROOT_FOLDER_ID !== 'dummy_root_id') {
-                    rootFolderId = await findOrCreateFolder(lote.nome_pasta || targetFolderName, ROOT_FOLDER_ID);
-                    // Salva o ID no Supabase para as próximas requisições
-                    await supabase.from('faturamentos_lote').update({ drive_folder_id: rootFolderId }).eq('id', loteId);
-                }
-            }
-        } else if (ROOT_FOLDER_ID !== 'dummy_root_id') {
-            rootFolderId = await findOrCreateFolder(targetFolderName, ROOT_FOLDER_ID);
-        }
+        // 4. Encontra ou Cria a pasta no Google Drive
+        const loteFolderId = await findOrCreateFolder(folderName, ROOT_FOLDER_ID);
 
-        // Iterating over all provided files and names
-        const arrPromises = [];
-        for (const [key, value] of formData.entries()) {
-            if (value instanceof File) {
-                // Buffer conversion
-                // const arrayBuffer = await value.arrayBuffer();
-                // const buffer = Buffer.from(arrayBuffer);
+        if (!loteFolderId) throw new Error("Falha ao obter o Folder ID do Google Drive");
 
-                /*
-                const fileMetadata = {
-                    name: value.name,
-                    parents: [rootFolderId as string]
-                };
+        // Salva a tag no banco pra próxima
+        await supabaseAdmin.from('faturamentos_lote').update({ drive_folder_id: loteFolderId }).eq('id', loteId);
 
-                const media = {
-                    mimeType: value.type,
-                    body: require('stream').Readable.from(buffer)
-                };
+        // 5. Envia os binários transformando as instâncias nativas `File` da Edge pra Buffers e depois Readable Streams
+        const { Readable } = require('stream');
 
-                const p = drive.files.create({
-                    requestBody: fileMetadata,
-                    media: media,
-                    fields: 'id'
-                });
-                arrPromises.push(p);
-                */
-                console.log(`Simulando upload de ${value.name} para o Drive. Tamanho: ${value.size}`);
-            }
-        }
+        const uploadPromises = files.map(async (file) => {
+            const buffer = Buffer.from(await file.arrayBuffer());
 
-        // await Promise.all(arrPromises);
+            const fileMetadata = {
+                name: file.name,
+                parents: [loteFolderId as string]
+            };
 
-        return NextResponse.json({ success: true, message: "Uploads completados com sucesso (simulado)" });
+            const media = {
+                mimeType: file.type || 'application/pdf',
+                body: Readable.from(buffer)
+            };
+
+            return drive.files.create({
+                requestBody: fileMetadata,
+                media: media,
+                fields: 'id'
+            });
+        });
+
+        await Promise.all(uploadPromises);
+
+        console.log(`[Next.js Drive] 🚀 Upload de ${files.length} PDFs Concluído na pasta ${folderName}`);
+
+        return NextResponse.json({ success: true, message: `Upload realizado para ${files.length} arquivos` });
 
     } catch (error: any) {
         console.error("Erro no API /drive/upload:", error);
