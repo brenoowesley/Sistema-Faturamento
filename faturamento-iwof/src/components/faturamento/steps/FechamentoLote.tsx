@@ -119,10 +119,14 @@ export default function FechamentoLote({
 
         const lojasUnicas = new Map<string, { nome: string; id: string; razaoSocial: string; cnpj: string | undefined; totalFaturar: number; valorBase: number; valorAcrescimos: number; valorDescontos: number; }>();
         for (const a of validados) {
-            if (!lojasUnicas.has(a.clienteId!)) {
-                lojasUnicas.set(a.clienteId!, {
+            // FIX QUEIROZ: Cria uma chave única combinando o ID e o sufixo do mês para forçar a separação na consolidação
+            const isQueirozSplit = a.loja.includes('(Mês');
+            const uniqueKey = isQueirozSplit ? `${a.clienteId}-${a.loja}` : a.clienteId!;
+
+            if (!lojasUnicas.has(uniqueKey)) {
+                lojasUnicas.set(uniqueKey, {
                     id: a.clienteId!,
-                    nome: a.loja,
+                    nome: a.loja, // Mantém o sufixo (Mês Atual)/(Mês Anterior)
                     razaoSocial: a.razaoSocial || a.loja,
                     cnpj: a.cnpj?.replace(/\D/g, ''),
                     totalFaturar: 0,
@@ -132,7 +136,7 @@ export default function FechamentoLote({
                 });
             }
 
-            const lojaEntry = lojasUnicas.get(a.clienteId!)!;
+            const lojaEntry = lojasUnicas.get(uniqueKey)!;
             const baseVal = a.originalValorIwof ?? a.valorIwof;
             const finalVal = a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof);
 
@@ -147,8 +151,7 @@ export default function FechamentoLote({
         }
 
         const reports = Array.from(lojasUnicas.values()).map(loja => {
-            const sanitizedNameForMatch = loja.nome.replace(/\(Mês Atual\)|\(Mês Anterior\)/gi, '').trim();
-            const normalizedStoreName = normalizarNome(sanitizedNameForMatch);
+            const normalizedStoreName = normalizarNome(loja.nome);
 
             let statusNF: 'PENDENTE' | 'EMITIDA' = 'PENDENTE';
             let numeroNF: string | undefined;

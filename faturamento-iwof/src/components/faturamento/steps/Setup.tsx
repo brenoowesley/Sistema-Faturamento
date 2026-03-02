@@ -112,11 +112,13 @@ export default function Setup({
         await processFile(allRows);
     };
 
+    const isQueirozSelected = ciclos.some(c => selectedCicloIds.includes(c.id) && c.nome.toUpperCase().includes('QUEIROZ'));
     const d1_check = periodoInicio ? new Date(periodoInicio + "T12:00:00") : null;
     const d2_check = periodoFim ? new Date(periodoFim + "T12:00:00") : null;
     const isCrossMonth = d1_check && d2_check && (d1_check.getMonth() !== d2_check.getMonth() || d1_check.getFullYear() !== d2_check.getFullYear());
+    const showQueirozPanel = isCrossMonth && isQueirozSelected;
 
-    const isReady = files.length > 0 && periodoInicio && periodoFim && selectedCicloIds.length > 0 && nomePasta.trim().length > 0 && (!isCrossMonth || (queirozConfig?.splitDate && queirozConfig?.compAnterior && queirozConfig?.compAtual));
+    const isReady = files.length > 0 && periodoInicio && periodoFim && selectedCicloIds.length > 0 && nomePasta.trim().length > 0 && (!showQueirozPanel || (queirozConfig?.splitDate && queirozConfig?.compAnterior && queirozConfig?.compAtual));
 
     return (
         <div className="flex flex-col gap-6 max-w-4xl mx-auto">
@@ -189,7 +191,7 @@ export default function Setup({
                 </div>
             </div>
 
-            {isCrossMonth && (
+            {showQueirozPanel && (
                 <div className="bg-[var(--bg-sidebar)] border border-amber-500/30 rounded-2xl p-6 relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
                         <AlertTriangle size={100} />
@@ -214,7 +216,7 @@ export default function Setup({
                                 Comp. Anterior
                             </label>
                             <input
-                                type="month"
+                                type="date"
                                 className="input w-full bg-[var(--bg-card)] border-[var(--border)] focus:border-amber-500 text-[var(--fg)]"
                                 value={queirozConfig?.compAnterior || ""}
                                 onChange={(e) => setQueirozConfig(prev => ({ splitDate: prev?.splitDate || "", compAnterior: e.target.value, compAtual: prev?.compAtual || "" }))}
@@ -225,7 +227,7 @@ export default function Setup({
                                 Comp. Atual
                             </label>
                             <input
-                                type="month"
+                                type="date"
                                 className="input w-full bg-[var(--bg-card)] border-[var(--border)] focus:border-amber-500 text-[var(--fg)]"
                                 value={queirozConfig?.compAtual || ""}
                                 onChange={(e) => setQueirozConfig(prev => ({ splitDate: prev?.splitDate || "", compAnterior: prev?.compAnterior || "", compAtual: e.target.value }))}
