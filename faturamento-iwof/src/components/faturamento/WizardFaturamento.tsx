@@ -372,6 +372,7 @@ export default function WizardFaturamento() {
                 cicloNome: matched?.ciclos_faturamento?.nome ?? null,
                 nome_conta_azul: matched?.nome_conta_azul ?? null,
                 ciclo: matched?.ciclos_faturamento?.nome ?? null,
+                numero_nf: (row as any).numero_nf || (row as any).numeroNF, // Preserva numero_nf se vier de faturamento_consolidados
                 rawRow: row,
                 suggestedFracaoHora,
                 suggestedValorIwof,

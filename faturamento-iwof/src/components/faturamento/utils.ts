@@ -73,6 +73,7 @@ export const normalizarNome = (nome?: string) => {
     return nome
         .trim()
         .replace(/_/g, " ") // Suporte Conta Azul: troca _ por espaço
+        .replace(/'/g, "")  // Remove apóstrofos (ex: d'italia -> ditalia)
         .toLowerCase()
         .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
         .replace(/\s+/g, " ");

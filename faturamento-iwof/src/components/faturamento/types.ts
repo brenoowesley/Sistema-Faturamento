@@ -51,6 +51,7 @@ export interface Agendamento {
     cicloNome: string | null;      // from DB join
     nome_conta_azul?: string | null;
     ciclo?: string | null;
+    numero_nf?: string | null;
     data_competencia?: string;
     dataCompetencia?: string;     // assigned period (YYYY-MM-DD or YYYY-MM)
     rawRow: Record<string, string>;

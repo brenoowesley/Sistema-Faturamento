@@ -55,6 +55,7 @@ export default function FechamentoLote({
     // MODAL STATE
     const [activeModal, setActiveModal] = useState<string | null>(null);
     const [filterStatus, setFilterStatus] = useState<string>("TODAS");
+    const [dbConsolidados, setDbConsolidados] = useState<Record<string, string>>({}); // uniqueKey -> consolidadoId
 
     const boletosInputRef = useRef<HTMLInputElement>(null);
     const nfsInputRef = useRef<HTMLInputElement>(null);
@@ -113,6 +114,22 @@ export default function FechamentoLote({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [nfseFiles]);
 
+    interface StoreData {
+        consolidadoId: string;
+        id: string;
+        nome: string;
+        razaoSocial: string;
+        nomeContaAzul: string;
+        cnpj: string | undefined;
+        totalFaturar: number;
+        valorBase: number;
+        valorAcrescimos: number;
+        valorDescontos: number;
+        data_competencia?: string;
+        ciclo: string;
+        numero_nf?: string | null;
+    }
+
     const matchFiles = useMemo(() => {
         const validados = agendamentos.filter(a =>
             !a.isRemoved &&
@@ -120,7 +137,7 @@ export default function FechamentoLote({
             a.clienteId
         );
 
-        const lojasUnicas = new Map<string, { consolidadoId: string; nome: string; id: string; razaoSocial: string; nomeContaAzul: string; cnpj: string | undefined; totalFaturar: number; valorBase: number; valorAcrescimos: number; valorDescontos: number; data_competencia?: string; ciclo: string }>();
+        const lojasUnicas = new Map<string, StoreData>();
 
         for (const a of validados) {
             const isQueirozSplit = a.loja.includes('(Mês Anterior)') || a.loja.includes('(Mês Atual)');
@@ -135,7 +152,8 @@ export default function FechamentoLote({
                     nomeContaAzul: a.nome_conta_azul || a.razaoSocial || a.loja, // Prioridade para nome_conta_azul
                     cnpj: a.cnpj?.replace(/\D/g, ''),
                     data_competencia: a.data_competencia || a.dataCompetencia,
-                    ciclo: a.ciclo || "-", // Captura o ciclo para a hierarquia do Drive
+                    ciclo: (a as any).ciclo || "-", // Captura o ciclo para a hierarquia do Drive
+                    numero_nf: (a as any).numero_nf || (a as any).numeroNF, // Preserva numero_nf se vier de faturamento_consolidados
                     valorBase: 0,
                     totalFaturar: 0,
                     valorAcrescimos: 0,
@@ -158,39 +176,41 @@ export default function FechamentoLote({
         }
 
         const initialReports = Array.from(lojasUnicas.values()).map(loja => {
-            const normalizedStoreName = normalizarNome(loja.nome);
-
             let statusNF: 'PENDENTE' | 'EMITIDA' = 'PENDENTE';
-            let numeroNF: string | undefined;
-            let descontoIR: number | undefined;
-
             let nfseMatch = null;
-            let cnpjFilial: string | null = null;
 
-            // 1. SMART MATCH NF BY NUMBER (RegEx)
-            if (loja.cnpj) {
-                const cnpjToMatch = loja.cnpj;
-                const matchingNfEntry = Object.entries(xmlParsedData).find(([nfNum, data]) => data.cnpj === cnpjToMatch || (data.cnpj && cnpjToMatch.includes(data.cnpj)));
-                if (matchingNfEntry) {
-                    const nfNumber = matchingNfEntry[0];
+            // 1. SMART MATCH NF BY NUMBER extracted from PDF filename
+            // User rule: Extraia o número numérico do nome do arquivo (ex: 1234-nfse.pdf -> 1234)
+            if (loja.numero_nf) {
+                nfseMatch = nfseFiles.find(f => {
+                    const extractedNum = f.name.match(/\d+/)?.[0];
+                    return f.name.toLowerCase().endsWith(".pdf") && extractedNum === loja.numero_nf;
+                }) || null;
+
+                if (nfseMatch) {
                     statusNF = 'EMITIDA';
-                    numeroNF = nfNumber;
-                    descontoIR = matchingNfEntry[1].irrf;
-                    cnpjFilial = matchingNfEntry[1].cnpjPrestador;
-                    // Procura o arquivo PDF que contenha o número da nota no nome
-                    nfseMatch = nfseFiles.find(f => f.name.includes(nfNumber)) || null;
                 }
             }
 
-            // 2. Fallback: manual mapping for NF
+            // Fallback: manual mapping for NF
             if (!nfseMatch) {
                 const manual = Object.entries(manualMappings).find(([fileName, map]) => map.consolidadoId === loja.consolidadoId && map.type === 'nfse');
                 if (manual) {
                     nfseMatch = nfseFiles.find(f => f.name === manual[0]) || null;
+                    if (nfseMatch) statusNF = 'EMITIDA';
                 }
             }
 
-            return { ...loja, nfse: nfseMatch, statusNF, numeroNF, descontoIR, cnpjFilial };
+            const xmlData = loja.numero_nf ? xmlParsedData[loja.numero_nf] : null;
+
+            return {
+                ...loja,
+                nfse: nfseMatch,
+                statusNF,
+                numeroNF: loja.numero_nf,
+                descontoIR: xmlData?.irrf || 0,
+                cnpjFilial: xmlData?.cnpjPrestador || null
+            };
         });
 
         // 3. SMART MATCH BOLETOS (Conta Azul style with Queue for splits)
@@ -199,8 +219,6 @@ export default function FechamentoLote({
 
         const matchedBoletoNames = new Set<string>();
         const reportsWithBoletos = initialReports.map(report => {
-            const normalizedStoreName = normalizarNome(report.nome);
-
             // Try manual mapping first
             const manual = Object.entries(manualMappings).find(([fileName, map]) => map.consolidadoId === report.consolidadoId && map.type === 'boleto');
             if (manual) {
@@ -211,12 +229,16 @@ export default function FechamentoLote({
                 }
             }
 
-            // Automatic Smatch Match (normalized name)
-            // We use a queue-like approach: find files matching normalized name that aren't already matched
+            // Automatic Smatch Match (normalized name) with priority for nomeContaAzul
+            const normalizedStoreName = normalizarNome(report.nomeContaAzul);
+            const normalizedRazao = normalizarNome(report.razaoSocial);
+
             const boletoMatch = boletoFiles.find(f => {
                 if (matchedBoletoNames.has(f.name)) return false;
-                const normalizedFile = normalizarNome(f.name.replace(/boleto|_|\.pdf/gi, " "));
-                return normalizedFile.includes(normalizedStoreName) || normalizedStoreName.includes(normalizedFile);
+                if (!f.name.toLowerCase().endsWith(".pdf")) return false; // Somente PDFs
+                const normalizedFile = normalizarNome(f.name.replace(/\.pdf$/i, ""));
+                return normalizedFile === normalizedStoreName || normalizedFile === normalizedRazao ||
+                    normalizedFile.includes(normalizedStoreName) || normalizedStoreName.includes(normalizedFile);
             });
 
             if (boletoMatch) {
@@ -339,14 +361,28 @@ export default function FechamentoLote({
                 // Remove antigos antes de re-inserir para garantir idempotência ao clicar múltiplas vezes
                 await supabase.from('faturamento_consolidados').delete().eq('lote_id', currentLoteId);
 
-                const { error: consolidadosErr } = await supabase
+                const { data: inserted, error: consolidadosErr } = await supabase
                     .from('faturamento_consolidados')
-                    .insert(consolidadosPayload);
+                    .insert(consolidadosPayload)
+                    .select('id, cliente_id, data_competencia');
 
                 if (consolidadosErr) {
                     console.error("🚨 ERRO CONSOLIDADOS:", consolidadosErr);
                     alert("Falha ao criar painel de consolidados (IRRF e Totais da NF): " + consolidadosErr.message);
                     return;
+                }
+
+                if (inserted) {
+                    const idMap: Record<string, string> = {};
+                    const validadosParaMap = agendamentos.filter(a => !a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO") && a.clienteId);
+                    inserted.forEach(row => {
+                        // Recria a uniqueKey p/ o mapeamento
+                        const client = validadosParaMap.find(v => v.clienteId === row.cliente_id);
+                        const isQueiroz = client?.loja.includes('(Mês Anterior)') || client?.loja.includes('(Mês Atual)');
+                        const key = isQueiroz ? `${row.cliente_id}_${client?.loja}` : (row.cliente_id || "");
+                        idMap[key] = row.id;
+                    });
+                    setDbConsolidados(idMap);
                 }
             }
 
@@ -448,7 +484,8 @@ export default function FechamentoLote({
                 .map(async r => {
                     const formData = new FormData();
                     formData.append("loteId", targetLoteId!);
-                    formData.append("consolidadoId", r.consolidadoId);
+                    const dbId = dbConsolidados[r.id] || r.consolidadoId;
+                    formData.append("consolidadoId", dbId);
                     formData.append("docType", "hc");
                     formData.append("storeName", r.nomeContaAzul || r.razaoSocial || r.nome);
                     formData.append("cycleName", (r as any).ciclo || "Geral");
@@ -481,7 +518,8 @@ export default function FechamentoLote({
                 .map(async r => {
                     const formData = new FormData();
                     formData.append("loteId", targetLoteId!);
-                    formData.append("consolidadoId", r.consolidadoId);
+                    const dbId = dbConsolidados[r.id] || r.consolidadoId;
+                    formData.append("consolidadoId", dbId);
                     formData.append("docType", "nf");
                     formData.append("storeName", r.nomeContaAzul || r.razaoSocial || r.nome);
                     formData.append("cycleName", (r as any).ciclo || "Geral");
@@ -981,7 +1019,7 @@ export default function FechamentoLote({
                     </div>
                     <p className="text-sm text-[var(--fg-dim)] mb-6">Estes arquivos não foram associados automaticamente. Por favor, vincule-os manualmente às lojas do lote.</p>
 
-                    <div className="grid md:grid-cols-2 gap-8">
+                    <div className="grid md:grid-cols-2 gap-8 mb-8">
                         {/* NFs Órfãs */}
                         {matchFiles.orphanNfses.length > 0 && (
                             <div className="space-y-4">
