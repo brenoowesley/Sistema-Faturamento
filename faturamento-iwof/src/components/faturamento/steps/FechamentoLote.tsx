@@ -10,8 +10,18 @@ import { createClient } from "@/lib/supabase/client";
 interface FechamentoLoteProps {
     setCurrentStep: (s: number) => void;
     agendamentos: Agendamento[];
-    nfseFiles: { name: string; blob: Blob; buffer: ArrayBuffer }[]; // Preserving standard nfse state if already generated
-    setNfseFiles?: React.Dispatch<React.SetStateAction<{ name: string; blob: Blob; buffer: ArrayBuffer }[]>>;
+    nfseFiles: {
+        name: string;
+        blob: Blob;
+        buffer: ArrayBuffer;
+        fiscalData?: {
+            numero: string;
+            valorIr: number;
+            cnpj: string;
+            valorServicos: number;
+        }
+    }[];
+    setNfseFiles?: React.Dispatch<React.SetStateAction<any[]>>;
     financialSummary: FinancialSummary;
     saving: boolean;
     saveResult?: { ok: number; err: number; loteId?: string } | null;
@@ -110,6 +120,8 @@ export default function FechamentoLote({
         numero_nf?: string | null;
         descontoIR: number;
         cnpjFilial?: string | null;
+        isXmlMatched?: boolean;
+        xmlValorServicos?: number;
     }
 
     const matchFiles = useMemo(() => {
@@ -140,7 +152,8 @@ export default function FechamentoLote({
                     valorBase: 0,
                     totalFaturar: 0,
                     valorAcrescimos: 0,
-                    valorDescontos: 0
+                    valorDescontos: 0,
+                    isXmlMatched: false
                 });
             }
 
@@ -171,6 +184,17 @@ export default function FechamentoLote({
                 lojaEntry.valorAcrescimos += (finalVal - baseVal);
             } else if (finalVal < baseVal) {
                 lojaEntry.valorDescontos += (baseVal - finalVal);
+            }
+
+            // --- XML Data Matching (Senior Rule) ---
+            // If we have an XML file with a matching CNPJ, prioritize its fiscal data
+            const matchingXml = nfseFiles.find(f => f.fiscalData && f.fiscalData.cnpj === lojaEntry.cnpj);
+            if (matchingXml?.fiscalData) {
+                lojaEntry.numero_nf = matchingXml.fiscalData.numero;
+                lojaEntry.descontoIR = matchingXml.fiscalData.valorIr;
+                lojaEntry.isXmlMatched = true;
+                lojaEntry.xmlValorServicos = matchingXml.fiscalData.valorServicos;
+                console.log(`[XML Match] Found data for ${lojaEntry.nome}: NF ${lojaEntry.numero_nf}, IR ${lojaEntry.descontoIR}`);
             }
         }
 
@@ -1026,7 +1050,12 @@ export default function FechamentoLote({
                                             {r.statusNF === 'EMITIDA' ? fmtCurrency(r.totalFaturar) : '—'}
                                         </td>
                                         <td className="py-4 px-6 text-right font-mono text-[12px] text-purple-400">
-                                            {r.descontoIR && r.descontoIR > 0 ? `- ${fmtCurrency(r.descontoIR)}` : '—'}
+                                            <div className="flex flex-col items-end">
+                                                {r.descontoIR && r.descontoIR > 0 ? `- ${fmtCurrency(r.descontoIR)}` : '—'}
+                                                {r.isXmlMatched && (
+                                                    <span className="text-[9px] bg-purple-500/20 text-purple-400 px-1 rounded border border-purple-500/30 mt-0.5 font-bold">XML</span>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="py-4 px-6 text-right">
                                             <span className="font-mono text-[13px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-md">

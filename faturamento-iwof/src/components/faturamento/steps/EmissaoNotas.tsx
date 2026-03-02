@@ -12,8 +12,28 @@ interface EmissaoNotasProps {
     selectedCicloIds: string[];
     lojasSemNf: Set<string>;
     agendamentos: any[];
-    nfseFiles: { name: string; blob: Blob; buffer: ArrayBuffer }[];
-    setNfseFiles: React.Dispatch<React.SetStateAction<{ name: string; blob: Blob; buffer: ArrayBuffer }[]>>;
+    nfseFiles: {
+        name: string;
+        blob: Blob;
+        buffer: ArrayBuffer;
+        fiscalData?: {
+            numero: string;
+            valorIr: number;
+            cnpj: string;
+            valorServicos: number;
+        }
+    }[];
+    setNfseFiles: React.Dispatch<React.SetStateAction<{
+        name: string;
+        blob: Blob;
+        buffer: ArrayBuffer;
+        fiscalData?: {
+            numero: string;
+            valorIr: number;
+            cnpj: string;
+            valorServicos: number;
+        }
+    }[]>>;
 }
 
 export default function EmissaoNotas({
@@ -146,11 +166,32 @@ export default function EmissaoNotas({
         }
     };
 
+    const extractFiscalDataFromXml = (xmlText: string) => {
+        try {
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+            const numero = xmlDoc.getElementsByTagName("Numero")[0]?.textContent || xmlDoc.getElementsByTagName("numero")[0]?.textContent || "";
+            const valorIrStr = xmlDoc.getElementsByTagName("ValorIr")[0]?.textContent || xmlDoc.getElementsByTagName("valor_ir")[0]?.textContent || "0";
+            const cnpjTomador = xmlDoc.getElementsByTagName("Cnpj")[0]?.textContent || xmlDoc.getElementsByTagName("cnpj")[0]?.textContent || "";
+            const valorServicosStr = xmlDoc.getElementsByTagName("ValorServicos")[0]?.textContent || xmlDoc.getElementsByTagName("valor_servicos")[0]?.textContent || "0";
+            return {
+                numero,
+                valorIr: parseFloat(valorIrStr.replace(',', '.')),
+                cnpj: cnpjTomador.replace(/\D/g, ''),
+                valorServicos: parseFloat(valorServicosStr.replace(',', '.'))
+            };
+        } catch (e) {
+            console.error("Erro ao fazer parse do XML fiscal:", e);
+            return null;
+        }
+    };
+
+
     const processDroppedFile = async (files: File[]) => {
         setIsExtracting(true);
         setExtractError(null);
         try {
-            const extractedFiles: { name: string; blob: Blob; buffer: ArrayBuffer }[] = [...nfseFiles];
+            const extractedFiles: any[] = [...nfseFiles];
 
             for (const file of files) {
                 if (file.name.toLowerCase().endsWith('.zip')) {
@@ -171,19 +212,37 @@ export default function EmissaoNotas({
                             const fileData = await zipObj.async("blob");
                             const fileBuffer = await zipObj.async("arraybuffer");
                             let cleanName = filename.split('/').pop() || filename;
+
+                            let fiscalData;
+                            if (cleanName.toLowerCase().endsWith('.xml')) {
+                                const xmlText = await zipObj.async("text");
+                                fiscalData = extractFiscalDataFromXml(xmlText);
+                                if (fiscalData) console.log(`[XML Extract] ${cleanName}:`, fiscalData);
+                            }
+
                             extractedFiles.push({
                                 name: cleanName,
                                 blob: fileData,
-                                buffer: fileBuffer
+                                buffer: fileBuffer,
+                                fiscalData
                             });
                         }
                     }
                 } else if (file.name.toLowerCase().endsWith('.xml') || file.name.toLowerCase().endsWith('.pdf')) {
                     const arrayBuffer = await file.arrayBuffer();
+
+                    let fiscalData;
+                    if (file.name.toLowerCase().endsWith('.xml')) {
+                        const xmlText = await file.text();
+                        fiscalData = extractFiscalDataFromXml(xmlText);
+                        if (fiscalData) console.log(`[XML Extract] ${file.name}:`, fiscalData);
+                    }
+
                     extractedFiles.push({
                         name: file.name,
                         blob: file,
-                        buffer: arrayBuffer
+                        buffer: arrayBuffer,
+                        fiscalData
                     });
                 } else {
                     setExtractError(prev => (prev ? prev + "\n" : "") + `Formato não suportado: ${file.name}`);
