@@ -82,7 +82,8 @@ export default function WizardFaturamento() {
         const geralArquivoSet = new Set<string>();
 
         for (const a of agendamentos) {
-            const companyKey = a.clienteId || String(a.refAgendamento) || a.loja;
+            const isQueirozSplit = a.loja.includes('(Mês Anterior)') || a.loja.includes('(Mês Atual)');
+            const companyKey = isQueirozSplit ? `${a.clienteId}_${a.loja}` : (a.clienteId || String(a.refAgendamento) || a.loja);
 
             originalBruto += a.originalValorIwof ?? a.valorIwof;
             originalBrutoSet.add(companyKey);
@@ -385,26 +386,39 @@ export default function WizardFaturamento() {
         const d2_check = periodoFim ? new Date(periodoFim + "T12:00:00") : null;
         const isCrossMonth = d1_check && d2_check && (d1_check.getMonth() !== d2_check.getMonth() || d1_check.getFullYear() !== d2_check.getFullYear());
 
-        if (isCrossMonth && queirozConfig) {
-            const splitDateVal = new Date(queirozConfig.splitDate + "T23:59:59").getTime();
+        const isQueirozSelected = ciclos.some(c => selectedCicloIds.includes(c.id) && c.nome.toUpperCase().includes('QUEIROZ'));
+        const splitDate = queirozConfig?.splitDate;
+        const compAnterior = queirozConfig?.compAnterior;
+        const compAtual = queirozConfig?.compAtual;
+        const dataCompetencia = periodoInicio || new Date().toISOString().split("T")[0];
 
-            for (const a of parsed) {
-                if (a.cicloNome?.includes("QUEIROZ") && a.inicio) {
-                    const isAfterSplit = a.inicio.getTime() > splitDateVal;
-                    const comp = isAfterSplit ? queirozConfig.compAtual : queirozConfig.compAnterior;
-                    const monthSuffix = isAfterSplit ? "Mês Atual" : "Mês Anterior";
+        for (const a of parsed) {
+            // 1. Valores padrão para 99% das lojas (Fluxo Normal)
+            let compAtribuida = dataCompetencia;
+            let nomeLojaAtribuida = a.loja;
 
-                    finalParsed.push({
-                        ...a,
-                        loja: `${a.loja} (${monthSuffix})`,
-                        rawRow: { ...a.rawRow, data_competencia: comp }
-                    });
+            // 2. Barreira de Proteção: Apenas executa o split se for ciclo QUEIROZ
+            const isLinhaQueiroz = a.cicloNome && a.cicloNome.toUpperCase().includes('QUEIROZ');
+
+            if (isQueirozSelected && splitDate && isLinhaQueiroz && a.inicio) {
+                const dataInicioAgend = new Date(a.inicio);
+                const dataCorte = new Date(splitDate + "T23:59:59");
+
+                if (dataInicioAgend <= dataCorte) {
+                    compAtribuida = compAnterior || dataCompetencia;
+                    nomeLojaAtribuida = `${a.loja} (Mês Anterior)`;
                 } else {
-                    finalParsed.push(a);
+                    compAtribuida = compAtual || dataCompetencia;
+                    nomeLojaAtribuida = `${a.loja} (Mês Atual)`;
                 }
             }
-        } else {
-            finalParsed = parsed;
+
+            finalParsed.push({
+                ...a,
+                loja: nomeLojaAtribuida,
+                data_competencia: compAtribuida,
+                rawRow: { ...a.rawRow, data_competencia: compAtribuida }
+            });
         }
 
         const identicalMap: Map<string, Agendamento[]> = new Map();

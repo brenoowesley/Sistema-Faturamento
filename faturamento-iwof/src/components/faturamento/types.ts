@@ -49,6 +49,7 @@ export interface Agendamento {
     razaoSocial?: string | null;
     cnpj?: string | null;
     cicloNome: string | null;      // from DB join
+    data_competencia?: string;     // assigned period (YYYY-MM-DD or YYYY-MM)
     rawRow: Record<string, string>;
 
     // Interactive fields

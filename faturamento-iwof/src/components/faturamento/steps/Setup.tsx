@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { UploadCloud, CheckCircle2, ChevronRight, FileSpreadsheet, X, AlertTriangle } from "lucide-react";
 import { useDropzone } from "react-dropzone";
 import * as Papa from "papaparse";
@@ -44,15 +44,15 @@ export default function Setup({
 }: SetupProps) {
     const [files, setFiles] = useState<File[]>([]);
 
+    useEffect(() => {
+        setFileName(files.map(f => f.name).join(", "));
+    }, [files, setFileName]);
+
     const onDrop = useCallback((acceptedFiles: File[]) => {
         if (acceptedFiles.length > 0) {
-            setFiles(prev => {
-                const newFiles = [...prev, ...acceptedFiles];
-                setFileName(newFiles.map(f => f.name).join(", "));
-                return newFiles;
-            });
+            setFiles(prev => [...prev, ...acceptedFiles]);
         }
-    }, [setFileName]);
+    }, []);
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
@@ -263,9 +263,7 @@ export default function Setup({
                                         className="btn btn-sm btn-ghost text-[var(--danger)] px-2 h-auto py-1"
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            const newFiles = files.filter((_, index) => index !== i);
-                                            setFiles(newFiles);
-                                            setFileName(newFiles.map(file => file.name).join(", "));
+                                            setFiles(files.filter((_, index) => index !== i));
                                         }}
                                     >
                                         <X size={14} />

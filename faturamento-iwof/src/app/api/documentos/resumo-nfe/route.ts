@@ -69,22 +69,30 @@ export async function POST(req: NextRequest) {
             const lojaId = a.clienteId;
             if (!lojaId) return;
 
-            if (!consolidatedMap.has(lojaId)) {
-                consolidatedMap.set(lojaId, {
+            // Para o Queiroz, a chave deve ser composta pelo ID + Competência se houver split
+            const dataComp = a.rawRow?.data_competencia || "NORMAL";
+            const uniqueKey = `${lojaId}_${dataComp}`;
+
+            if (!consolidatedMap.has(uniqueKey)) {
+                consolidatedMap.set(uniqueKey, {
                     cliente_id: lojaId,
+                    data_competencia: a.rawRow?.data_competencia,
                     valor_bruto: 0,
                     acrescimos: 0,
                     descontos: 0,
                     clientes: clienteMap.get(lojaId),
                 });
             }
-            const store = consolidatedMap.get(lojaId)!;
+            const store = consolidatedMap.get(uniqueKey)!;
             store.valor_bruto += Number(a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof)) || 0;
         });
 
         ajustes?.forEach(aj => {
-            const store = consolidatedMap.get(aj.cliente_id);
-            if (store) {
+            // Se houver split, aplicamos o ajuste ao primeiro registro encontrado para esse cliente
+            // para evitar duplicar o ajuste em ambos os meses do split.
+            const keys = Array.from(consolidatedMap.keys()).filter(k => k.startsWith(`${aj.cliente_id}_`));
+            if (keys.length > 0) {
+                const store = consolidatedMap.get(keys[0]);
                 if (aj.tipo === "ACRESCIMO") store.acrescimos += Number(aj.valor);
                 if (aj.tipo === "DESCONTO") store.descontos += Number(aj.valor);
             }

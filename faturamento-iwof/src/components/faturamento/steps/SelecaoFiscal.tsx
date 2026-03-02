@@ -38,10 +38,12 @@ export default function SelecaoFiscal({
         }>();
 
         for (const a of validados) {
-            const cid = a.clienteId!;
-            if (!map.has(cid)) {
-                map.set(cid, {
-                    id: cid,
+            const isQueirozSplit = a.loja.includes('(Mês Anterior)') || a.loja.includes('(Mês Atual)');
+            const uniqueKey = isQueirozSplit ? `${a.clienteId}_${a.loja}` : a.clienteId!;
+
+            if (!map.has(uniqueKey)) {
+                map.set(uniqueKey, {
+                    id: uniqueKey,
                     nomeCliente: a.loja,
                     razaoSocial: a.razaoSocial || a.loja,
                     cnpj: a.cnpj || "Sem CNPJ",
@@ -50,7 +52,7 @@ export default function SelecaoFiscal({
                 });
             }
 
-            const current = map.get(cid)!;
+            const current = map.get(uniqueKey)!;
             current.numAgendamentos += 1;
             const valor = a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof);
             current.valorSugerido += valor;

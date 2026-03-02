@@ -117,11 +117,15 @@ export default function FechamentoLote({
             a.clienteId
         );
 
-        const lojasUnicas = new Map<string, { nome: string; id: string; razaoSocial: string; cnpj: string | undefined; totalFaturar: number; valorBase: number; valorAcrescimos: number; valorDescontos: number; }>();
+        const lojasUnicas = new Map<string, { nome: string; id: string; razaoSocial: string; cnpj: string | undefined; totalFaturar: number; valorBase: number; valorAcrescimos: number; valorDescontos: number; data_competencia?: string }>();
         for (const a of validados) {
-            // FIX QUEIROZ: Cria uma chave única combinando o ID e o sufixo do mês para forçar a separação na consolidação
-            const isQueirozSplit = a.loja.includes('(Mês');
-            const uniqueKey = isQueirozSplit ? `${a.clienteId}-${a.loja}` : a.clienteId!;
+            // Verifica se a loja atual passou pelo processo de split do Queiroz no Passo 1
+            const isQueirozSplit = a.loja.includes('(Mês Anterior)') || a.loja.includes('(Mês Atual)');
+
+            // FIX ESTRITO: 
+            // Se NÃO for Queiroz, agrupa normalmente pelo clienteId (junta tudo da loja numa fatura só).
+            // Se FOR Queiroz, agrupa pelo ID + Sufixo (separa em duas faturas distintas).
+            const uniqueKey = isQueirozSplit ? `${a.clienteId}_${a.loja}` : a.clienteId!;
 
             if (!lojasUnicas.has(uniqueKey)) {
                 lojasUnicas.set(uniqueKey, {
@@ -129,6 +133,7 @@ export default function FechamentoLote({
                     nome: a.loja, // Mantém o sufixo (Mês Atual)/(Mês Anterior)
                     razaoSocial: a.razaoSocial || a.loja,
                     cnpj: a.cnpj?.replace(/\D/g, ''),
+                    data_competencia: a.data_competencia,
                     totalFaturar: 0,
                     valorBase: 0,
                     valorAcrescimos: 0,
@@ -285,6 +290,7 @@ export default function FechamentoLote({
             const consolidadosPayload = matchFiles.reports.map(r => ({
                 lote_id: currentLoteId,
                 cliente_id: r.id,
+                data_competencia: r.data_competencia || null, // FIX: Preserva a competência em caso de split
                 valor_bruto: r.totalFaturar || 0,
                 acrescimos: 0,
                 descontos: 0,
