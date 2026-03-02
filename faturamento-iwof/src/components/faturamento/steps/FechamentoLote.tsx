@@ -132,10 +132,10 @@ export default function FechamentoLote({
                     id: a.clienteId!,
                     nome: a.loja,
                     razaoSocial: a.razaoSocial || a.loja,
-                    nomeContaAzul: a.nome_conta_azul || a.nomeNomeContaAzul || a.razaoSocial || a.loja, // Prioridade para nome_conta_azul
+                    nomeContaAzul: a.nome_conta_azul || a.razaoSocial || a.loja, // Prioridade para nome_conta_azul
                     cnpj: a.cnpj?.replace(/\D/g, ''),
                     data_competencia: a.data_competencia || a.dataCompetencia,
-                    ciclo: (a as any).ciclo || "-", // Captura o ciclo para a hierarquia do Drive
+                    ciclo: a.ciclo || "-", // Captura o ciclo para a hierarquia do Drive
                     valorBase: 0,
                     totalFaturar: 0,
                     valorAcrescimos: 0,

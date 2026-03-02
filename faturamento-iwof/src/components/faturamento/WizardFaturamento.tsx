@@ -370,6 +370,8 @@ export default function WizardFaturamento() {
                 razaoSocial: matched?.razao_social ?? null,
                 cnpj: matched?.cnpj ?? null,
                 cicloNome: matched?.ciclos_faturamento?.nome ?? null,
+                nome_conta_azul: matched?.nome_conta_azul ?? null,
+                ciclo: matched?.ciclos_faturamento?.nome ?? null,
                 rawRow: row,
                 suggestedFracaoHora,
                 suggestedValorIwof,
