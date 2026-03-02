@@ -54,7 +54,14 @@ export async function POST(request: Request) {
 
         const formData = await request.formData();
         const loteId = formData.get('loteId') as string;
-        const files = formData.getAll('files') as File[];
+        // Captura os arquivos independentemente de como o frontend os nomeou no FormData
+        const files = [
+            ...formData.getAll('files'),
+            ...formData.getAll('file'),
+            ...formData.getAll('files[]'),
+            ...formData.getAll('boletos'),
+            ...formData.getAll('nfse')
+        ] as File[];
 
         if (!loteId) throw new Error("ID do Lote não fornecido na requisição.");
         if (!files || files.length === 0) throw new Error("Nenhum arquivo recebido para upload.");

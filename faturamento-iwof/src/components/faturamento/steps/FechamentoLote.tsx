@@ -409,9 +409,11 @@ export default function FechamentoLote({
 
             const formData = new FormData();
             formData.append("loteId", targetLoteId);
-            for (const fileObj of boletoFiles) {
+
+            // Enviando todos os boletos sob a chave 'files'
+            boletoFiles.forEach(fileObj => {
                 formData.append("files", fileObj.file, fileObj.name);
-            }
+            });
 
             const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
 
@@ -440,9 +442,11 @@ export default function FechamentoLote({
 
             const formData = new FormData();
             formData.append("loteId", targetLoteId);
-            for (const fileObj of nfseFiles) {
+
+            // Enviando todas as NFs sob a chave 'files'
+            nfseFiles.forEach(fileObj => {
                 formData.append("files", fileObj.blob, fileObj.name);
-            }
+            });
 
             const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
             if (!res.ok) {

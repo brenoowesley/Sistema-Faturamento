@@ -566,8 +566,8 @@ export default function WizardFaturamento() {
             });
 
             // 1. CRIA O LOTE INICIAL ('faturamentos_lote')
-            const qzAnterior = queirozConfig?.compAnterior ? `${queirozConfig.compAnterior}-01` : null;
-            const qzAtual = queirozConfig?.compAtual ? `${queirozConfig.compAtual}-01` : null;
+            const qzAnterior = queirozConfig?.compAnterior ? (String(queirozConfig.compAnterior).length === 7 ? `${queirozConfig.compAnterior}-01` : queirozConfig.compAnterior) : null;
+            const qzAtual = queirozConfig?.compAtual ? (String(queirozConfig.compAtual).length === 7 ? `${queirozConfig.compAtual}-01` : queirozConfig.compAtual) : null;
 
             const { data: loteObj, error: loteErr } = await supabase
                 .from("faturamentos_lote")
