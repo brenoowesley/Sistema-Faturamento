@@ -395,15 +395,15 @@ export default function ResumoFaturamento({
                                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                                 {items.map(a => (
                                                     <div key={a.id} className="flex flex-col p-4 rounded-xl border border-[var(--border)] bg-[rgba(255,255,255,0.02)] gap-3 relative overflow-hidden group shadow-sm hover:shadow-md transition-shadow">
-                                                        <div className="flex items-start justify-between">
-                                                            <div>
-                                                                <p className="font-bold text-[var(--fg)] text-sm pr-12 line-clamp-1" title={a.nome}>{a.nome}</p>
-                                                                <p className="text-xs text-[var(--fg-dim)] truncate mt-0.5">{a.loja} • {a.vaga}</p>
+                                                        <div className="flex items-start justify-between relative">
+                                                            <div className="pr-16 w-full">
+                                                                <p className="font-bold text-[var(--fg)] text-sm leading-tight break-words" title={a.nome}>{a.nome}</p>
+                                                                <p className="text-xs text-[var(--fg-dim)] mt-1.5 leading-tight break-words">{a.loja} <br /> <span className="opacity-70 mt-0.5 inline-block">{a.vaga}</span></p>
                                                             </div>
                                                             {a.status === "CANCELAR" ? (
-                                                                <span className="text-[10px] font-bold px-2 py-1 bg-[var(--danger)]/10 text-[var(--danger)] rounded border border-[var(--danger)]/20 absolute top-4 right-4 shadow-sm">CANCELAR</span>
+                                                                <span className="text-[10px] font-bold px-2 py-1 bg-[var(--danger)]/10 text-[var(--danger)] rounded border border-[var(--danger)]/20 absolute top-0 right-0 shadow-sm">CANCELAR</span>
                                                             ) : (
-                                                                <span className="text-[10px] font-bold px-2 py-1 bg-amber-500/10 text-amber-500 rounded border border-amber-500/20 absolute top-4 right-4 shadow-sm">CORREÇÃO</span>
+                                                                <span className="text-[10px] font-bold px-2 py-1 bg-amber-500/10 text-amber-500 rounded border border-amber-500/20 absolute top-0 right-0 shadow-sm">CORREÇÃO</span>
                                                             )}
                                                         </div>
 
@@ -569,6 +569,32 @@ export default function ResumoFaturamento({
                     </div>
                 </div>
             )}
+
+            <div className="flex justify-between items-center pt-6 border-t border-[var(--border)] mt-4">
+                <button
+                    className="btn btn-ghost text-[var(--fg-dim)]"
+                    onClick={() => setCurrentStep(1)}
+                    disabled={saving}
+                >
+                    <ArrowLeft size={20} className="mr-2" /> Voltar
+                </button>
+
+                <button
+                    className="btn btn-primary btn-lg shadow-lg hover:shadow-xl transition-all min-w-[200px]"
+                    onClick={handleSaveLoteInicial}
+                    disabled={saving}
+                >
+                    {saving ? (
+                        <>
+                            <span className="loading loading-spinner w-5 h-5"></span> Gravando...
+                        </>
+                    ) : (
+                        <>
+                            Gravar Lote e Avançar <ChevronRight size={20} className="ml-2" />
+                        </>
+                    )}
+                </button>
+            </div>
         </div>
     );
 }
