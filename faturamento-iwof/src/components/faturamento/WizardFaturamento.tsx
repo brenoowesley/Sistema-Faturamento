@@ -520,7 +520,7 @@ export default function WizardFaturamento() {
 
         setProcessing(false);
         setCurrentStep(2);
-    }, [supabase, periodoInicio, periodoFim, selectedCicloIds, queirozConfig]);
+    }, [supabase, periodoInicio, periodoFim, selectedCicloIds, queirozConfig, ciclos]);
 
     const handleManualStoreMatch = (lojaRawName: string, clienteId: string) => {
         const cliente = dbClientes.find(c => c.id === clienteId);
