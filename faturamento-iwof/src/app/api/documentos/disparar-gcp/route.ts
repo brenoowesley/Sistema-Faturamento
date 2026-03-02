@@ -30,7 +30,9 @@ async function getOrCreateFolder(folderName: string, parentFolderId: string) {
             q,
             fields: 'files(id, name)',
             spaces: 'drive',
-            pageSize: 1
+            pageSize: 1,
+            supportsAllDrives: true,
+            includeItemsFromAllDrives: true
         });
 
         if (res.data.files && res.data.files.length > 0 && res.data.files[0].id) {
@@ -43,7 +45,8 @@ async function getOrCreateFolder(folderName: string, parentFolderId: string) {
             };
             const createRes = await drive.files.create({
                 requestBody: fileMetadata,
-                fields: 'id'
+                fields: 'id',
+                supportsAllDrives: true
             });
             return createRes.data.id;
         }
@@ -438,7 +441,8 @@ export async function POST(req: NextRequest) {
                 ciclo_mensal: cyclePeriodStr,
                 lote_id: lote.id,
                 data_faturamento: new Date().toLocaleDateString("pt-BR"),
-                lojas: payloadHC
+                lojas: payloadHC,
+                driveFolderId: rootFolderId
             };
             gcpFetchTasks.push(() => fetch(pubHCUrl, { method: "POST", headers, body: JSON.stringify(masterHCPayload) }));
             console.log(`[GCP HC] Disparando 1 pacote global com ${payloadHC.length} lojas.`);
@@ -451,7 +455,8 @@ export async function POST(req: NextRequest) {
                 ciclo_mensal: cyclePeriodStr,
                 lote_id: lote.id,
                 data_faturamento: new Date().toLocaleDateString("pt-BR"),
-                lojas: payloadNC
+                lojas: payloadNC,
+                driveFolderId: rootFolderId
             };
             gcpFetchTasks.push(() => fetch(pubNCUrl, { method: "POST", headers, body: JSON.stringify(masterNCPayload) }));
             console.log(`[GCP NC] Disparando 1 pacote global com ${payloadNC.length} lojas.`);

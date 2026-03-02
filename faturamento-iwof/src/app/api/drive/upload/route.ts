@@ -34,13 +34,24 @@ const supabaseAdmin = createClient(
 async function findOrCreateFolder(folderName: string, parentFolderId: string) {
     try {
         const q = `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`;
-        const res = await drive.files.list({ q, fields: 'files(id, name)', spaces: 'drive', pageSize: 1 });
+        const res = await drive.files.list({
+            q,
+            fields: 'files(id, name)',
+            spaces: 'drive',
+            pageSize: 1,
+            supportsAllDrives: true,
+            includeItemsFromAllDrives: true
+        });
 
         if (res.data.files && res.data.files.length > 0 && res.data.files[0].id) {
             return res.data.files[0].id;
         } else {
             const fileMetadata = { name: folderName, mimeType: 'application/vnd.google-apps.folder', parents: [parentFolderId] };
-            const createRes = await drive.files.create({ requestBody: fileMetadata, fields: 'id' });
+            const createRes = await drive.files.create({
+                requestBody: fileMetadata,
+                fields: 'id',
+                supportsAllDrives: true
+            });
             return createRes.data.id;
         }
     } catch (error) {
@@ -117,7 +128,8 @@ export async function POST(request: Request) {
             return drive.files.create({
                 requestBody: fileMetadata,
                 media: media,
-                fields: 'id'
+                fields: 'id',
+                supportsAllDrives: true
             });
         });
 
