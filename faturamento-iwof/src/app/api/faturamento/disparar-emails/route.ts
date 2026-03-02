@@ -1,98 +1,109 @@
 import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 import nodemailer from 'nodemailer';
 
-const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: Number(process.env.SMTP_PORT) || 587,
-    secure: false, // true for 465, false for other ports
-    auth: {
-        user: process.env.EMAIL_FINANCEIRO_USER,
-        pass: process.env.EMAIL_FINANCEIRO_PASS,
-    }
-});
-
-function buildFaturaEmailHtml(templateDados: { cicloFolder: string, subfolderName: string, currentMonth: string, currentYear: string }) {
-    return `
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; }
-        .container { max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); }
-        .header { background-color: #1c5d99; color: #ffffff; text-align: center; padding: 20px; }
-        .content { padding: 30px; line-height: 1.6; color: #333333; }
-        .footer { background-color: #f8f9fa; color: #6c757d; text-align: center; padding: 15px; font-size: 12px; }
-        h1 { margin: 0; font-size: 24px; }
-        .highlight { font-weight: bold; color: #2176ff; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Faturamento iWof</h1>
-        </div>
-        <div class="content">
-            <p>Olá equipe <strong>${templateDados.subfolderName}</strong>,</p>
-            <p>Segue em anexo o faturamento referente ao período <strong>${templateDados.currentMonth}/${templateDados.currentYear}</strong>.</p>
-            <p>Ciclo de faturamento: <span class="highlight">${templateDados.cicloFolder}</span>.</p>
-            <hr>
-            <p>Os documentos anexados incluem:</p>
-            <ul>
-                <li>Boleto Bancário</li>
-                <li>Nota Fiscal de Serviço (NFS-e)</li>
-            </ul>
-            <p>Por favor, certifique-se de realizar o pagamento até a data de vencimento estipulada no boleto.</p>
-            <p>Qualquer dúvida, nossa equipe financeira está à disposição para auxiliar.</p>
-        </div>
-        <div class="footer">
-            <p>Este é um e-mail automático enviado pelo sistema de Faturamento iWof. Por favor, não responda a este e-mail.</p>
-            <p>&copy; ${templateDados.currentYear} iWof. Todos os direitos reservados.</p>
-        </div>
-    </div>
-</body>
-</html>
-    `;
-}
+const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export async function POST(request: Request) {
     try {
-        // Here you would parse request.json(), or fetch directly from the DB regarding the recent Lote
-        // Because this is a migration, we are mocking the success of fetching Drive files and sending emails
-        console.log('[Next.js API] Iniciando disparo de e-mails de Faturamento...');
+        const { loteId } = await request.json();
+        if (!loteId) throw new Error("ID do Lote não fornecido.");
 
-        const dt = new Date();
-        const currentYear = dt.getFullYear().toString();
-        const currentMonth = (dt.getMonth() + 1).toString().padStart(2, '0');
+        // 1. Buscar os consolidados e os dados do cliente (Join)
+        const { data: consolidados, error: consErr } = await supabaseAdmin
+            .from('faturamento_consolidados')
+            .select(`
+                id,
+                valor_bruto,
+                valor_boleto_final,
+                valor_nc_final,
+                numero_nf,
+                cliente_id,
+                clientes ( nome, razao_social, emails_faturamento )
+            `)
+            .eq('lote_id', loteId);
 
-        const mockTemplateData = {
-            cicloFolder: "M2",
-            subfolderName: "Cliente Exemplo SA",
-            currentMonth,
-            currentYear
+        if (consErr || !consolidados) throw new Error(`Erro ao buscar dados: ${consErr?.message}`);
+
+        // 2. Configurar o Transportador de E-mail (SMTP)
+        const transporter = nodemailer.createTransport({
+            host: process.env.SMTP_HOST || 'smtp.gmail.com', // Padrão Gmail/Google Workspace
+            port: parseInt(process.env.SMTP_PORT || '465'),
+            secure: process.env.SMTP_PORT === '465',
+            auth: {
+                user: process.env.SMTP_USER,
+                pass: process.env.SMTP_PASS,
+            }
+        });
+
+        const resultados = [];
+
+        // 3. Disparar e-mails individualmente
+        for (const item of consolidados) {
+            const cliente = Array.isArray(item.clientes) ? item.clientes[0] : item.clientes;
+
+            if (!cliente || !cliente.emails_faturamento) {
+                resultados.push({ cliente: cliente?.nome || 'Desconhecido', status: 'Ignorado (Sem e-mail)' });
+                continue;
+            }
+
+            // Lógica de TO e CC baseada na separação por vírgula ou ponto-e-vírgula
+            const emailList = cliente.emails_faturamento
+                .split(/[,;]+/)
+                .map((e: string) => e.trim())
+                .filter((e: string) => e.length > 0);
+
+            if (emailList.length === 0) continue;
+
+            const to = emailList[0];
+            const cc = emailList.slice(1).join(', ');
+
+            // Formatação de Moeda
+            const fmtBRL = (valor: number) => `R$ ${valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+            const mailOptions = {
+                from: `"Financeiro iWof" <${process.env.SMTP_USER}>`,
+                to,
+                cc: cc.length > 0 ? cc : undefined,
+                subject: `Faturamento Mensal - ${cliente.razao_social || cliente.nome}`,
+                html: `
+                    <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; line-height: 1.6;">
+                        <h2 style="color: #0056b3;">Olá, equipe da ${cliente.nome}!</h2>
+                        <p>O faturamento referente a este ciclo já se encontra disponível e consolidado em nosso sistema.</p>
+                        
+                        <div style="background-color: #f8f9fa; padding: 15px; border-left: 4px solid #0056b3; margin: 20px 0;">
+                            <ul style="list-style-type: none; padding: 0; margin: 0;">
+                                <li><strong>Valor Bruto dos Serviços:</strong> ${fmtBRL(item.valor_bruto)}</li>
+                                ${item.valor_boleto_final > 0 ?\`<li><strong style="color: #28a745;">Valor Líquido do Boleto:</strong> \${fmtBRL(item.valor_boleto_final)}</li>\` : ''}
+                                \${item.valor_nc_final > 0 ? \`<li><strong style="color: #dc3545;">Nota de Crédito Provisionada:</strong> \${fmtBRL(item.valor_nc_final)}</li>\` : ''}
+                                \${item.numero_nf ? \`<li><strong>Nota Fiscal:</strong> \${item.numero_nf}</li>\` : ''}
+                            </ul>
+                        </div>
+
+                        <p>Os documentos fiscais (NFSe, Boletos e HCs) foram processados e podem ser acessados através da sua pasta ou plataforma oficial.</p>
+                        <p>Qualquer dúvida sobre os lançamentos, estamos à disposição para esclarecimentos.</p>
+                        <br>
+                        <p>Atenciosamente,<br><strong>Departamento Financeiro - iWof</strong></p>
+                    </div>
+                `
         };
 
-        const htmlContent = buildFaturaEmailHtml(mockTemplateData);
-
-        const mailOptions = {
-            from: `"Financeiro iWof" <${process.env.EMAIL_FINANCEIRO_USER}>`,
-            to: process.env.EMAIL_FINANCEIRO_USER, // Para testes manda pra ele mesmo
-            subject: `Faturamento iWof - ${mockTemplateData.subfolderName} - ${mockTemplateData.currentMonth}/${mockTemplateData.currentYear}`,
-            html: htmlContent,
-            attachments: [] // Em produção: stream de binários do Google Drive
-        };
-
-        /*
-        const result = await transporter.sendMail(mailOptions);
-        console.log(`Email enviado.MessageId: ${ result.messageId }`);
-        */
-        console.log(`E - mail simulado enviado para ${mailOptions.to} `);
-
-        return NextResponse.json({ success: true, message: "E-mails disparados com sucesso (simulado)" });
-
-    } catch (error: any) {
-        console.error("Erro no API /faturamento/disparar-emails:", error);
-        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+        try {
+            await transporter.sendMail(mailOptions);
+            resultados.push({ cliente: cliente.nome, status: 'Enviado', to, cc });
+        } catch (emailErr: any) {
+            console.error(`Erro ao enviar e-mail para \${cliente.nome}:`, emailErr);
+            resultados.push({ cliente: cliente.nome, status: 'Erro', erro: emailErr.message });
+        }
     }
+
+        return NextResponse.json({ success: true, message: "Disparo concluído", resultados });
+
+} catch (error: any) {
+    console.error("🚨 Erro Crítico na API de E-mails:", error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+}
 }
