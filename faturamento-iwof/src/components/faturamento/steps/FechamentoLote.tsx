@@ -120,7 +120,7 @@ export default function FechamentoLote({
             a.clienteId
         );
 
-        const lojasUnicas = new Map<string, { consolidadoId: string; nome: string; id: string; razaoSocial: string; cnpj: string | undefined; totalFaturar: number; valorBase: number; valorAcrescimos: number; valorDescontos: number; data_competencia?: string; ciclo: string }>();
+        const lojasUnicas = new Map<string, { consolidadoId: string; nome: string; id: string; razaoSocial: string; nomeContaAzul: string; cnpj: string | undefined; totalFaturar: number; valorBase: number; valorAcrescimos: number; valorDescontos: number; data_competencia?: string; ciclo: string }>();
 
         for (const a of validados) {
             const isQueirozSplit = a.loja.includes('(Mês Anterior)') || a.loja.includes('(Mês Atual)');
@@ -132,6 +132,7 @@ export default function FechamentoLote({
                     id: a.clienteId!,
                     nome: a.loja,
                     razaoSocial: a.razaoSocial || a.loja,
+                    nomeContaAzul: a.nome_conta_azul || a.nomeNomeContaAzul || a.razaoSocial || a.loja, // Prioridade para nome_conta_azul
                     cnpj: a.cnpj?.replace(/\D/g, ''),
                     data_competencia: a.data_competencia || a.dataCompetencia,
                     ciclo: (a as any).ciclo || "-", // Captura o ciclo para a hierarquia do Drive
@@ -449,7 +450,7 @@ export default function FechamentoLote({
                     formData.append("loteId", targetLoteId!);
                     formData.append("consolidadoId", r.consolidadoId);
                     formData.append("docType", "hc");
-                    formData.append("storeName", r.razaoSocial || r.nome);
+                    formData.append("storeName", r.nomeContaAzul || r.razaoSocial || r.nome);
                     formData.append("cycleName", (r as any).ciclo || "Geral");
                     formData.append("file", r.boleto!.file, r.boleto!.name);
 
@@ -482,7 +483,7 @@ export default function FechamentoLote({
                     formData.append("loteId", targetLoteId!);
                     formData.append("consolidadoId", r.consolidadoId);
                     formData.append("docType", "nf");
-                    formData.append("storeName", r.razaoSocial || r.nome);
+                    formData.append("storeName", r.nomeContaAzul || r.razaoSocial || r.nome);
                     formData.append("cycleName", (r as any).ciclo || "Geral");
                     formData.append("file", r.nfse!.blob, r.nfse!.name);
 
