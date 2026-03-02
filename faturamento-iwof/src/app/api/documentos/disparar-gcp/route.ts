@@ -11,7 +11,17 @@ const auth = new google.auth.GoogleAuth({
 });
 
 const drive = google.drive({ version: 'v3', auth });
-const ROOT_FOLDER_ID = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || 'dummy_root_id';
+// 1. Extração Inteligente do ID da Pasta
+const getRootFolderId = () => {
+    const rawFolderEnv = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || process.env.DRIVE_FOLDER_ID || process.env.DRIVE_FOLDER_URL;
+
+    if (!rawFolderEnv) return null;
+
+    // Se for um URL, extrai apenas o ID final
+    return rawFolderEnv.includes('drive.google.com')
+        ? rawFolderEnv.split('/').pop()?.split('?')[0]
+        : rawFolderEnv;
+};
 
 async function getOrCreateFolder(folderName: string, parentFolderId: string) {
     try {
@@ -387,11 +397,15 @@ export async function POST(req: NextRequest) {
         const cyclePeriodStr = `${dInicio} à ${dFim}`;
 
         let rootFolderId = lote.drive_folder_id;
-        if (!rootFolderId && ROOT_FOLDER_ID !== 'dummy_root_id') {
-            rootFolderId = await getOrCreateFolder(cycleNameStr, ROOT_FOLDER_ID);
+        const rootConfigId = getRootFolderId();
+
+        if (!rootFolderId && rootConfigId) {
+            rootFolderId = await getOrCreateFolder(cycleNameStr, rootConfigId);
             // Salva o ID no Supabase para as próximas requisições
             await supabase.from('faturamentos_lote').update({ drive_folder_id: rootFolderId }).eq('id', loteId);
             console.log(`[DRIVE CACHE] Pasta Mestre '${cycleNameStr}' criada e travada com ID: ${rootFolderId}`);
+        } else if (!rootFolderId && !rootConfigId) {
+            console.warn("⚠️ Variáveis de ambiente do Google Drive não configuradas. Usando ID dummy ou falhando se necessário.");
         } else if (rootFolderId) {
             console.log(`[DRIVE CACHE] Usando Pasta Mestre Existente '${cycleNameStr}': ${rootFolderId}`);
         }

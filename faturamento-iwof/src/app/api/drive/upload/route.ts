@@ -13,16 +13,17 @@ const auth = new google.auth.GoogleAuth({
 
 const drive = google.drive({ version: 'v3', auth });
 
-// Extrai o ID da pasta quer venha da variável nova ou da URL antiga
-const extractFolderId = () => {
-    if (process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID) return process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID;
-    if (process.env.DRIVE_FOLDER_URL) {
-        const parts = process.env.DRIVE_FOLDER_URL.split('/');
-        return parts[parts.length - 1] || parts[parts.length - 2];
-    }
-    return null;
+// 1. Extração Inteligente do ID da Pasta (Movida para dentro do POST para maior flexibilidade)
+const getRootFolderId = () => {
+    const rawFolderEnv = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || process.env.DRIVE_FOLDER_ID || process.env.DRIVE_FOLDER_URL;
+
+    if (!rawFolderEnv) return null;
+
+    // Se for um URL, extrai apenas o ID final
+    return rawFolderEnv.includes('drive.google.com')
+        ? rawFolderEnv.split('/').pop()?.split('?')[0]
+        : rawFolderEnv;
 };
-const ROOT_FOLDER_ID = extractFolderId();
 
 // 2. Configuração do Supabase Admin (Ignora RLS)
 const supabaseAdmin = createClient(
@@ -50,17 +51,27 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string) {
 
 export async function POST(request: Request) {
     try {
-        if (!ROOT_FOLDER_ID) throw new Error("A variável do Google Drive (URL ou ID) não está configurada no servidor.");
+        const rootFolderId = getRootFolderId();
+
+        if (!rootFolderId) {
+            console.error("ERRO: Variáveis DRIVE_FOLDER_ID ou DRIVE_FOLDER_URL ausentes.");
+            return NextResponse.json(
+                { success: false, error: "A variável do Google Drive (URL ou ID) não está configurada no servidor." },
+                { status: 500 }
+            );
+        }
 
         const formData = await request.formData();
         const loteId = formData.get('loteId') as string;
-        // Captura os arquivos independentemente de como o frontend os nomeou no FormData
+
+        // 2. Tratamento Unificado de Boletos e NFs
         const files = [
             ...formData.getAll('files'),
             ...formData.getAll('file'),
             ...formData.getAll('files[]'),
             ...formData.getAll('boletos'),
-            ...formData.getAll('nfse')
+            ...formData.getAll('nfse'),
+            ...formData.getAll('nf')
         ] as File[];
 
         if (!loteId) throw new Error("ID do Lote não fornecido na requisição.");
@@ -79,8 +90,8 @@ export async function POST(request: Request) {
 
         const folderName = lote.nome_pasta || `Lote ${lote.data_competencia}`;
 
-        // 4. Encontra ou Cria a pasta no Google Drive
-        const loteFolderId = await findOrCreateFolder(folderName, ROOT_FOLDER_ID);
+        // 4. Encontra ou Cria a pasta no Google Drive usando o rootFolderId inteligente
+        const loteFolderId = await findOrCreateFolder(folderName, rootFolderId);
 
         if (!loteFolderId) throw new Error("Falha ao obter o Folder ID do Google Drive");
 
