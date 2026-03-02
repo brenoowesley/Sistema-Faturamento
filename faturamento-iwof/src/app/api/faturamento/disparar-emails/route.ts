@@ -77,9 +77,9 @@ export async function POST(request: Request) {
                         <div style="background-color: #f8f9fa; padding: 15px; border-left: 4px solid #0056b3; margin: 20px 0;">
                             <ul style="list-style-type: none; padding: 0; margin: 0;">
                                 <li><strong>Valor Bruto dos Serviços:</strong> ${fmtBRL(item.valor_bruto)}</li>
-                                ${item.valor_boleto_final > 0 ?\`<li><strong style="color: #28a745;">Valor Líquido do Boleto:</strong> \${fmtBRL(item.valor_boleto_final)}</li>\` : ''}
-                                \${item.valor_nc_final > 0 ? \`<li><strong style="color: #dc3545;">Nota de Crédito Provisionada:</strong> \${fmtBRL(item.valor_nc_final)}</li>\` : ''}
-                                \${item.numero_nf ? \`<li><strong>Nota Fiscal:</strong> \${item.numero_nf}</li>\` : ''}
+                                ${item.valor_boleto_final > 0 ? `<li><strong style="color: #28a745;">Valor Líquido do Boleto:</strong> ${fmtBRL(item.valor_boleto_final)}</li>` : ''}
+                                ${item.valor_nc_final > 0 ? `<li><strong style="color: #dc3545;">Nota de Crédito Provisionada:</strong> ${fmtBRL(item.valor_nc_final)}</li>` : ''}
+                                ${item.numero_nf ? `<li><strong>Nota Fiscal:</strong> ${item.numero_nf}</li>` : ''}
                             </ul>
                         </div>
 
@@ -89,21 +89,21 @@ export async function POST(request: Request) {
                         <p>Atenciosamente,<br><strong>Departamento Financeiro - iWof</strong></p>
                     </div>
                 `
-        };
+            };
 
-        try {
-            await transporter.sendMail(mailOptions);
-            resultados.push({ cliente: cliente.nome, status: 'Enviado', to, cc });
-        } catch (emailErr: any) {
-            console.error(`Erro ao enviar e-mail para \${cliente.nome}:`, emailErr);
-            resultados.push({ cliente: cliente.nome, status: 'Erro', erro: emailErr.message });
+            try {
+                await transporter.sendMail(mailOptions);
+                resultados.push({ cliente: cliente.nome, status: 'Enviado', to, cc });
+            } catch (emailErr: any) {
+                console.error(`Erro ao enviar e-mail para ${cliente.nome}:`, emailErr);
+                resultados.push({ cliente: cliente.nome, status: 'Erro', erro: emailErr.message });
+            }
         }
-    }
 
         return NextResponse.json({ success: true, message: "Disparo concluído", resultados });
 
-} catch (error: any) {
-    console.error("🚨 Erro Crítico na API de E-mails:", error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-}
+    } catch (error: any) {
+        console.error("🚨 Erro Crítico na API de E-mails:", error);
+        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
 }
