@@ -172,7 +172,13 @@ export default function EmissaoNotas({
             const xmlDoc = parser.parseFromString(xmlText, "text/xml");
             const numero = xmlDoc.getElementsByTagName("Numero")[0]?.textContent || xmlDoc.getElementsByTagName("numero")[0]?.textContent || "";
             const valorIrStr = xmlDoc.getElementsByTagName("ValorIr")[0]?.textContent || xmlDoc.getElementsByTagName("valor_ir")[0]?.textContent || "0";
-            const cnpjTomador = xmlDoc.getElementsByTagName("Cnpj")[0]?.textContent || xmlDoc.getElementsByTagName("cnpj")[0]?.textContent || "";
+
+            // Search specifically for Tomador/Recipient CNPJ
+            const tomadorNode = xmlDoc.getElementsByTagName("TomadorServico")[0] || xmlDoc.getElementsByTagName("tomador_servico")[0] || xmlDoc.getElementsByTagName("Tomador")[0];
+            const cnpjTomador = tomadorNode
+                ? (tomadorNode.getElementsByTagName("Cnpj")[0]?.textContent || tomadorNode.getElementsByTagName("cnpj")[0]?.textContent || "")
+                : (xmlDoc.getElementsByTagName("Cnpj")[1]?.textContent || xmlDoc.getElementsByTagName("Cnpj")[0]?.textContent || "");
+
             const valorServicosStr = xmlDoc.getElementsByTagName("ValorServicos")[0]?.textContent || xmlDoc.getElementsByTagName("valor_servicos")[0]?.textContent || "0";
             return {
                 numero,
