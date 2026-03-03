@@ -166,8 +166,8 @@ function parsearPlanilhaNC(rawRows: Record<string, string>[]): {
     const colBoleto = findColNC(headers, "valor boleto", "vlr boleto", "boleto", "valor do boleto");
     const colNF = findColNC(headers, "valor nf", "vlr nf", "nf", "valor da nf", "valor nota fiscal");
     const colNC = findColNC(headers, "valor nc", "vlr nc", "nc", "valor da nc", "valor nota crédito", "nota crédito");
-    const colNumNF = findColNC(headers, "nº nf", "num nf", "numero nf", "número nf", "nf numero", "nº da nf");
-    const colDesconto = findColNC(headers, "desconto", "discount", "número do pedido", "pedido");
+    const colNumNF = findColNC(headers, "nº nf", "num nf", "numero nf", "número nf", "nf numero", "nº da nf", "nf");
+    const colDesconto = findColNC(headers, "desconto", "discount", "número do pedido", "pedido", "nc", "nota crédito");
 
     const missing: string[] = [];
     if (!colLoja) missing.push("LOJA");
@@ -196,12 +196,12 @@ function parsearPlanilhaNC(rawRows: Record<string, string>[]): {
             return;
         }
 
-        // Concatenação limpa: "19770 - Número do pedido: 6700100984"
-        let descricaoServico = numNF;
-        if (desc) {
-            descricaoServico = descricaoServico
-                ? `${descricaoServico} - ${desc}`
-                : desc;
+        // Concatenação: "NF - Nº do pedido: NC"
+        let descricaoServico = "";
+        if (numNF && desc) {
+            descricaoServico = `${numNF} - Nº do pedido: ${desc}`;
+        } else {
+            descricaoServico = numNF || desc;
         }
 
         dados.push({
