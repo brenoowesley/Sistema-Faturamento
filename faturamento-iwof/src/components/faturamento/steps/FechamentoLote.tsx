@@ -190,6 +190,8 @@ export default function FechamentoLote({
         );
 
         const lojasUnicas = new Map<string, StoreData>();
+        const usedNfIds = new Set<string>();
+        const cleanCnpj = (c?: string | null) => c ? c.replace(/\D/g, '').replace(/^0+/, '') : '';
 
         for (const a of validados) {
             const isQueirozSplit = a.loja.includes('(Mês Anterior)') || a.loja.includes('(Mês Atual)');
@@ -244,24 +246,33 @@ export default function FechamentoLote({
                 lojaEntry.valorDescontos += (baseVal - finalVal);
             }
 
-            // --- XML Data Matching (Refined Senior Rule with ID-based pairing) ---
-            // 1. Search for XML by CNPJ in the indexed data
-            const matchingXmlEntry = Object.entries(xmlParsedData).find(([id, data]) => data.cnpj === lojaEntry.cnpj);
+            // --- XML Data Matching (Refined Senior Rule with ID-based pairing & Sequential Pool) ---
+            // 1. Search for XML by Cleaned CNPJ in the indexed data (Sequential allocation)
+            const matchingXmlEntry = Object.entries(xmlParsedData).find(([nfNum, data]) => {
+                if (usedNfIds.has(nfNum)) return false; // Pula se já foi atribuída (Sequential Pool)
+
+                const safeCnpjDb = cleanCnpj(lojaEntry.cnpj);
+                const safeCnpjXml = cleanCnpj(data.cnpj);
+
+                return safeCnpjDb && safeCnpjXml && safeCnpjDb === safeCnpjXml;
+            });
 
             if (matchingXmlEntry) {
-                const [fileId, data] = matchingXmlEntry;
-                lojaEntry.numero_nf = data.numero_nf_real;
+                const [numeroNF, data] = matchingXmlEntry;
+                usedNfIds.add(numeroNF); // Marca como consumida para evitar duplicação em múltiplas lojas do mesmo cliente
+
+                lojaEntry.numero_nf = numeroNF;
                 lojaEntry.descontoIR = data.valorIr;
                 lojaEntry.isXmlMatched = true;
                 lojaEntry.xmlValorServicos = data.valorServicos;
 
-                // 2. Pair with the physical PDF uploaded in Step 5 using the FileID
-                const matchingPdf = pdfNfsFiles.find(p => p.name.includes(fileId));
+                // 2. Pair with the physical PDF uploaded in Step 5 using the precise numeroNF
+                const matchingPdf = pdfNfsFiles.find(p => p.name.includes(numeroNF));
                 if (matchingPdf) {
                     lojaEntry.pdfNfMatch = matchingPdf;
-                    console.log(`[Full Match] Unified XML + PDF for ${lojaEntry.nome}: ID ${fileId}, NF ${data.numero_nf_real}`);
+                    console.log(`[Full Match] Unified XML + PDF for ${lojaEntry.nome}: NF ${numeroNF}, IR ${data.valorIr}`);
                 } else {
-                    console.warn(`[Partial Match] XML found for ${lojaEntry.nome} (ID ${fileId}), but PDF file "${fileId}-nfse.pdf" is missing.`);
+                    console.warn(`[Partial Match] XML found for ${lojaEntry.nome} (NF ${numeroNF}), but PDF file "${numeroNF}-nfse.pdf" is missing.`);
                 }
             }
         }
@@ -276,7 +287,6 @@ export default function FechamentoLote({
 
             if (nfseMatch) {
                 statusNF = 'EMITIDA';
-                matchedNfseNames.add(nfseMatch.name);
             }
 
             // Fallback: manual mapping for NF
