@@ -700,12 +700,15 @@ export default function FechamentoLote({
                 const metadataArray = [];
 
                 for (const r of chunk) {
-                    const fileObj = r.nfse!.file || r.nfse!;
-                    const fileName = r.nfse!.name || (fileObj as any).name;
-                    formData.append("files", fileObj, fileName);
+                    // CORREÇÃO: Extraindo o blob e montando o File corretamente
+                    const fileContent = r.nfse!.blob || r.nfse!.file || r.nfse!;
+                    const fileObj = fileContent instanceof Blob ? fileContent : new File([fileContent], r.nfse!.name, { type: "application/pdf" });
+
+                    // Agora sim, garantimos que fileObj é um Blob/File
+                    formData.append("files", fileObj, r.nfse!.name);
 
                     metadataArray.push({
-                        filename: fileName,
+                        filename: r.nfse!.name,
                         clienteId: r.id,
                         consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
                         nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
