@@ -48,6 +48,7 @@ export default function FechamentoLote({
 }: FechamentoLoteProps) {
 
     const [boletoFiles, setBoletoFiles] = useState<{ name: string; fetchUrl: string; file: File }[]>([]);
+    const [pdfNfsFiles, setPdfNfsFiles] = useState<{ name: string; blob: Blob; buffer: ArrayBuffer }[]>([]);
 
     // ACTION STATES
     const [actionState, setActionState] = useState({
@@ -122,7 +123,31 @@ export default function FechamentoLote({
         cnpjFilial?: string | null;
         isXmlMatched?: boolean;
         xmlValorServicos?: number;
+        pdfNfMatch?: any;
     }
+
+    // --- XML Indexing (ID from Filename) ---
+    const xmlParsedData = useMemo(() => {
+        const index: Record<string, { cnpj: string; valorIr: number; numero_nf_real: string; valorServicos: number; name: string }> = {};
+
+        nfseFiles.forEach(f => {
+            if (f.name.toLowerCase().endsWith(".xml") && f.fiscalData) {
+                // Regex to extract unique numerical ID from filename
+                // Example: 48999300000152-2026-03-00019894-nfse.xml -> 19894
+                const match = f.name.match(/0*(\d+)-nfse\.xml$/i);
+                const fileId = match ? match[1] : f.name;
+
+                index[fileId] = {
+                    cnpj: f.fiscalData.cnpj,
+                    valorIr: f.fiscalData.valorIr,
+                    numero_nf_real: f.fiscalData.numero,
+                    valorServicos: f.fiscalData.valorServicos,
+                    name: f.name
+                };
+            }
+        });
+        return index;
+    }, [nfseFiles]);
 
     const matchFiles = useMemo(() => {
         const validados = agendamentos.filter(a =>
@@ -186,15 +211,25 @@ export default function FechamentoLote({
                 lojaEntry.valorDescontos += (baseVal - finalVal);
             }
 
-            // --- XML Data Matching (Senior Rule) ---
-            // If we have an XML file with a matching CNPJ, prioritize its fiscal data
-            const matchingXml = nfseFiles.find(f => f.fiscalData && f.fiscalData.cnpj === lojaEntry.cnpj);
-            if (matchingXml?.fiscalData) {
-                lojaEntry.numero_nf = matchingXml.fiscalData.numero;
-                lojaEntry.descontoIR = matchingXml.fiscalData.valorIr;
+            // --- XML Data Matching (Refined Senior Rule with ID-based pairing) ---
+            // 1. Search for XML by CNPJ in the indexed data
+            const matchingXmlEntry = Object.entries(xmlParsedData).find(([id, data]) => data.cnpj === lojaEntry.cnpj);
+
+            if (matchingXmlEntry) {
+                const [fileId, data] = matchingXmlEntry;
+                lojaEntry.numero_nf = data.numero_nf_real;
+                lojaEntry.descontoIR = data.valorIr;
                 lojaEntry.isXmlMatched = true;
-                lojaEntry.xmlValorServicos = matchingXml.fiscalData.valorServicos;
-                console.log(`[XML Match] Found data for ${lojaEntry.nome}: NF ${lojaEntry.numero_nf}, IR ${lojaEntry.descontoIR}`);
+                lojaEntry.xmlValorServicos = data.valorServicos;
+
+                // 2. Pair with the physical PDF uploaded in Step 5 using the FileID
+                const matchingPdf = pdfNfsFiles.find(p => p.name.includes(fileId));
+                if (matchingPdf) {
+                    lojaEntry.pdfNfMatch = matchingPdf;
+                    console.log(`[Full Match] Unified XML + PDF for ${lojaEntry.nome}: ID ${fileId}, NF ${data.numero_nf_real}`);
+                } else {
+                    console.warn(`[Partial Match] XML found for ${lojaEntry.nome} (ID ${fileId}), but PDF file "${fileId}-nfse.pdf" is missing.`);
+                }
             }
         }
 
@@ -202,18 +237,8 @@ export default function FechamentoLote({
             let statusNF: 'PENDENTE' | 'EMITIDA' = 'PENDENTE';
             let nfseMatch = null;
 
-            // 0. Manual Mapping Priority (NFSE)
-            const manualNF = Object.entries(manualMappings).find(([name, m]) => m.consolidadoId === loja.consolidadoId && m.type === 'nfse');
-            if (manualNF) {
-                nfseMatch = nfseFiles.find(f => f.name === manualNF[0]) || null;
-            }
-
-            // 1. SMART MATCH NF BY NUMBER extracted from PDF filename
-            if (!nfseMatch && loja.numero_nf) {
-                nfseMatch = nfseFiles.find(f => {
-                    const extractedNum = f.name.match(/\d+/)?.[0];
-                    return f.name.toLowerCase().endsWith(".pdf") && extractedNum === loja.numero_nf;
-                }) || null;
+            if (loja.pdfNfMatch) {
+                nfseMatch = loja.pdfNfMatch;
             }
 
             if (nfseMatch) {
@@ -242,7 +267,7 @@ export default function FechamentoLote({
 
         // 3. SMART MATCH BOLETOS (Conta Azul style with Queue for splits)
         const matchedNfseNames = new Set(initialReports.map(r => r.nfse?.name).filter(Boolean));
-        const orphanNfses = nfseFiles.filter(f => !matchedNfseNames.has(f.name));
+        const orphanNfses = pdfNfsFiles.filter(f => !matchedNfseNames.has(f.name));
 
         const matchedBoletoNames = new Set<string>();
         const reportsWithBoletos = initialReports.map(report => {
@@ -294,7 +319,7 @@ export default function FechamentoLote({
         });
 
         return { reports: finalReports, orphanNfses, orphanBoletos };
-    }, [agendamentos, nfseFiles, boletoFiles, actionState.ncsSuccess, manualMappings]);
+    }, [agendamentos, nfseFiles, pdfNfsFiles, xmlParsedData, boletoFiles, actionState.ncsSuccess, manualMappings]);
 
     const handleConsolidarLote = async () => {
         try {
@@ -483,22 +508,22 @@ export default function FechamentoLote({
 
                     for (const [filename, fileData] of Object.entries(zip.files)) {
                         if (!fileData.dir) {
-                            if (filename.toLowerCase().endsWith(".pdf") || filename.toLowerCase().endsWith(".xml")) {
+                            if (filename.toLowerCase().endsWith(".pdf")) {
                                 const blob = await fileData.async("blob");
                                 const buffer = await fileData.async("arraybuffer");
                                 extractedFiles.push({ name: filename, blob, buffer });
                             }
                         }
                     }
-                } else if (file.name.toLowerCase().endsWith(".xml") || file.name.toLowerCase().endsWith(".pdf")) {
+                } else if (file.name.toLowerCase().endsWith(".pdf")) {
                     const buffer = await file.arrayBuffer();
                     extractedFiles.push({ name: file.name, blob: file, buffer });
                 }
             }
-            if (setNfseFiles) setNfseFiles(prev => [...prev, ...extractedFiles]);
+            setPdfNfsFiles(prev => [...prev, ...extractedFiles]);
         } catch (error) {
-            console.error("Error reading zip/xml upload", error);
-            alert("Erro ao extrair arquivos do ZIP/XML de Notas Fiscais.");
+            console.error("Error reading zip/pdf upload", error);
+            alert("Erro ao extrair arquivos de Notas Fiscais (PDFs).");
         } finally {
             setLoadingMap(p => ({ ...p, "zipNfs": false }));
         }
@@ -740,15 +765,15 @@ export default function FechamentoLote({
                         <div className="flex justify-center border-2 border-dashed border-[var(--border)] rounded-xl py-8 mb-6 hover:bg-[var(--bg-sidebar)] transition-colors cursor-pointer" onClick={() => nfsInputRef.current?.click()}>
                             <div className="flex flex-col items-center gap-2">
                                 <FileArchive className="text-[var(--accent)]" />
-                                <span className="font-bold text-sm">{loadingMap["zipNfs"] ? "Lendo Arquivos..." : "Selecionar ZIP/XMLs"}</span>
+                                <span className="font-bold text-sm">{loadingMap["zipNfs"] ? "Lendo Arquivos..." : "Selecionar ZIP/PDFs"}</span>
                             </div>
-                            <input type="file" ref={nfsInputRef} onChange={handleNfsZipUpload} multiple accept=".zip,.xml,.pdf" className="hidden" />
+                            <input type="file" ref={nfsInputRef} onChange={handleNfsZipUpload} multiple accept=".zip,.pdf" className="hidden" />
                         </div>
-                        {nfseFiles.length > 0 && <p className="text-xs text-center text-[var(--success)] mb-6 font-bold">{nfseFiles.length} Extraídos com SUCESSO!</p>}
+                        {pdfNfsFiles.length > 0 && <p className="text-xs text-center text-[var(--success)] mb-6 font-bold">{pdfNfsFiles.length} PDFs Extraídos!</p>}
 
                         <div className="flex gap-4">
                             <button className="flex-1 btn btn-ghost" onClick={() => setActiveModal(null)}>Cancelar</button>
-                            <button className="flex-1 btn btn-primary" onClick={handleUploadNfs} disabled={loadingMap["nfsSuccess"] || nfseFiles.length === 0}>
+                            <button className="flex-1 btn btn-primary" onClick={handleUploadNfs} disabled={loadingMap["nfsSuccess"] || pdfNfsFiles.length === 0}>
                                 {loadingMap["nfsSuccess"] ? "Enviando..." : "Confirmar Upload GCP"}
                             </button>
                         </div>
