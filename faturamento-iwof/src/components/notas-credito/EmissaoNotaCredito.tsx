@@ -164,8 +164,8 @@ function parsearPlanilhaNC(rawRows: Record<string, string>[]): {
     const colCnpj = findColNC(headers, "cnpj");
     const colEstado = findColNC(headers, "estado", "uf");
     const colBoleto = findColNC(headers, "valor boleto", "vlr boleto", "boleto", "valor do boleto");
-    const colNF = findColNC(headers, "valor nf", "vlr nf", "nf", "valor da nf", "valor nota fiscal");
-    const colNC = findColNC(headers, "valor nc", "vlr nc", "nc", "valor da nc", "valor nota crédito", "nota crédito");
+    const colNF = findColNC(headers, "valor nf", "vlr nf", "valor da nf", "valor nota fiscal");
+    const colNC = findColNC(headers, "valor nc", "vlr nc", "valor da nc", "valor nota crédito");
     const colNumNF = findColNC(headers, "nº nf", "num nf", "numero nf", "número nf", "nf numero", "nº da nf", "nf");
     const colDesconto = findColNC(headers, "desconto", "discount", "número do pedido", "pedido", "nc", "nota crédito");
 
