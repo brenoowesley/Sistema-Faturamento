@@ -822,7 +822,8 @@ export default function FechamentoLote({
 
     const totals = financialSummary.summaryArr.find(v => v.ciclo === "LÍQUIDO P/ LOTE");
 
-    const pendingNfCount = matchFiles.reports.filter(r => r.statusNF === 'PENDENTE').length;
+    const pendingNfReports = matchFiles.reports.filter(r => r.statusNF === 'PENDENTE');
+    const pendingNfCount = pendingNfReports.length;
 
     const filteredReports = matchFiles.reports.filter(r => {
         if (filterStatus === "FALTA_NF") return r.statusNF === 'PENDENTE';
@@ -1091,9 +1092,25 @@ export default function FechamentoLote({
                         {actionState.emailsSuccess && <span className="text-xs font-bold px-2 py-1 bg-green-500/20 text-green-500 rounded-lg flex items-center gap-1"><CheckCircle2 size={12} /> Enviado</span>}
                     </button>
 
-                    {pendingNfCount > 0 && (
-                        <div className="text-xs text-[var(--danger)] text-center font-bold px-3 py-2 bg-red-500/10 rounded-xl border border-red-500/20 flex flex-col items-center gap-1">
-                            <span>Atenção: {pendingNfCount} {pendingNfCount === 1 ? 'loja ainda está' : 'lojas ainda estão'} sem Nota Fiscal.</span>
+                    {pendingNfReports.length > 0 && (
+                        <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 mt-2 flex flex-col gap-3">
+                            <div className="flex items-center gap-2 text-[var(--danger)] font-bold text-sm">
+                                <AlertTriangle size={18} />
+                                <span>Pendência: {pendingNfReports.length} {pendingNfReports.length === 1 ? 'loja sem NF' : 'lojas sem NF'}</span>
+                            </div>
+                            <p className="text-xs text-red-400/80 leading-tight">
+                                As seguintes faturas ficarão retidas como Notas de Crédito (NC) caso o lote seja consolidado agora:
+                            </p>
+                            <div className="max-h-56 overflow-y-auto custom-scrollbar pr-1 flex flex-col gap-1.5 mt-1">
+                                {pendingNfReports.map((r, i) => (
+                                    <div key={i} className="text-xs text-red-400 bg-red-500/5 px-2.5 py-2 rounded-lg border border-red-500/10 flex flex-col">
+                                        <span className="font-bold truncate" title={r.razaoSocial}>{r.razaoSocial}</span>
+                                        <span className="font-mono text-[10px] opacity-80 mt-0.5">
+                                            {r.cnpj ? r.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5") : 'S/ CNPJ'}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     )}
                 </div>
