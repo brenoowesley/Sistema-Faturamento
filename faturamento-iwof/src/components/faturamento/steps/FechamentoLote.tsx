@@ -196,7 +196,9 @@ export default function FechamentoLote({
 
             if (!error && data) {
                 setExistingConsolidados(data);
-                setIsLoteConsolidado(true);
+
+                // CORREÇÃO CRÍTICA: Só bloqueia o botão se realmente houver dados gravados
+                setIsLoteConsolidado(data.length > 0);
 
                 // Also populate dbConsolidados map for upload handlers
                 const idMap: Record<string, string> = {};
