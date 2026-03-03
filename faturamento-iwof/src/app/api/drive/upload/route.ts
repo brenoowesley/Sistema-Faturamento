@@ -15,26 +15,29 @@ const drive = google.drive({ version: 'v3', auth });
 
 // 1. Extração Inteligente do ID da Pasta (Movida para dentro do POST para maior flexibilidade)
 const getRootFolderId = () => {
-    const rawFolderEnv = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || process.env.DRIVE_FOLDER_ID || process.env.DRIVE_FOLDER_URL;
+    // Ordem de Prioridade: GOOGLE_DRIVE_ROOT_FOLDER_ID > DRIVE_FOLDER_URL
+    const rawFolderEnv = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || process.env.DRIVE_FOLDER_URL;
 
     if (!rawFolderEnv) return null;
 
-    // Limpa espaços em branco e caracteres invisíveis
-    const cleanedId = rawFolderEnv.trim().replace(/[\u200B-\u200D\uFEFF]/g, "");
+    // Sanitização: .trim() + remoção de caracteres invisíveis (Regex)
+    const sanitizedInput = rawFolderEnv.trim().replace(/[\u200B-\u200D\uFEFF]/g, "");
 
-    // Se for uma URL, extrai apenas o ID final
-    const finalId = cleanedId.includes('drive.google.com')
-        ? cleanedId.split('/').pop()?.split('?')[0]
-        : cleanedId;
+    // Extração robusta: Se for URL, pega o ID após a última barra
+    const extractedId = sanitizedInput.includes('drive.google.com')
+        ? sanitizedInput.split('/').pop()?.split('?')[0]
+        : sanitizedInput;
 
-    // Validação da Raiz (Root ID)
-    const EXPECTED_ROOT_ID = '11HaPWnmMVfS0vgu9xXfdWHxaf2vh7T_Z';
-    if (finalId !== EXPECTED_ROOT_ID) {
-        console.error(`[Drive API] ERRO CRÍTICO: ID da Raiz (${finalId}) diverge do esperado (${EXPECTED_ROOT_ID})`);
-        throw new Error(`ID da pasta raiz inválido ou mal formatado: ${finalId}`);
+    // Validação da Raiz (Root ID Oficial iWof)
+    const EXPECTED_ROOT_ID = '1vBylgUjKl1LC8-Ttf8rrL5CdEJYpi9AT';
+
+    if (extractedId !== EXPECTED_ROOT_ID) {
+        console.error(`[Drive API Audit] ERRO: ID Rejeitado (${extractedId}). Esperado: ${EXPECTED_ROOT_ID}`);
+        throw new Error(`ID da pasta raiz inválido: ${extractedId}. Use o ID oficial da iWof.`);
     }
 
-    return finalId;
+    console.log(`[Drive API Audit] ID da Raiz (${extractedId}) carregado com sucesso.`);
+    return extractedId;
 };
 
 // 2. Configuração do Supabase Admin (Ignora RLS)
