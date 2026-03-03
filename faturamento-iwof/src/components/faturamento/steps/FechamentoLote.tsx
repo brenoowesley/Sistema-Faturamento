@@ -245,17 +245,26 @@ export default function FechamentoLote({
             } else if (finalVal < baseVal) {
                 lojaEntry.valorDescontos += (baseVal - finalVal);
             }
+        }
 
-            // --- XML Data Matching (Refined Phase 4 ARCHITECTURE: CNPJ Shielding & Auditing) ---
+        // --- PHASE 5: Decoupled Logic (XML is Data, PDF is Anexo) ---
+        const initialReports = Array.from(lojasUnicas.values()).map(loja => {
+            let statusNF: 'PENDENTE' | 'EMITIDA' = 'PENDENTE';
+            let numeroNF = loja.numero_nf;
+            let descontoIR = loja.descontoIR;
+            let cnpjFilial = loja.cnpjFilial;
+            let nfseMatch: any = null;
+
+            // 1. DADOS (XML Priority with CNPJ Shielding & Auditing)
             const matchingNfEntry = Object.entries(xmlParsedData).find(([nfNum, data]) => {
-                if (usedNfIds.has(nfNum)) return false; // Pula se a NF já foi consumida por outra fatura
+                if (usedNfIds.has(nfNum)) return false;
 
-                const safeCnpjDb = cleanCnpj(lojaEntry.cnpj);
+                const safeCnpjDb = cleanCnpj(loja.cnpj);
                 const safeCnpjXml = cleanCnpj(data.cnpj);
 
-                // LOG DE AUDITORIA - ISSO É OBRIGATÓRIO PARA DIAGNÓSTICO:
                 if (safeCnpjXml) {
-                    console.log(`[MATCH AUDIT] Loja: ${lojaEntry.nome} | DB original: ${lojaEntry.cnpj} -> limpo: ${safeCnpjDb} | XML limpo: ${safeCnpjXml} | NF: ${nfNum}`);
+                    // Audit log for alignment checks
+                    console.log(`[MATCH AUDIT] Loja: ${loja.nome} | DB: ${loja.cnpj} -> ${safeCnpjDb} | XML: ${safeCnpjXml} | NF: ${nfNum}`);
                 }
 
                 return safeCnpjDb && safeCnpjXml && safeCnpjDb === safeCnpjXml;
@@ -265,34 +274,26 @@ export default function FechamentoLote({
                 const [nfId, data] = matchingNfEntry;
                 usedNfIds.add(nfId);
 
-                lojaEntry.numero_nf = data.numero_nf_real || nfId;
-                lojaEntry.descontoIR = data.irrf;
-                lojaEntry.isXmlMatched = true;
-                lojaEntry.xmlValorServicos = data.valorServicos;
-
-                // 2. Busca o PDF correspondente usando o numeroNF isolado
-                const targetNF = lojaEntry.numero_nf;
-                const matchingPdf = pdfNfsFiles?.find(p => p.name.includes(targetNF));
-
-                if (matchingPdf) {
-                    lojaEntry.pdfNfMatch = matchingPdf;
-                    console.log(`[Full Match] Unified XML + PDF for ${lojaEntry.nome}: NF ${targetNF}, IR ${data.irrf}`);
-                } else {
-                    console.warn(`[Partial Match] XML found for ${lojaEntry.nome} (NF ${targetNF}), but PDF file "${targetNF}-nfse.pdf" is missing.`);
-                }
-            }
-        }
-
-        const initialReports = Array.from(lojasUnicas.values()).map(loja => {
-            let statusNF: 'PENDENTE' | 'EMITIDA' = 'PENDENTE';
-            let nfseMatch = null;
-
-            if (loja.pdfNfMatch) {
-                nfseMatch = loja.pdfNfMatch;
-            }
-
-            if (nfseMatch) {
                 statusNF = 'EMITIDA';
+                numeroNF = data.numero_nf_real || nfId;
+                descontoIR = data.irrf;
+                cnpjFilial = data.cnpj; // Use CNPJ from XML for consistency
+
+                // 2. ANEXO (Passive matching, don't block if missing)
+                const targetNF = String(numeroNF);
+                nfseMatch = pdfNfsFiles?.find(p => p.name.includes(targetNF)) || null;
+
+                if (nfseMatch) {
+                    console.log(`[FULL MATCH] XML ${targetNF} + PDF found for ${loja.nome}`);
+                } else {
+                    console.log(`[INFO] XML ${targetNF} vinculado à loja ${loja.nome}. Aguardando posterior upload do PDF.`);
+                }
+            } else if (numeroNF) {
+                // If it already had a number (from DB), consider it emitted
+                statusNF = 'EMITIDA';
+                // Try to find the PDF if we already have the number
+                const targetNF = String(numeroNF);
+                nfseMatch = pdfNfsFiles?.find(p => p.name.includes(targetNF)) || null;
             }
 
             // Fallback: manual mapping for NF
@@ -308,9 +309,9 @@ export default function FechamentoLote({
                 ...loja,
                 nfse: nfseMatch,
                 statusNF,
-                numeroNF: loja.numero_nf,
-                descontoIR: loja.descontoIR,
-                cnpjFilial: loja.cnpjFilial
+                numeroNF,
+                descontoIR,
+                cnpjFilial
             };
         });
 
