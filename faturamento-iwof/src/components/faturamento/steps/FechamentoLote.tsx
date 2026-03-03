@@ -71,9 +71,64 @@ export default function FechamentoLote({
 
     const boletosInputRef = useRef<HTMLInputElement>(null);
     const nfsInputRef = useRef<HTMLInputElement>(null);
-
-    // Manual Mapping for Orphans
     const [manualMappings, setManualMappings] = useState<Record<string, { consolidadoId: string; type: 'nfse' | 'boleto' }>>({});
+    const [xmlParsedData, setXmlParsedData] = useState<Record<string, { cnpj: string; valorIr: number; numero_nf_real: string; valorServicos: number; name: string }>>({});
+
+    useEffect(() => {
+        const parseXmls = async () => {
+            if (!nfseFiles?.length) return;
+            const newParsedMap: Record<string, any> = {};
+
+            for (const f of nfseFiles) {
+                if (f.name.toLowerCase().endsWith(".xml")) {
+                    try {
+                        const xmlText = new TextDecoder().decode(f.buffer);
+                        const parser = new DOMParser();
+                        const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+
+                        // 1. IGNORAR TAG <Numero> (Bug NFE.io)
+                        // Extração exclusivamente do nome do arquivo
+                        const match = f.name.match(/(\d+)-nfse\.xml$/i);
+                        // Remove zeros à esquerda: ex 00019894 -> 19894
+                        const numeroNF = match ? String(parseInt(match[1], 10)) : "";
+
+                        // 2. Extração de Cnpj e ValorIr (Continuam necessárias)
+                        const tomadorNode = xmlDoc.getElementsByTagName("TomadorServico")[0] || xmlDoc.getElementsByTagName("tomador_servico")[0] || xmlDoc.getElementsByTagName("Tomador")[0] || xmlDoc.getElementsByTagName("dest")[0];
+                        const cnpj = tomadorNode
+                            ? (tomadorNode.getElementsByTagName("Cnpj")[0]?.textContent || tomadorNode.getElementsByTagName("cnpj")[0]?.textContent || tomadorNode.getElementsByTagName("CPF")[0]?.textContent || "")
+                            : (xmlDoc.getElementsByTagName("Cnpj")[1]?.textContent || xmlDoc.getElementsByTagName("Cnpj")[0]?.textContent || "");
+
+                        const valorIrStr = xmlDoc.getElementsByTagName("ValorIr")[0]?.textContent || xmlDoc.getElementsByTagName("valor_ir")[0]?.textContent || "0";
+                        const valorIr = parseFloat(valorIrStr.replace(',', '.'));
+
+                        const valorServicosStr = xmlDoc.getElementsByTagName("ValorServicos")[0]?.textContent || xmlDoc.getElementsByTagName("valor_servicos")[0]?.textContent || "0";
+                        const valorServicos = parseFloat(valorServicosStr.replace(',', '.'));
+
+                        if (numeroNF) {
+                            console.group(`[XML Extract] Arquivo: ${f.name}`);
+                            console.log(`NF Real Extraída (Nome): ${numeroNF}`);
+                            console.log(`CNPJ Fiscal (Interno): ${cnpj}`);
+                            console.log(`IRRF Fiscal (Interno): ${valorIr}`);
+                            console.groupEnd();
+
+                            newParsedMap[numeroNF] = {
+                                cnpj: cnpj.replace(/\D/g, ''),
+                                valorIr,
+                                numero_nf_real: numeroNF,
+                                valorServicos,
+                                name: f.name
+                            };
+                        }
+                    } catch (e) {
+                        console.error("Erro ao processar XML:", f.name, e);
+                    }
+                }
+            }
+            setXmlParsedData(newParsedMap);
+        };
+
+        parseXmls();
+    }, [nfseFiles]);
 
     useEffect(() => {
         const fetchExisting = async () => {
@@ -126,28 +181,6 @@ export default function FechamentoLote({
         pdfNfMatch?: any;
     }
 
-    // --- XML Indexing (ID from Filename) ---
-    const xmlParsedData = useMemo(() => {
-        const index: Record<string, { cnpj: string; valorIr: number; numero_nf_real: string; valorServicos: number; name: string }> = {};
-
-        nfseFiles.forEach(f => {
-            if (f.name.toLowerCase().endsWith(".xml") && f.fiscalData) {
-                // Regex to extract unique numerical ID from filename
-                // Example: 48999300000152-2026-03-00019894-nfse.xml -> 19894
-                const match = f.name.match(/0*(\d+)-nfse\.xml$/i);
-                const fileId = match ? match[1] : f.name;
-
-                index[fileId] = {
-                    cnpj: f.fiscalData.cnpj,
-                    valorIr: f.fiscalData.valorIr,
-                    numero_nf_real: f.fiscalData.numero,
-                    valorServicos: f.fiscalData.valorServicos,
-                    name: f.name
-                };
-            }
-        });
-        return index;
-    }, [nfseFiles]);
 
     const matchFiles = useMemo(() => {
         const validados = agendamentos.filter(a =>
