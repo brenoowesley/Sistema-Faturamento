@@ -620,37 +620,37 @@ export default function FechamentoLote({
             const targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
             if (!targetLoteId) throw new Error("Falha ao encontrar o lote.");
 
-            const formData = new FormData();
-            formData.append("loteId", targetLoteId);
-
-            const metadataArray: any[] = [];
             const [ano, mes] = (periodoInicio || "").split("-");
+            const reportsWithBoletos = matchFiles.reports.filter(r => r.boleto);
 
-            for (const r of matchFiles.reports) {
-                if (r.boleto) {
-                    formData.append("files", r.boleto.file, r.boleto.name);
-                    metadataArray.push({
-                        filename: r.boleto.name,
-                        clienteId: r.id,
-                        consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
-                        nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
-                        ciclo: r.ciclo || "Geral",
-                        ano: ano || new Date().getFullYear().toString(),
-                        mes: mes || (new Date().getMonth() + 1).toString().padStart(2, '0'),
-                        docType: "hc"
-                    });
-                }
-            }
-
-            if (metadataArray.length === 0) {
+            if (reportsWithBoletos.length === 0) {
                 alert("Nenhum boleto pareado para upload.");
+                setLoadingMap(p => ({ ...p, "boletosSuccess": false }));
                 return;
             }
 
-            formData.append("metadata", JSON.stringify(metadataArray));
+            // Envio sequencial para não estourar o limite de payload da Vercel (4.5MB)
+            for (const r of reportsWithBoletos) {
+                const formData = new FormData();
+                formData.append("loteId", targetLoteId);
+                formData.append("files", r.boleto!.file, r.boleto!.name);
 
-            const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
-            if (!res.ok) throw new Error("Erro no upload dos boletos.");
+                const metadataArray = [{
+                    filename: r.boleto!.name,
+                    clienteId: r.id,
+                    consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
+                    nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
+                    ciclo: r.ciclo || "Geral",
+                    ano: ano || new Date().getFullYear().toString(),
+                    mes: mes || (new Date().getMonth() + 1).toString().padStart(2, '0'),
+                    docType: "hc"
+                }];
+
+                formData.append("metadata", JSON.stringify(metadataArray));
+
+                const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
+                if (!res.ok) throw new Error(`Erro no upload do boleto: ${r.boleto!.name}`);
+            }
 
             setActionState(p => ({ ...p, boletosSuccess: true }));
             alert("Boletos enviados e vinculados com sucesso!");
@@ -669,38 +669,39 @@ export default function FechamentoLote({
             const targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
             if (!targetLoteId) throw new Error("Falha ao encontrar o lote.");
 
-            const formData = new FormData();
-            formData.append("loteId", targetLoteId);
-
-            const metadataArray: any[] = [];
             const [ano, mes] = (periodoInicio || "").split("-");
+            const reportsWithNf = matchFiles.reports.filter(r => r.nfse);
 
-            for (const r of matchFiles.reports) {
-                if (r.nfse) {
-                    const file = new File([r.nfse.blob], r.nfse.name, { type: "application/pdf" });
-                    formData.append("files", file, r.nfse.name);
-                    metadataArray.push({
-                        filename: r.nfse.name,
-                        clienteId: r.id,
-                        consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
-                        nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
-                        ciclo: r.ciclo || "Geral",
-                        ano: ano || new Date().getFullYear().toString(),
-                        mes: mes || (new Date().getMonth() + 1).toString().padStart(2, '0'),
-                        docType: "nf"
-                    });
-                }
-            }
-
-            if (metadataArray.length === 0) {
+            if (reportsWithNf.length === 0) {
                 alert("Nenhuma NF pareada para upload.");
+                setLoadingMap(p => ({ ...p, "nfsSuccess": false }));
                 return;
             }
 
-            formData.append("metadata", JSON.stringify(metadataArray));
+            // Envio sequencial para não estourar o limite de payload da Vercel (4.5MB)
+            for (const r of reportsWithNf) {
+                const formData = new FormData();
+                formData.append("loteId", targetLoteId);
 
-            const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
-            if (!res.ok) throw new Error("Erro no upload das NFs.");
+                const file = new File([r.nfse.blob], r.nfse.name, { type: "application/pdf" });
+                formData.append("files", file, r.nfse.name);
+
+                const metadataArray = [{
+                    filename: r.nfse.name,
+                    clienteId: r.id,
+                    consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
+                    nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
+                    ciclo: r.ciclo || "Geral",
+                    ano: ano || new Date().getFullYear().toString(),
+                    mes: mes || (new Date().getMonth() + 1).toString().padStart(2, '0'),
+                    docType: "nf"
+                }];
+
+                formData.append("metadata", JSON.stringify(metadataArray));
+
+                const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
+                if (!res.ok) throw new Error(`Erro no upload da NF: ${r.nfse.name}`);
+            }
 
             setActionState(p => ({ ...p, nfsSuccess: true }));
             alert("Notas Fiscais enviadas e vinculadas com sucesso!");
