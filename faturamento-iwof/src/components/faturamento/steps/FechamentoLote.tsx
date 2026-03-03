@@ -629,27 +629,39 @@ export default function FechamentoLote({
                 return;
             }
 
-            // Envio sequencial para não estourar o limite de payload da Vercel (4.5MB)
-            for (const r of reportsWithBoletos) {
+            // Envio em lotes de 5 para equilibrar limite da Vercel vs Rate Limit do Google Drive
+            const chunkSize = 5;
+            for (let i = 0; i < reportsWithBoletos.length; i += chunkSize) {
+                const chunk = reportsWithBoletos.slice(i, i + chunkSize);
                 const formData = new FormData();
                 formData.append("loteId", targetLoteId);
-                formData.append("files", r.boleto!.file, r.boleto!.name);
 
-                const metadataArray = [{
-                    filename: r.boleto!.name,
-                    clienteId: r.id,
-                    consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
-                    nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
-                    ciclo: r.ciclo || "Geral",
-                    ano: ano || new Date().getFullYear().toString(),
-                    mes: mes || (new Date().getMonth() + 1).toString().padStart(2, '0'),
-                    docType: "hc"
-                }];
+                const metadataArray = [];
+
+                for (const r of chunk) {
+                    const fileObj = r.boleto.file || r.boleto;
+                    const fileName = r.boleto.name || fileObj.name;
+                    formData.append("files", fileObj, fileName);
+
+                    metadataArray.push({
+                        filename: fileName,
+                        clienteId: r.id,
+                        consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
+                        nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
+                        ciclo: r.ciclo || "Geral",
+                        ano: ano || new Date().getFullYear().toString(),
+                        mes: mes || (new Date().getMonth() + 1).toString().padStart(2, '0'),
+                        docType: "hc"
+                    });
+                }
 
                 formData.append("metadata", JSON.stringify(metadataArray));
 
                 const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
-                if (!res.ok) throw new Error(`Erro no upload do boleto: ${r.boleto!.name}`);
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(`Erro na API (Boletos Lote ${i / chunkSize + 1}): ${errData.error || res.statusText}`);
+                }
             }
 
             setActionState(p => ({ ...p, boletosSuccess: true }));
@@ -678,29 +690,39 @@ export default function FechamentoLote({
                 return;
             }
 
-            // Envio sequencial para não estourar o limite de payload da Vercel (4.5MB)
-            for (const r of reportsWithNf) {
+            // Envio em lotes de 5 para equilibrar limite da Vercel vs Rate Limit do Google Drive
+            const chunkSize = 5;
+            for (let i = 0; i < reportsWithNf.length; i += chunkSize) {
+                const chunk = reportsWithNf.slice(i, i + chunkSize);
                 const formData = new FormData();
                 formData.append("loteId", targetLoteId);
 
-                const file = new File([r.nfse.blob], r.nfse.name, { type: "application/pdf" });
-                formData.append("files", file, r.nfse.name);
+                const metadataArray = [];
 
-                const metadataArray = [{
-                    filename: r.nfse.name,
-                    clienteId: r.id,
-                    consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
-                    nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
-                    ciclo: r.ciclo || "Geral",
-                    ano: ano || new Date().getFullYear().toString(),
-                    mes: mes || (new Date().getMonth() + 1).toString().padStart(2, '0'),
-                    docType: "nf"
-                }];
+                for (const r of chunk) {
+                    const fileObj = r.nfse.file || r.nfse;
+                    const fileName = r.nfse.name || fileObj.name;
+                    formData.append("files", fileObj, fileName);
+
+                    metadataArray.push({
+                        filename: fileName,
+                        clienteId: r.id,
+                        consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
+                        nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
+                        ciclo: r.ciclo || "Geral",
+                        ano: ano || new Date().getFullYear().toString(),
+                        mes: mes || (new Date().getMonth() + 1).toString().padStart(2, '0'),
+                        docType: "nf"
+                    });
+                }
 
                 formData.append("metadata", JSON.stringify(metadataArray));
 
                 const res = await fetch("/api/drive/upload", { method: "POST", body: formData });
-                if (!res.ok) throw new Error(`Erro no upload da NF: ${r.nfse.name}`);
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(`Erro na API (NFs Lote ${i / chunkSize + 1}): ${errData.error || res.statusText}`);
+                }
             }
 
             setActionState(p => ({ ...p, nfsSuccess: true }));
