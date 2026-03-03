@@ -72,7 +72,7 @@ export default function FechamentoLote({
     const boletosInputRef = useRef<HTMLInputElement>(null);
     const nfsInputRef = useRef<HTMLInputElement>(null);
     const [manualMappings, setManualMappings] = useState<Record<string, { consolidadoId: string; type: 'nfse' | 'boleto' }>>({});
-    const [xmlParsedData, setXmlParsedData] = useState<Record<string, { cnpj: string; valorIr: number; numero_nf_real: string; valorServicos: number; name: string }>>({});
+    const [xmlParsedData, setXmlParsedData] = useState<Record<string, { cnpj: string; irrf: number; numero_nf_real: string; valorServicos: number; name: string }>>({});
 
     useEffect(() => {
         const parseXmls = async () => {
@@ -113,7 +113,7 @@ export default function FechamentoLote({
 
                             newParsedMap[numeroNF] = {
                                 cnpj: cnpj.replace(/\D/g, ''),
-                                valorIr,
+                                irrf: valorIr,
                                 numero_nf_real: numeroNF,
                                 valorServicos,
                                 name: f.name
@@ -246,33 +246,39 @@ export default function FechamentoLote({
                 lojaEntry.valorDescontos += (baseVal - finalVal);
             }
 
-            // --- XML Data Matching (Refined Senior Rule with ID-based pairing & Sequential Pool) ---
-            // 1. Search for XML by Cleaned CNPJ in the indexed data (Sequential allocation)
-            const matchingXmlEntry = Object.entries(xmlParsedData).find(([nfNum, data]) => {
-                if (usedNfIds.has(nfNum)) return false; // Pula se já foi atribuída (Sequential Pool)
+            // --- XML Data Matching (Refined Phase 4 ARCHITECTURE: CNPJ Shielding & Auditing) ---
+            const matchingNfEntry = Object.entries(xmlParsedData).find(([nfNum, data]) => {
+                if (usedNfIds.has(nfNum)) return false; // Pula se a NF já foi consumida por outra fatura
 
                 const safeCnpjDb = cleanCnpj(lojaEntry.cnpj);
                 const safeCnpjXml = cleanCnpj(data.cnpj);
 
+                // LOG DE AUDITORIA - ISSO É OBRIGATÓRIO PARA DIAGNÓSTICO:
+                if (safeCnpjXml) {
+                    console.log(`[MATCH AUDIT] Loja: ${lojaEntry.nome} | DB original: ${lojaEntry.cnpj} -> limpo: ${safeCnpjDb} | XML limpo: ${safeCnpjXml} | NF: ${nfNum}`);
+                }
+
                 return safeCnpjDb && safeCnpjXml && safeCnpjDb === safeCnpjXml;
             });
 
-            if (matchingXmlEntry) {
-                const [numeroNF, data] = matchingXmlEntry;
-                usedNfIds.add(numeroNF); // Marca como consumida para evitar duplicação em múltiplas lojas do mesmo cliente
+            if (matchingNfEntry) {
+                const [nfId, data] = matchingNfEntry;
+                usedNfIds.add(nfId);
 
-                lojaEntry.numero_nf = numeroNF;
-                lojaEntry.descontoIR = data.valorIr;
+                lojaEntry.numero_nf = data.numero_nf_real || nfId;
+                lojaEntry.descontoIR = data.irrf;
                 lojaEntry.isXmlMatched = true;
                 lojaEntry.xmlValorServicos = data.valorServicos;
 
-                // 2. Pair with the physical PDF uploaded in Step 5 using the precise numeroNF
-                const matchingPdf = pdfNfsFiles.find(p => p.name.includes(numeroNF));
+                // 2. Busca o PDF correspondente usando o numeroNF isolado
+                const targetNF = lojaEntry.numero_nf;
+                const matchingPdf = pdfNfsFiles?.find(p => p.name.includes(targetNF));
+
                 if (matchingPdf) {
                     lojaEntry.pdfNfMatch = matchingPdf;
-                    console.log(`[Full Match] Unified XML + PDF for ${lojaEntry.nome}: NF ${numeroNF}, IR ${data.valorIr}`);
+                    console.log(`[Full Match] Unified XML + PDF for ${lojaEntry.nome}: NF ${targetNF}, IR ${data.irrf}`);
                 } else {
-                    console.warn(`[Partial Match] XML found for ${lojaEntry.nome} (NF ${numeroNF}), but PDF file "${numeroNF}-nfse.pdf" is missing.`);
+                    console.warn(`[Partial Match] XML found for ${lojaEntry.nome} (NF ${targetNF}), but PDF file "${targetNF}-nfse.pdf" is missing.`);
                 }
             }
         }
