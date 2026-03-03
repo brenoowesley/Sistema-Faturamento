@@ -445,34 +445,29 @@ export default function FechamentoLote({
                     const finalVal = a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof);
                     valTotal += finalVal;
                     return {
-                        cliente_id: a.clienteId,
+                        loja_id: a.clienteId,
                         nome_profissional: a.nome,
                         vaga: a.vaga,
-                        inicio: a.inicio ? a.inicio.toISOString() : null,
-                        termino: a.termino ? a.termino.toISOString() : null,
+                        data_inicio: a.inicio ? a.inicio.toISOString() : null,
+                        data_fim: a.termino ? a.termino.toISOString() : null,
                         valor_iwof: finalVal,
                         fracao_hora: a.status === "CORREÇÃO" ? (a.suggestedFracaoHora ?? a.fracaoHora) : a.fracaoHora,
-                        ref_agendamento: a.refAgendamento,
-                        data_cancelamento: a.dataCancelamento ? a.dataCancelamento.toISOString() : null,
-                        motivo_cancelamento: a.motivoCancelamento,
-                        responsavel_cancelamento: a.responsavelCancelamento,
-                        raw_data: a.rawRow
+                        status_validacao: "VALIDADO",
+                        data_competencia: a.data_competencia || a.dataCompetencia || null
                     };
                 });
 
-                const pStartUTC = periodoInicio ? new Date(periodoInicio + "T00:00:00Z").toISOString() : null;
-                const pEndUTC = periodoFim ? new Date(periodoFim + "T23:59:59Z").toISOString() : null;
+                // Define uma competência base usando o primeiro agendamento ou o período de início
+                const compBase = validos.length > 0 ? (validos[0].data_competencia || validos[0].dataCompetencia || periodoInicio) : periodoInicio;
 
                 const { data: lote, error: loteErr } = await supabase
                     .from('faturamentos_lote')
                     .insert({
-                        nome: nomePasta || `Lote ${new Date().toLocaleString("pt-BR")}`,
-                        periodo_inicio: pStartUTC,
-                        periodo_fim: pEndUTC,
-                        status: 'FECHADO',
-                        quantidade_agendamentos: agsInserir.length,
-                        valor_total: valTotal,
-                        criado_por: user.id
+                        data_competencia: compBase,
+                        data_inicio_ciclo: periodoInicio,
+                        data_fim_ciclo: periodoFim,
+                        nome_pasta: nomePasta || `Lote ${new Date().toLocaleString("pt-BR")}`,
+                        status: 'FECHADO'
                     })
                     .select('id').single();
 
