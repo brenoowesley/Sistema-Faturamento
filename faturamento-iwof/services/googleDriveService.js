@@ -22,7 +22,9 @@ async function findOrCreateFolder(folderName, parentFolderId) {
             q,
             fields: 'files(id, name)',
             spaces: 'drive',
-            pageSize: 1
+            pageSize: 1,
+            supportsAllDrives: true,
+            includeItemsFromAllDrives: true
         });
 
         if (res.data.files && res.data.files.length > 0) {
@@ -36,7 +38,8 @@ async function findOrCreateFolder(folderName, parentFolderId) {
             };
             const createRes = await drive.files.create({
                 resource: fileMetadata,
-                fields: 'id'
+                fields: 'id',
+                supportsAllDrives: true
             });
             return createRes.data.id;
         }

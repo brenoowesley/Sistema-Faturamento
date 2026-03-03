@@ -19,10 +19,22 @@ const getRootFolderId = () => {
 
     if (!rawFolderEnv) return null;
 
-    // Se for um URL, extrai apenas o ID final
-    return rawFolderEnv.includes('drive.google.com')
-        ? rawFolderEnv.split('/').pop()?.split('?')[0]
-        : rawFolderEnv;
+    // Limpa espaços em branco e caracteres invisíveis
+    const cleanedId = rawFolderEnv.trim().replace(/[\u200B-\u200D\uFEFF]/g, "");
+
+    // Se for uma URL, extrai apenas o ID final
+    const finalId = cleanedId.includes('drive.google.com')
+        ? cleanedId.split('/').pop()?.split('?')[0]
+        : cleanedId;
+
+    // Validação da Raiz (Root ID)
+    const EXPECTED_ROOT_ID = '11HaPWnmMVfS0vgu9xXfdWHxaf2vh7T_Z';
+    if (finalId !== EXPECTED_ROOT_ID) {
+        console.error(`[Drive API] ERRO CRÍTICO: ID da Raiz (${finalId}) diverge do esperado (${EXPECTED_ROOT_ID})`);
+        throw new Error(`ID da pasta raiz inválido ou mal formatado: ${finalId}`);
+    }
+
+    return finalId;
 };
 
 // 2. Configuração do Supabase Admin (Ignora RLS)
@@ -50,6 +62,18 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string) {
         if (res.data.files && res.data.files.length > 0 && res.data.files[0].id) {
             return res.data.files[0].id;
         } else {
+            // Tratamento de Erros de Listagem: Verificação de permissão antes de criar
+            try {
+                await drive.files.get({
+                    fileId: parentFolderId,
+                    fields: 'id, capabilities',
+                    supportsAllDrives: true
+                });
+            } catch (permError) {
+                console.error(`[Drive API] Sem acesso de leitura na pasta pai (${parentFolderId}):`, permError);
+                throw new Error(`Permissão insuficiente na pasta pai: ${parentFolderId}`);
+            }
+
             const fileMetadata = { name: folderName, mimeType: 'application/vnd.google-apps.folder', parents: [parentFolderId] };
             const createRes = await drive.files.create({
                 requestBody: fileMetadata,
@@ -68,7 +92,9 @@ async function findOrCreatePath(rootFolderId: string, segments: string[]) {
     let currentParentId = rootFolderId;
     for (const segment of segments) {
         if (!segment) continue;
-        currentParentId = (await findOrCreateFolder(segment.trim(), currentParentId)) as string;
+        const folderName = segment.trim();
+        currentParentId = (await findOrCreateFolder(folderName, currentParentId)) as string;
+        console.log(`[Drive Path Audit] Segmento: "${folderName}" -> ID: ${currentParentId}`);
     }
     return currentParentId;
 }
@@ -157,6 +183,8 @@ export async function POST(request: Request) {
                 mimeType: file.type || 'application/pdf',
                 body: Readable.from(buffer)
             };
+
+            console.log(`[Drive API] Destino Final do Arquivo [${file.name}]:`, targetFolderId);
 
             const driveRes = await drive.files.create({
                 requestBody: fileMetadata,
