@@ -12,19 +12,36 @@ const auth = new google.auth.GoogleAuth({
 
 const drive = google.drive({ version: 'v3', auth });
 
-// PASTA RAIZ DO FATURAMENTO (Definir nas VOs ou variável ambiente)
-const ROOT_FOLDER_ID = process.env.DRIVE_FATURAMENTO_ROOT_ID || 'dummy_root_id';
+// 1. Extração Inteligente do ID da Pasta (Sincronizado com API)
+const getRootFolderId = () => {
+    // Ordem de Prioridade: GOOGLE_DRIVE_ROOT_FOLDER_ID > DRIVE_FOLDER_URL
+    const rawFolderEnv = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || process.env.DRIVE_FOLDER_URL || '1vBylgUjKl1LC8-Ttf8rrL5CdEJYpi9AT';
+
+    // Sanitização: .trim() + remoção de caracteres invisíveis
+    const sanitizedInput = rawFolderEnv.trim().replace(/[\u200B-\u200D\uFEFF]/g, "");
+
+    // Extração robusta: Se for URL, pega o ID após a última barra
+    const extractedId = sanitizedInput.includes('drive.google.com')
+        ? sanitizedInput.split('/').pop()?.split('?')[0]
+        : sanitizedInput;
+
+    return extractedId;
+};
+
+const ROOT_FOLDER_ID = getRootFolderId();
 
 async function findOrCreateFolder(folderName, parentFolderId) {
     try {
-        const q = `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`;
+        const q = `name='${folderName.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`;
         const res = await drive.files.list({
             q,
             fields: 'files(id, name)',
             spaces: 'drive',
             pageSize: 1,
             supportsAllDrives: true,
-            includeItemsFromAllDrives: true
+            includeItemsFromAllDrives: true,
+            driveId: ROOT_FOLDER_ID,
+            corpora: 'drive'
         });
 
         if (res.data.files && res.data.files.length > 0) {
@@ -37,7 +54,7 @@ async function findOrCreateFolder(folderName, parentFolderId) {
                 parents: [parentFolderId]
             };
             const createRes = await drive.files.create({
-                resource: fileMetadata,
+                requestBody: fileMetadata, // 'resource' renomeado para 'requestBody' na v3 googleapis
                 fields: 'id',
                 supportsAllDrives: true
             });

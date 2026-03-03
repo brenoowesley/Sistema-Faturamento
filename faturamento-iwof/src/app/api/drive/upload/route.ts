@@ -59,7 +59,9 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string) {
             spaces: 'drive',
             pageSize: 1,
             supportsAllDrives: true,
-            includeItemsFromAllDrives: true
+            includeItemsFromAllDrives: true,
+            driveId: '1vBylgUjKl1LC8-Ttf8rrL5CdEJYpi9AT',
+            corpora: 'drive'
         });
 
         if (res.data.files && res.data.files.length > 0 && res.data.files[0].id) {
@@ -97,7 +99,7 @@ async function findOrCreatePath(rootFolderId: string, segments: string[]) {
         if (!segment) continue;
         const folderName = segment.trim();
         currentParentId = (await findOrCreateFolder(folderName, currentParentId)) as string;
-        console.log(`[Drive Path Audit] Segmento: "${folderName}" -> ID: ${currentParentId}`);
+        console.log(`[Drive Debug] Segmento: ${folderName} | Pai: ${currentParentId}`);
     }
     return currentParentId;
 }
@@ -187,6 +189,7 @@ export async function POST(request: Request) {
                 body: Readable.from(buffer)
             };
 
+            console.log(`[Drive Debug] Uploading ${file.name} para a pasta final: ${targetFolderId}`);
             console.log(`[Drive API] Destino Final do Arquivo [${file.name}]:`, targetFolderId);
 
             const driveRes = await drive.files.create({
