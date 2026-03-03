@@ -33,7 +33,11 @@ const supabaseAdmin = createClient(
 
 async function findOrCreateFolder(folderName: string, parentFolderId: string) {
     try {
-        const q = `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`;
+        // Blindagem contra Apóstrofos (Escape de aspas simples para a API do Google Drive)
+        const safeFolderName = folderName.replace(/'/g, "\\'");
+
+        const q = `name='${safeFolderName}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`;
+
         const res = await drive.files.list({
             q,
             fields: 'files(id, name)',
