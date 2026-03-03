@@ -432,34 +432,32 @@ export default function FechamentoLote({
 
             const { data: { session } } = await supabase.auth.getSession();
             const user = session?.user;
-            if (!user) throw new Error("Usuário não autenticado para consolidar o lote.");
 
-            // 1. CRIAR O LOTE (se ainda não existir)
             let currentLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
 
+            const validos = agendamentos.filter(a => !a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO") && a.clienteId);
+            let valTotal = 0;
+
+            // MAP DOS AGENDAMENTOS (Chaves Corretas)
+            const agsInserir = validos.map(a => {
+                const finalVal = a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof);
+                valTotal += finalVal;
+                return {
+                    loja_id: a.clienteId,
+                    nome_profissional: a.nome,
+                    vaga: a.vaga,
+                    data_inicio: a.inicio ? a.inicio.toISOString() : null,
+                    data_fim: a.termino ? a.termino.toISOString() : null,
+                    valor_iwof: finalVal,
+                    fracao_hora: a.status === "CORREÇÃO" ? (a.suggestedFracaoHora ?? a.fracaoHora) : a.fracaoHora,
+                    status_validacao: "VALIDADO",
+                    data_competencia: a.data_competencia || a.dataCompetencia || null
+                };
+            });
+
+            // 1. GARANTIR A EXISTÊNCIA E O STATUS DO LOTE
             if (!currentLoteId) {
-                const validos = agendamentos.filter(a => !a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO") && a.clienteId);
-                let valTotal = 0;
-
-                const agsInserir = validos.map(a => {
-                    const finalVal = a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof);
-                    valTotal += finalVal;
-                    return {
-                        loja_id: a.clienteId,
-                        nome_profissional: a.nome,
-                        vaga: a.vaga,
-                        data_inicio: a.inicio ? a.inicio.toISOString() : null,
-                        data_fim: a.termino ? a.termino.toISOString() : null,
-                        valor_iwof: finalVal,
-                        fracao_hora: a.status === "CORREÇÃO" ? (a.suggestedFracaoHora ?? a.fracaoHora) : a.fracaoHora,
-                        status_validacao: "VALIDADO",
-                        data_competencia: a.data_competencia || a.dataCompetencia || null
-                    };
-                });
-
-                // Define uma competência base usando o primeiro agendamento ou o período de início
                 const compBase = validos.length > 0 ? (validos[0].data_competencia || validos[0].dataCompetencia || periodoInicio) : periodoInicio;
-
                 const { data: lote, error: loteErr } = await supabase
                     .from('faturamentos_lote')
                     .insert({
@@ -471,68 +469,54 @@ export default function FechamentoLote({
                     })
                     .select('id').single();
 
-                if (loteErr) {
-                    console.error("🚨 ERRO LOTE:", loteErr);
-                    alert("Falha ao criar o Lote no banco de dados: " + loteErr.message);
-                    return;
-                }
-
+                if (loteErr) throw new Error("Erro ao criar Lote: " + loteErr.message);
                 currentLoteId = lote.id;
-
                 if (setLoteId) setLoteId(currentLoteId);
                 if (typeof window !== "undefined") sessionStorage.setItem('currentLoteId', currentLoteId!);
-                console.log("✅ LOTE CRIADO NO SUPABASE COM ID:", currentLoteId);
-
-                // 2. INSERIR AGENDAMENTOS BRUTOS
-                const batchSize = 1000;
-                for (let i = 0; i < agsInserir.length; i += batchSize) {
-                    const chunk = agsInserir.slice(i, i + batchSize).map(x => ({ ...x, lote_id: currentLoteId }));
-                    const { error: agendamentosErr } = await supabase.from("agendamentos_brutos").insert(chunk);
-                    if (agendamentosErr) {
-                        console.error("🚨 ERRO AGENDAMENTOS:", agendamentosErr);
-                        alert("Falha ao salvar agendamentos extraídos: " + agendamentosErr.message);
-                        return;
-                    }
-                }
+            } else {
+                // Lote já existe (Rascunho): Atualizar para Fechado e limpar sujeira
+                await supabase.from('faturamentos_lote').update({ status: 'FECHADO' }).eq('id', currentLoteId);
+                await supabase.from('agendamentos_brutos').delete().eq('lote_id', currentLoteId);
             }
 
-            // 3. INSERIR CONSOLIDADOS FISCAIS (Faturamento por Loja Final)
+            // 2. INSERIR AGENDAMENTOS BRUTOS SEMPRE (Obrigatoriedade)
+            const batchSize = 1000;
+            for (let i = 0; i < agsInserir.length; i += batchSize) {
+                const chunk = agsInserir.slice(i, i + batchSize).map(x => ({ ...x, lote_id: currentLoteId }));
+                const { error: agendamentosErr } = await supabase.from("agendamentos_brutos").insert(chunk);
+                if (agendamentosErr) throw new Error("Erro ao salvar agendamentos: " + agendamentosErr.message);
+            }
+
+            // 3. INSERIR CONSOLIDADOS FISCAIS
             const consolidadosPayload = matchFiles.reports.map(r => ({
                 lote_id: currentLoteId,
                 cliente_id: r.id,
-                data_competencia: r.data_competencia || null, // FIX: Preserva a competência em caso de split
+                data_competencia: r.data_competencia || null,
                 valor_bruto: r.totalFaturar || 0,
-                acrescimos: 0,
-                descontos: 0,
+                acrescimos: r.valorAcrescimos || 0,
+                descontos: r.valorDescontos || 0,
                 valor_irrf: r.descontoIR || 0,
                 numero_nf: r.numeroNF || null,
                 valor_nf_emitida: r.statusNF === 'EMITIDA' ? r.totalFaturar : 0,
-                valor_nc_final: r.statusNF === 'PENDENTE' ? r.totalFaturar : 0, // FIX: Se não tem NF no XML, o valor é provisionado para NC
+                valor_nc_final: r.statusNF === 'PENDENTE' ? r.totalFaturar : 0,
                 valor_boleto_final: r.totalFaturar - (r.descontoIR || 0),
-                cnpj_filial: r.cnpjFilial || null, // FIX: Gravando o emissor
+                cnpj_filial: r.cnpjFilial || null,
                 valor_ir_xml: r.descontoIR || 0
             }));
 
             if (consolidadosPayload.length > 0) {
-                // Remove antigos antes de re-inserir para garantir idempotência ao clicar múltiplas vezes
                 await supabase.from('faturamento_consolidados').delete().eq('lote_id', currentLoteId);
-
                 const { data: inserted, error: consolidadosErr } = await supabase
                     .from('faturamento_consolidados')
                     .insert(consolidadosPayload)
                     .select('id, cliente_id, data_competencia');
 
-                if (consolidadosErr) {
-                    console.error("🚨 ERRO CONSOLIDADOS:", consolidadosErr);
-                    alert("Falha ao criar painel de consolidados (IRRF e Totais da NF): " + consolidadosErr.message);
-                    return;
-                }
+                if (consolidadosErr) throw new Error("Erro ao salvar consolidados: " + consolidadosErr.message);
 
                 if (inserted) {
                     const idMap: Record<string, string> = {};
                     const validadosParaMap = agendamentos.filter(a => !a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO") && a.clienteId);
                     inserted.forEach(row => {
-                        // Recria a uniqueKey p/ o mapeamento
                         const client = validadosParaMap.find(v => v.clienteId === row.cliente_id);
                         const isQueiroz = client?.loja.includes('(Mês Anterior)') || client?.loja.includes('(Mês Atual)');
                         const key = isQueiroz ? `${row.cliente_id}_${client?.loja}` : (row.cliente_id || "");
@@ -542,8 +526,7 @@ export default function FechamentoLote({
                 }
             }
 
-            alert("✅ Lote, agendamentos e consolidados fiscais gravados com pleno sucesso!");
-            console.log("🟢 Consolidação Definitiva Executada no Lote:", currentLoteId);
+            alert("✅ Lote e Agendamentos consolidados com sucesso!");
             setIsLoteConsolidado(true);
 
         } catch (error: any) {
