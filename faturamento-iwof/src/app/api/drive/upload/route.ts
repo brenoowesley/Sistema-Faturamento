@@ -110,11 +110,32 @@ export async function POST(request: Request) {
                 continue;
             }
 
+            // --- Lógica de Pareamento Dinâmico (Phase 9) ---
+            let empresaParaPasta = (meta.nome_empresa_extraido || meta.nome_conta_azul || "Indefinido").trim();
+
+            if (meta.docType === 'nf' && meta.numeroNF) {
+                try {
+                    // Busca na tabela faturamento_consolidados pelo número da nota
+                    const { data: consData, error: consErr } = await supabaseAdmin
+                        .from('faturamento_consolidados')
+                        .select('nome_empresa')
+                        .eq('numero_nf', meta.numeroNF)
+                        .maybeSingle();
+
+                    if (!consErr && consData?.nome_empresa) {
+                        empresaParaPasta = consData.nome_empresa.trim();
+                        console.log(`[Drive Pairing] NF ${meta.numeroNF} vinculada à empresa: ${empresaParaPasta}`);
+                    }
+                } catch (e) {
+                    console.error(`[Drive Pairing Error] Falha ao buscar empresa para NF ${meta.numeroNF}:`, e);
+                }
+            }
+
             // 1. Construir árvore de pastas: [Ano] -> [Mês] -> [Empresa] -> [Ciclo]
             const segments = [
                 meta.ano,
                 meta.mes,
-                meta.nome_conta_azul,
+                empresaParaPasta,
                 meta.ciclo
             ].map(s => String(s || "Indefinido").trim());
 

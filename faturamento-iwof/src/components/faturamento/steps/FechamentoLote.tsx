@@ -651,7 +651,8 @@ export default function FechamentoLote({
                         ciclo: r.ciclo || "Geral",
                         ano: ano || new Date().getFullYear().toString(),
                         mes: mes || (new Date().getMonth() + 1).toString().padStart(2, '0'),
-                        docType: "hc"
+                        docType: "hc",
+                        nome_empresa_extraido: r.nomeContaAzul || r.razaoSocial
                     });
                 }
 
@@ -715,7 +716,8 @@ export default function FechamentoLote({
                         ciclo: r.ciclo || "Geral",
                         ano: ano || new Date().getFullYear().toString(),
                         mes: mes || (new Date().getMonth() + 1).toString().padStart(2, '0'),
-                        docType: "nf"
+                        docType: "nf",
+                        numeroNF: r.numeroNF
                     });
                 }
 
