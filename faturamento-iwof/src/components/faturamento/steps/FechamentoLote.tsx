@@ -639,8 +639,8 @@ export default function FechamentoLote({
                 const metadataArray = [];
 
                 for (const r of chunk) {
-                    const fileObj = r.boleto.file || r.boleto;
-                    const fileName = r.boleto.name || fileObj.name;
+                    const fileObj = r.boleto!.file || r.boleto!;
+                    const fileName = r.boleto!.name || (fileObj as any).name;
                     formData.append("files", fileObj, fileName);
 
                     metadataArray.push({
@@ -700,8 +700,8 @@ export default function FechamentoLote({
                 const metadataArray = [];
 
                 for (const r of chunk) {
-                    const fileObj = r.nfse.file || r.nfse;
-                    const fileName = r.nfse.name || fileObj.name;
+                    const fileObj = r.nfse!.file || r.nfse!;
+                    const fileName = r.nfse!.name || (fileObj as any).name;
                     formData.append("files", fileObj, fileName);
 
                     metadataArray.push({
