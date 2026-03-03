@@ -8,8 +8,10 @@ import JSZip from "jszip";
 import { createClient } from "@/lib/supabase/client";
 import * as pdfjsLib from "pdfjs-dist";
 
-// Setup PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// Garante que a versão do worker é exatamente igual à versão da biblioteca instalada
+if (typeof window !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+}
 
 interface FechamentoLoteProps {
     setCurrentStep: (s: number) => void;
