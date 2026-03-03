@@ -6,6 +6,10 @@ import { Agendamento, FinancialSummary } from "../types";
 import { fmtCurrency, normalizarNome } from "../utils";
 import JSZip from "jszip";
 import { createClient } from "@/lib/supabase/client";
+import * as pdfjsLib from "pdfjs-dist";
+
+// Setup PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 interface FechamentoLoteProps {
     setCurrentStep: (s: number) => void;
@@ -72,62 +76,105 @@ export default function FechamentoLote({
     const boletosInputRef = useRef<HTMLInputElement>(null);
     const nfsInputRef = useRef<HTMLInputElement>(null);
     const [manualMappings, setManualMappings] = useState<Record<string, { consolidadoId: string; type: 'nfse' | 'boleto' }>>({});
-    const [xmlParsedData, setXmlParsedData] = useState<Record<string, { cnpj: string; irrf: number; numero_nf_real: string; valorServicos: number; name: string }>>({});
+    const [parsedDocumentData, setParsedDocumentData] = useState<Record<string, { cnpj: string; irrf: number; numero_nf_real: string; valorServicos: number; name: string }>>({});
 
     useEffect(() => {
-        const parseXmls = async () => {
+        const parseDocuments = async () => {
             if (!nfseFiles?.length) return;
+            console.group("📝 Document Parsing Audit (XML + PDF Fallback)");
             const newParsedMap: Record<string, any> = {};
 
             for (const f of nfseFiles) {
-                if (f.name.toLowerCase().endsWith(".xml")) {
+                const isXml = f.name.toLowerCase().endsWith(".xml");
+                const isPdf = f.name.toLowerCase().endsWith(".pdf");
+
+                if (isXml) {
                     try {
                         const xmlText = new TextDecoder().decode(f.buffer);
                         const parser = new DOMParser();
                         const xmlDoc = parser.parseFromString(xmlText, "text/xml");
 
                         // 1. IGNORAR TAG <Numero> (Bug NFE.io)
-                        // Extração exclusivamente do nome do arquivo
                         const match = f.name.match(/(\d+)-nfse\.xml$/i);
-                        // Remove zeros à esquerda: ex 00019894 -> 19894
                         const numeroNF = match ? String(parseInt(match[1], 10)) : "";
 
-                        // 2. Extração de Cnpj e ValorIr (Continuam necessárias)
                         const tomadorNode = xmlDoc.getElementsByTagName("TomadorServico")[0] || xmlDoc.getElementsByTagName("tomador_servico")[0] || xmlDoc.getElementsByTagName("Tomador")[0] || xmlDoc.getElementsByTagName("dest")[0];
                         const cnpj = tomadorNode
                             ? (tomadorNode.getElementsByTagName("Cnpj")[0]?.textContent || tomadorNode.getElementsByTagName("cnpj")[0]?.textContent || tomadorNode.getElementsByTagName("CPF")[0]?.textContent || "")
                             : (xmlDoc.getElementsByTagName("Cnpj")[1]?.textContent || xmlDoc.getElementsByTagName("Cnpj")[0]?.textContent || "");
 
-                        const valorIrStr = xmlDoc.getElementsByTagName("ValorIr")[0]?.textContent || xmlDoc.getElementsByTagName("valor_ir")[0]?.textContent || "0";
-                        const valorIr = parseFloat(valorIrStr.replace(',', '.'));
+                        const irrfStr = xmlDoc.getElementsByTagName("ValorIr")[0]?.textContent || xmlDoc.getElementsByTagName("valor_irrf")[0]?.textContent || "0";
+                        const irrfValue = parseFloat(irrfStr.replace(',', '.'));
 
                         const valorServicosStr = xmlDoc.getElementsByTagName("ValorServicos")[0]?.textContent || xmlDoc.getElementsByTagName("valor_servicos")[0]?.textContent || "0";
                         const valorServicos = parseFloat(valorServicosStr.replace(',', '.'));
 
                         if (numeroNF) {
-                            console.group(`[XML Extract] Arquivo: ${f.name}`);
-                            console.log(`NF Real Extraída (Nome): ${numeroNF}`);
-                            console.log(`CNPJ Fiscal (Interno): ${cnpj}`);
-                            console.log(`IRRF Fiscal (Interno): ${valorIr}`);
-                            console.groupEnd();
-
                             newParsedMap[numeroNF] = {
                                 cnpj: cnpj.replace(/\D/g, ''),
-                                irrf: valorIr,
+                                irrf: irrfValue,
                                 numero_nf_real: numeroNF,
                                 valorServicos,
                                 name: f.name
                             };
+                            console.log(`[XML Extract] ${f.name} -> NF: ${numeroNF}, CNPJ: ${cnpj}, IRRF: ${irrfValue}`);
                         }
-                    } catch (e) {
-                        console.error("Erro ao processar XML:", f.name, e);
+                    } catch (err) {
+                        console.error("Erro ao processar XML:", f.name, err);
+                    }
+                } else if (isPdf) {
+                    try {
+                        const loadingTask = pdfjsLib.getDocument({ data: f.buffer });
+                        const pdf = await loadingTask.promise;
+                        let fullText = "";
+
+                        for (let i = 1; i <= pdf.numPages; i++) {
+                            const page = await pdf.getPage(i);
+                            const textContent = await page.getTextContent();
+                            fullText += textContent.items.map((item: any) => item.str).join(" ");
+                        }
+
+                        // 1. CNPJ Extração (Tomador)
+                        const cnpjRegex = /TOMADOR DO SERVIÇO[\s\S]*?CNPJ\/CPF\/NIF[\s\S]*?([0-9]{2}\.[0-9]{3}\.[0-9]{3}\/[0-9]{4}-[0-9]{2})/i;
+                        const cnpjMatch = fullText.match(cnpjRegex);
+                        const cnpjRaw = cnpjMatch ? cnpjMatch[1] : "";
+                        const cnpjClean = cnpjRaw.replace(/\D/g, '').replace(/^0+/, '');
+
+                        // 2. Número NF (Primário nome do arquivo, secundário texto)
+                        const nameMatch = f.name.match(/(\d+)-nfse\.pdf$/i);
+                        let numeroNF = nameMatch ? String(parseInt(nameMatch[1], 10)) : "";
+
+                        if (!numeroNF) {
+                            const nfRegex = /Número da NFS-e[\s\S]*?(\d+)/i;
+                            const nfMatch = fullText.match(nfRegex);
+                            numeroNF = nfMatch ? nfMatch[1] : "";
+                        }
+
+                        // 3. IRRF Extração
+                        const irrfRegex = /IRRF[\s\S]*?([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})/i;
+                        const irrfMatch = fullText.match(irrfRegex);
+                        const irrfValue = irrfMatch ? parseFloat(irrfMatch[1].replace('.', '').replace(',', '.')) : 0;
+
+                        if (numeroNF) {
+                            newParsedMap[numeroNF] = {
+                                cnpj: cnpjClean,
+                                irrf: irrfValue,
+                                numero_nf_real: numeroNF,
+                                valorServicos: 0,
+                                name: f.name
+                            };
+                            console.log(`[PDF Fallback] ${f.name} -> NF: ${numeroNF}, CNPJ: ${cnpjClean}, IRRF: ${irrfValue}`);
+                        }
+                    } catch (err) {
+                        console.error("Erro ao processar PDF:", f.name, err);
                     }
                 }
             }
-            setXmlParsedData(newParsedMap);
+            setParsedDocumentData(newParsedMap);
+            console.groupEnd();
         };
 
-        parseXmls();
+        parseDocuments();
     }, [nfseFiles]);
 
     useEffect(() => {
@@ -256,7 +303,8 @@ export default function FechamentoLote({
             let nfseMatch: any = null;
 
             // 1. DADOS (XML Priority with CNPJ Shielding & Auditing)
-            const matchingNfEntry = Object.entries(xmlParsedData).find(([nfNum, data]) => {
+            const matchingNfEntry = Object.entries(parsedDocumentData).find(([nfNum, entry]) => {
+                const data = entry as any;
                 if (usedNfIds.has(nfNum)) return false;
 
                 const safeCnpjDb = cleanCnpj(loja.cnpj);
@@ -369,7 +417,7 @@ export default function FechamentoLote({
         });
 
         return { reports: finalReports, orphanNfses, orphanBoletos };
-    }, [agendamentos, nfseFiles, pdfNfsFiles, xmlParsedData, boletoFiles, actionState.ncsSuccess, manualMappings]);
+    }, [agendamentos, nfseFiles, pdfNfsFiles, parsedDocumentData, boletoFiles, actionState.ncsSuccess, manualMappings]);
 
     const handleConsolidarLote = async () => {
         try {

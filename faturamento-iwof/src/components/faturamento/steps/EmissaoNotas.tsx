@@ -278,7 +278,8 @@ export default function EmissaoNotas({
             "application/x-zip-compressed": [".zip"],
             "text/xml": [".xml"],
             "application/xml": [".xml"],
-            "application/octet-stream": [".xml"]
+            "application/octet-stream": [".xml"],
+            "application/pdf": [".pdf"]
         },
         maxFiles: 500,
         noClick: false, // Ensure clicking works
@@ -487,7 +488,7 @@ export default function EmissaoNotas({
                                 </div>
                             )}
 
-                            <p className="text-sm font-semibold text-[var(--fg)] mb-1">Arraste o ZIP dos XMLs aqui</p>
+                            <p className="text-sm font-semibold text-[var(--fg)] mb-1">Arraste o ZIP, XMLs ou PDFs aqui</p>
                             <p className="text-xs text-[var(--fg-dim)] mb-4">ou</p>
                             <button type="button" className="btn btn-ghost border border-[var(--border)] text-[var(--fg-dim)] hover:border-[var(--fg)] hover:text-[var(--fg)] transition-colors pointer-events-none">
                                 Procurar nas Pastas
