@@ -133,14 +133,14 @@ export default function FechamentoLote({
                         for (let i = 1; i <= pdf.numPages; i++) {
                             const page = await pdf.getPage(i);
                             const textContent = await page.getTextContent();
-                            fullText += textContent.items.map((item: any) => item.str).join(" ");
+                            const pageText = textContent.items.map((item: any) => item.str).join(" ");
+                            fullText += pageText + " ";
                         }
 
-                        // 1. CNPJ Extração (Tomador)
-                        const cnpjRegex = /TOMADOR DO SERVIÇO[\s\S]*?CNPJ\/CPF\/NIF[\s\S]*?([0-9]{2}\.[0-9]{3}\.[0-9]{3}\/[0-9]{4}-[0-9]{2})/i;
-                        const cnpjMatch = fullText.match(cnpjRegex);
-                        const cnpjRaw = cnpjMatch ? cnpjMatch[1] : "";
-                        const cnpjClean = cnpjRaw.replace(/\D/g, '').replace(/^0+/, '');
+                        // 1. CNPJ Extração (Tomador): Pega o primeiro CNPJ formatado que aparecer estritamente APÓS a palavra "TOMADOR"
+                        const cnpjMatch = fullText.match(/TOMADOR[\s\S]*?([0-9]{2}\.[0-9]{3}\.[0-9]{3}\/[0-9]{4}-[0-9]{2})/i);
+                        const cnpjExtraido = cnpjMatch ? cnpjMatch[1] : null;
+                        const cnpjClean = cnpjExtraido ? cnpjExtraido.replace(/\D/g, '').replace(/^0+/, '') : null;
 
                         // 2. Número NF (Primário nome do arquivo, secundário texto)
                         const nameMatch = f.name.match(/(\d+)-nfse\.pdf$/i);
@@ -152,20 +152,25 @@ export default function FechamentoLote({
                             numeroNF = nfMatch ? nfMatch[1] : "";
                         }
 
-                        // 3. IRRF Extração
-                        const irrfRegex = /IRRF[\s\S]*?([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})/i;
-                        const irrfMatch = fullText.match(irrfRegex);
-                        const irrfValue = irrfMatch ? parseFloat(irrfMatch[1].replace('.', '').replace(',', '.')) : 0;
+                        // 3. IRRF: Procura a sigla IRRF e varre até 30 caracteres à frente procurando pelo valor numérico
+                        const irrfMatch = fullText.match(/IRRF[\s\S]{0,30}?(?:R\$)?\s*([\d.,]+)/i);
+                        let irrfExtraido = 0;
+                        if (irrfMatch && irrfMatch[1]) {
+                            const limpo = irrfMatch[1].replace(/\./g, '').replace(',', '.');
+                            if (!isNaN(parseFloat(limpo))) {
+                                irrfExtraido = parseFloat(limpo);
+                            }
+                        }
 
                         if (numeroNF) {
                             newParsedMap[numeroNF] = {
                                 cnpj: cnpjClean,
-                                irrf: irrfValue,
+                                irrf: irrfExtraido,
                                 numero_nf_real: numeroNF,
                                 valorServicos: 0,
                                 name: f.name
                             };
-                            console.log(`[PDF Fallback] ${f.name} -> NF: ${numeroNF}, CNPJ: ${cnpjClean}, IRRF: ${irrfValue}`);
+                            console.log(`[PDF Fallback] ${f.name} -> NF: ${numeroNF}, CNPJ: ${cnpjExtraido}, IRRF: ${irrfExtraido}`);
                         }
                     } catch (err) {
                         console.error("Erro ao processar PDF:", f.name, err);
