@@ -129,15 +129,25 @@ function fmtBRL_NC(v: number): string {
  * depois busca parcial. Aceita múltiplos candidatos.
  */
 function findColNC(headers: string[], ...candidates: string[]): string | null {
-    const lower = headers.map((h) => h.toLowerCase().trim());
+    const clean = (s: unknown) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+    const cleanHeaders = headers.map(clean);
+
+    // 1. Busca exata após limpeza (Ex: "Nº da NF" -> "nudanf")
     for (const c of candidates) {
-        const idx = lower.indexOf(c.toLowerCase());
+        const target = clean(c);
+        if (!target) continue;
+        const idx = cleanHeaders.indexOf(target);
         if (idx >= 0) return headers[idx];
     }
+
+    // 2. Busca parcial se não encontrou exata
     for (const c of candidates) {
-        const idx = lower.findIndex((h) => h.includes(c.toLowerCase()));
+        const target = clean(c);
+        if (!target) continue;
+        const idx = cleanHeaders.findIndex((h) => h.includes(target));
         if (idx >= 0) return headers[idx];
     }
+
     return null;
 }
 
@@ -162,14 +172,14 @@ function parsearPlanilhaNC(rawRows: Record<string, string>[]): {
     const headers = Object.keys(rawRows[0]);
     const erros: string[] = [];
 
-    const colLoja = findColNC(headers, "loja", "empresa", "cliente", "store");
+    const colLoja = findColNC(headers, "loja", "empresa", "cliente", "store", "unidade");
     const colCnpj = findColNC(headers, "cnpj");
-    const colEstado = findColNC(headers, "estado", "uf");
+    const colEstado = findColNC(headers, "estado", "uf", "uf loja");
     const colBoleto = findColNC(headers, "valor boleto", "vlr boleto", "boleto", "valor do boleto");
-    const colNF = findColNC(headers, "valor nf", "vlr nf", "valor da nf", "valor nota fiscal");
-    const colNC = findColNC(headers, "valor nc", "vlr nc", "valor da nc", "valor nota crédito");
-    const colNumNF = findColNC(headers, "nº nf", "num nf", "numero nf", "número nf", "nf numero", "nº da nf", "nota fiscal", "nf", "nota");
-    const colDesconto = findColNC(headers, "desconto", "discount", "número do pedido", "pedido", "nc", "nota crédito", "nº nc", "num nc", "numero nc");
+    const colNF = findColNC(headers, "valor nf", "vlr nf", "valor da nf", "valor nota fiscal", "vlr nota");
+    const colNC = findColNC(headers, "valor nc", "vlr nc", "valor da nc", "valor nota crédito", "vlr nc");
+    const colNumNF = findColNC(headers, "nf", "nº nf", "num nf", "numero nf", "número nf", "nf numero", "nº da nf", "nota fiscal", "nota");
+    const colDesconto = findColNC(headers, "nc", "desconto", "discount", "número do pedido", "pedido", "nota crédito", "nº nc", "num nc", "numero nc", "pedido nc");
 
     const missing: string[] = [];
     if (!colLoja) missing.push("LOJA");
