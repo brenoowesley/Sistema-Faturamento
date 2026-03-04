@@ -350,7 +350,6 @@ export default function CentralLancamentos() {
 
     const fetchClientesEmatch = useCallback(async (dados: LancamentoParcial[]) => {
         setLoadingClientes(true);
-        setStep("matching");
 
         // Busca paginada de clientes ativos
         let allClientes: ClienteDB_LP[] = [];
@@ -480,6 +479,7 @@ export default function CentralLancamentos() {
             setLancamentos(dados);
             setErrosParsing(erros);
             if (dados.length > 0) {
+                setStep("matching");
                 fetchClientesEmatch(dados);
             }
         };
@@ -524,12 +524,11 @@ export default function CentralLancamentos() {
         multiple: false,
     });
 
-    // 🔄 Re-match automático ao mudar alvos
     useEffect(() => {
         if (lancamentos.length > 0 && matchingTargets.length > 0 && (step === "matching" || step === "preview")) {
             fetchClientesEmatch(lancamentos);
         }
-    }, [matchingTargets, fetchClientesEmatch, step]);
+    }, [matchingTargets]);
 
     /* --- Manual match --- */
     const handleManualMatch = (lancId: string, clienteId: string) => {
