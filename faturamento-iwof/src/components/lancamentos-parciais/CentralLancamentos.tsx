@@ -345,66 +345,6 @@ export default function CentralLancamentos() {
     const unmatched = useMemo(() => lancamentos.filter(l => !l.lojaIdentificadaId).length, [lancamentos]);
 
     /* ================================================================
-       STEP 1: UPLOAD E PARSING
-       ================================================================ */
-
-    const parseFile = useCallback((file: File) => {
-        setErrosParsing([]);
-        setLancamentos([]);
-        setFileName(file.name);
-
-        const ext = file.name.split(".").pop()?.toLowerCase();
-
-        const processRows = (rawRows: Record<string, string>[]) => {
-            const { dados, erros } = parsearPlanilha_LP(rawRows);
-            setLancamentos(dados);
-            setErrosParsing(erros);
-            if (dados.length > 0) {
-                fetchClientesEmatch(dados);
-            }
-        };
-
-        if (ext === "csv") {
-            Papa.parse(file, {
-                header: true,
-                skipEmptyLines: true,
-                encoding: "UTF-8",
-                complete: (result) => processRows(result.data as Record<string, string>[]),
-                error: (err) => { setErrosParsing([`Erro CSV: ${err.message}`]); },
-            });
-        } else if (ext === "xlsx" || ext === "xls") {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                try {
-                    const wb = XLSX.read(e.target?.result, { type: "binary" });
-                    const ws = wb.Sheets[wb.SheetNames[0]];
-                    const raw = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "", raw: false });
-                    processRows(raw);
-                } catch (err: unknown) {
-                    setErrosParsing([`Erro XLSX: ${err instanceof Error ? err.message : "desconhecido"}`]);
-                }
-            };
-            reader.readAsBinaryString(file);
-        } else {
-            setErrosParsing(["Formato não suportado. Use CSV ou XLSX."]);
-        }
-    }, []);
-
-    const onDropUpload = useCallback((accepted: File[]) => {
-        if (accepted.length > 0) parseFile(accepted[0]);
-    }, [parseFile]);
-
-    const dzUpload = useDropzone({
-        onDrop: onDropUpload,
-        accept: {
-            "text/csv": [".csv"],
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
-            "application/vnd.ms-excel": [".xls"],
-        },
-        multiple: false,
-    });
-
-    /* ================================================================
        STEP 2: MATCHING AUTOMÁTICO DE LOJAS
        ================================================================ */
 
@@ -505,7 +445,7 @@ export default function CentralLancamentos() {
                             if (norm.includes(n) || n.includes(norm)) return Math.min(n.length, norm.length);
                             return -1;
                         }));
-                        if (score > bestScore) { bestScore = score; best = c; }
+                        if (score > bestScore && score >= 3) { bestScore = score; best = c; }
                     }
                     if (best) cliente = best;
                 }
@@ -522,7 +462,74 @@ export default function CentralLancamentos() {
 
         setLancamentos(matched);
         setLoadingClientes(false);
-    }, [supabase]);
+    }, [supabase, matchingTargets]);
+
+    /* ================================================================
+       STEP 1: UPLOAD E PARSING
+       ================================================================ */
+
+    const parseFile = useCallback((file: File) => {
+        setErrosParsing([]);
+        setLancamentos([]);
+        setFileName(file.name);
+
+        const ext = file.name.split(".").pop()?.toLowerCase();
+
+        const processRows = (rawRows: Record<string, string>[]) => {
+            const { dados, erros } = parsearPlanilha_LP(rawRows);
+            setLancamentos(dados);
+            setErrosParsing(erros);
+            if (dados.length > 0) {
+                fetchClientesEmatch(dados);
+            }
+        };
+
+        if (ext === "csv") {
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                encoding: "UTF-8",
+                complete: (result) => processRows(result.data as Record<string, string>[]),
+                error: (err) => { setErrosParsing([`Erro CSV: ${err.message}`]); },
+            });
+        } else if (ext === "xlsx" || ext === "xls") {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const wb = XLSX.read(e.target?.result, { type: "binary" });
+                    const ws = wb.Sheets[wb.SheetNames[0]];
+                    const raw = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "", raw: false });
+                    processRows(raw);
+                } catch (err: unknown) {
+                    setErrosParsing([`Erro XLSX: ${err instanceof Error ? err.message : "desconhecido"}`]);
+                }
+            };
+            reader.readAsBinaryString(file);
+        } else {
+            setErrosParsing(["Formato não suportado. Use CSV ou XLSX."]);
+        }
+    }, [fetchClientesEmatch]);
+
+    const onDropUpload = useCallback((accepted: File[]) => {
+        if (accepted.length > 0) parseFile(accepted[0]);
+    }, [parseFile]);
+
+    const dzUpload = useDropzone({
+        onDrop: onDropUpload,
+        accept: {
+            "text/csv": [".csv"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+            "application/vnd.ms-excel": [".xls"],
+        },
+        multiple: false,
+    });
+
+    // 🔄 Re-match automático ao mudar alvos
+    useEffect(() => {
+        if (lancamentos.length > 0 && matchingTargets.length > 0 && (step === "matching" || step === "preview")) {
+            fetchClientesEmatch(lancamentos);
+        }
+    }, [matchingTargets, fetchClientesEmatch, step]);
 
     /* --- Manual match --- */
     const handleManualMatch = (lancId: string, clienteId: string) => {
