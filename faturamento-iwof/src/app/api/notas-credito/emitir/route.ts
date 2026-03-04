@@ -50,8 +50,8 @@ export async function POST(req: NextRequest) {
         const gcpToken = process.env.GCP_AUTH_TOKEN;
 
         /* ─── Fallback local (sem URL configurada) ─── */
-        if (!pubNCUrl) {
-            console.warn("[NC EMITIR] GCP_PUB_NC_URL não configurada. Retornando simulação.");
+        if (!pubNCUrl && !pubMasterNCUrl) {
+            console.warn("[NC EMITIR] Nenhuma URL de disparo configurada. Retornando simulação.");
             const simulados = items.map(item => ({
                 loja: item.loja,
                 ok: true,
@@ -97,10 +97,12 @@ export async function POST(req: NextRequest) {
         }));
 
         /* ─── Gatilho Master NC (Payload Único) ─── */
-        if (!pubMasterNCUrl) {
-            console.error("[NC EMITIR] GCP_PUB_MASTER_NC_URL não configurada.");
+        const targetUrl = pubMasterNCUrl || pubNCUrl;
+
+        if (!targetUrl) {
+            console.error("[NC EMITIR] Nenhuma URL de disparo (GCP_PUB_MASTER_NC_URL ou GCP_PUB_NC_URL) encontrada.");
             return NextResponse.json(
-                { error: "URL do Gatilho Master não encontrada no ambiente." },
+                { error: "URL do Gatilho não encontrada no ambiente." },
                 { status: 500 }
             );
         }
@@ -112,7 +114,7 @@ export async function POST(req: NextRequest) {
             lojas: payloadsNC,
         };
 
-        const responseGCP = await fetch(pubMasterNCUrl, {
+        const responseGCP = await fetch(targetUrl, {
             method: "POST",
             headers,
             body: JSON.stringify(masterPayload),
