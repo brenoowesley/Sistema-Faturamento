@@ -745,8 +745,8 @@ export default function CentralLancamentos() {
                 cnpj: g.cnpj,
                 estado: "",
                 valorBoleto: 0,
-                valorNF: g.totalValor * 0.115,
-                valorNC: g.totalValor * 0.885,
+                valorNF: 0,
+                valorNC: g.totalValor,
                 descricaoServico: descricoes.join("; "),
             };
         });
@@ -1185,9 +1185,7 @@ export default function CentralLancamentos() {
                                         <th>Loja</th>
                                         <th>CNPJ</th>
                                         <th>NF Gerada</th>
-                                        <th style={{ textAlign: "right" }}>Valor Base</th>
-                                        <th style={{ textAlign: "right" }}>NF (11.5%)</th>
-                                        <th style={{ textAlign: "right" }}>NC (88.5%)</th>
+                                        <th style={{ textAlign: "right" }}>Valor</th>
                                         <th style={{ textAlign: "right" }}>IRRF</th>
                                     </tr>
                                 </thead>
@@ -1195,8 +1193,6 @@ export default function CentralLancamentos() {
                                     {filteredLancamentos
                                         .filter(l => filterTipo === "ALL" || l.tipo === filterTipo)
                                         .map((l, idx) => {
-                                            const nf115 = l.valor * 0.115;
-                                            const nc885 = l.valor * 0.885;
                                             const isPendingNF = l.tipo === "NF" && !l.numeroNFGerada;
 
                                             return (
@@ -1248,24 +1244,6 @@ export default function CentralLancamentos() {
                                                     </td>
                                                     <td style={{ textAlign: "right" }}>
                                                         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
-                                                            <span style={{ color: "var(--warning)", fontVariantNumeric: "tabular-nums" }}>{fmtBRL_LP(nf115)}</span>
-                                                            <button onClick={() => { navigator.clipboard.writeText(nf115.toFixed(2).replace(".", ",")); }} title="Copiar NF (11.5%)"
-                                                                style={{ background: "none", border: "none", color: "var(--fg-dim)", cursor: "pointer", padding: 2 }}>
-                                                                <Copy size={12} />
-                                                            </button>
-                                                        </div>
-                                                    </td>
-                                                    <td style={{ textAlign: "right" }}>
-                                                        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
-                                                            <span style={{ color: "var(--success)", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtBRL_LP(nc885)}</span>
-                                                            <button onClick={() => { navigator.clipboard.writeText(nc885.toFixed(2).replace(".", ",")); }} title="Copiar NC (88.5%)"
-                                                                style={{ background: "none", border: "none", color: "var(--fg-dim)", cursor: "pointer", padding: 2 }}>
-                                                                <Copy size={12} />
-                                                            </button>
-                                                        </div>
-                                                    </td>
-                                                    <td style={{ textAlign: "right" }}>
-                                                        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
                                                             <EditableCell value={l.irrf ? fmtBRL_LP(l.irrf) : ""} onSave={v => handleFieldChange(l.id, "irrf", v)} align="right" placeholder="—" />
                                                             {l.irrf ? (
                                                                 <button onClick={() => { navigator.clipboard.writeText(l.irrf!.toFixed(2).replace(".", ",")); }} title="Copiar IRRF"
@@ -1307,10 +1285,11 @@ export default function CentralLancamentos() {
                         </div>
                     </div>
                 </>
-            )}
+            )
+            }
 
             <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-        </div>
+        </div >
     );
 }
 
