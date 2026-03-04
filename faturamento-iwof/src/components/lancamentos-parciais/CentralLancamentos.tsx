@@ -9,7 +9,7 @@
    - Para exportação NFE.io usa API route própria (cópia isolada).
    ================================================================ */
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, ReactNode } from "react";
 import { useDropzone } from "react-dropzone";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
@@ -60,6 +60,11 @@ export interface LancamentoParcial {
     // UI:
     razaoSocialMatch?: string;
     nomeContaAzulMatch?: string;
+}
+
+interface ClientBrief_LP {
+    id: string;
+    razao_social: string;
 }
 
 interface ClienteDB_LP {
@@ -305,6 +310,21 @@ export default function CentralLancamentos() {
     const [preFilterEmpresa, setPreFilterEmpresa] = useState("");
     const [nomePastaGCP, setNomePastaGCP] = useState("Notas_Credito");
     const [filterTipo, setFilterTipo] = useState<"ALL" | "NF" | "NC">("ALL");
+    const [availableClients, setAvailableClients] = useState<ClientBrief_LP[]>([]);
+    const [matchingTargets, setMatchingTargets] = useState<string[]>([]);
+
+    /* --- Fetch initial clients for matchmaking targets --- */
+    useEffect(() => {
+        const load = async () => {
+            const { data, error } = await supabase
+                .from("clientes")
+                .select("id, razao_social")
+                .eq("status", true)
+                .order("razao_social");
+            if (!error && data) setAvailableClients(data);
+        };
+        load();
+    }, [supabase]);
 
     /* --- Totalizadores --- */
     const totalNF = useMemo(() => lancamentos.filter(l => l.tipo === "NF").reduce((s, l) => s + l.valor, 0), [lancamentos]);
@@ -387,10 +407,17 @@ export default function CentralLancamentos() {
         let hasMore = true;
 
         while (hasMore) {
-            const { data: chunk, error } = await supabase
+            let query = supabase
                 .from("clientes")
                 .select("id, razao_social, nome_fantasia, nome, nome_conta_azul, cnpj, email_principal, emails_faturamento, endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge, status")
-                .eq("status", true)
+                .eq("status", true);
+
+            // 🎯 Targeted Matchmaking: Filtra pelos alvos se houver seleção
+            if (matchingTargets.length > 0) {
+                query = query.in("id", matchingTargets);
+            }
+
+            const { data: chunk, error } = await query
                 .range(from, from + pageSize - 1);
 
             if (error) { console.error("Erro fetch clientes:", error); break; }
@@ -824,39 +851,91 @@ export default function CentralLancamentos() {
 
             {/* ──────── STEP 1: UPLOAD ──────── */}
             {step === "upload" && (
-                <div className="card">
-                    <h2 style={{ fontSize: 16, fontWeight: 600, color: "#fff", marginBottom: 16 }}>Upload da Planilha de Lançamentos</h2>
-                    <div
-                        {...dzUpload.getRootProps()}
-                        className={`dropzone ${dzUpload.isDragActive ? "dropzone-active" : ""}`}
-                    >
-                        <input {...dzUpload.getInputProps()} />
-                        {fileName ? (
-                            <>
-                                <FileSpreadsheet size={36} style={{ color: "var(--accent)" }} />
-                                <span className="dropzone-filename"><Download size={14} />{fileName}</span>
-                                <p className="dropzone-text" style={{ fontSize: 12 }}>Clique ou arraste para substituir</p>
-                            </>
-                        ) : (
-                            <>
-                                <Upload size={36} className="dropzone-icon" />
-                                <p className="dropzone-text">
-                                    Arraste a planilha aqui, ou <strong style={{ color: "var(--accent)" }}>clique para selecionar</strong>
-                                </p>
-                                <p style={{ fontSize: 12, color: "var(--fg-dim)" }}>CSV ou XLSX • Colunas sugeridas: PEDIDO, TIPO, DESCRIÇÃO, VALOR, CNPJ, LOJA</p>
-                            </>
+                <div className="card" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                    {/* ALVOS DO MATCHMAKING */}
+                    <div>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                            <h3 style={{ fontSize: 14, fontWeight: 700, color: "#fff", margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                <Building2 size={16} style={{ color: "var(--accent)" }} /> Alvos do Matchmaking
+                            </h3>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: matchingTargets.length > 0 ? "var(--accent)" : "var(--fg-dim)" }}>
+                                {matchingTargets.length} empresas selecionadas
+                            </span>
+                        </div>
+
+                        <div style={{
+                            display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 120, overflowY: "auto",
+                            padding: "12px", background: "rgba(129,140,248,0.03)", borderRadius: 8, border: "1px solid var(--border)"
+                        }}>
+                            {availableClients.map(c => {
+                                const isSelected = matchingTargets.includes(c.id);
+                                return (
+                                    <button
+                                        key={c.id}
+                                        onClick={() => {
+                                            setMatchingTargets(prev =>
+                                                isSelected ? prev.filter(tid => tid !== c.id) : [...prev, c.id]
+                                            );
+                                        }}
+                                        style={{
+                                            padding: "4px 10px", borderRadius: 16, border: "1px solid", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                                            transition: "all 0.2s",
+                                            borderColor: isSelected ? "var(--accent)" : "var(--border)",
+                                            background: isSelected ? "var(--accent)" : "transparent",
+                                            color: isSelected ? "#fff" : "var(--fg-dim)",
+                                        }}
+                                    >
+                                        {c.razao_social}
+                                    </button>
+                                );
+                            })}
+                            {availableClients.length === 0 && (
+                                <p style={{ fontSize: 12, color: "var(--fg-dim)", margin: 0, padding: "4px 8px" }}>Carregando empresas...</p>
+                            )}
+                        </div>
+
+                        {matchingTargets.length === 0 && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, padding: "6px 10px", background: "rgba(245,158,11,0.05)", borderRadius: 6 }}>
+                                <AlertTriangle size={14} style={{ color: "var(--warning)" }} />
+                                <span style={{ fontSize: 11, color: "var(--warning)" }}>Nenhuma empresa selecionada: o matchmaking buscará em toda a base de dados.</span>
+                            </div>
                         )}
                     </div>
-                    {errosParsing.length > 0 && (
-                        <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-                            {errosParsing.map((e, i) => (
-                                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "10px 14px", background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 8 }}>
-                                    <AlertTriangle size={16} style={{ color: "var(--danger)", flexShrink: 0, marginTop: 1 }} />
-                                    <span style={{ fontSize: 13, color: "var(--danger)" }}>{e}</span>
-                                </div>
-                            ))}
+
+                    <div style={{ borderTop: "1px solid var(--border)", paddingTop: 20 }}>
+                        <h2 style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 12 }}>Upload da Planilha</h2>
+                        <div
+                            {...dzUpload.getRootProps()}
+                            className={`dropzone ${dzUpload.isDragActive ? "dropzone-active" : ""}`}
+                        >
+                            <input {...dzUpload.getInputProps()} />
+                            {fileName ? (
+                                <>
+                                    <FileSpreadsheet size={36} style={{ color: "var(--accent)" }} />
+                                    <span className="dropzone-filename"><Download size={14} />{fileName}</span>
+                                    <p className="dropzone-text" style={{ fontSize: 12 }}>Clique ou arraste para substituir</p>
+                                </>
+                            ) : (
+                                <>
+                                    <Upload size={36} className="dropzone-icon" />
+                                    <p className="dropzone-text">
+                                        Arraste a planilha aqui, ou <strong style={{ color: "var(--accent)" }}>clique para selecionar</strong>
+                                    </p>
+                                    <p style={{ fontSize: 12, color: "var(--fg-dim)" }}>CSV ou XLSX • Colunas sugeridas: PEDIDO, TIPO, DESCRIÇÃO, VALOR, CNPJ, LOJA</p>
+                                </>
+                            )}
                         </div>
-                    )}
+                        {errosParsing.length > 0 && (
+                            <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+                                {errosParsing.map((e, i) => (
+                                    <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "10px 14px", background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 8 }}>
+                                        <AlertTriangle size={16} style={{ color: "var(--danger)", flexShrink: 0, marginTop: 1 }} />
+                                        <span style={{ fontSize: 13, color: "var(--danger)" }}>{e}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 </div>
             )}
 
@@ -1241,7 +1320,7 @@ function EditableCell({ value, onSave, mono, bold, align, maxW, placeholder }: {
     );
 }
 
-function SumCard({ label, value, icon, color }: { label: string; value: string; icon: React.ReactNode; color: string }) {
+function SumCard({ label, value, icon, color }: { label: string; value: string; icon: ReactNode; color: string }) {
     return (
         <div className="card" style={{ display: "flex", flexDirection: "column", gap: 8, padding: "16px 18px", borderLeft: `3px solid ${color}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, color }}>
@@ -1256,7 +1335,6 @@ function SumCard({ label, value, icon, color }: { label: string; value: string; 
 function ManualMatchSelect({ clientes, onSelect }: { clientes: ClienteDB_LP[]; onSelect: (id: string) => void }) {
     const [open, setOpen] = useState(false);
     const [search, setSearch] = useState("");
-    const btnRef = { current: null as HTMLButtonElement | null };
 
     const filtered = useMemo(() => {
         if (!search) return clientes.slice(0, 30);
@@ -1270,7 +1348,7 @@ function ManualMatchSelect({ clientes, onSelect }: { clientes: ClienteDB_LP[]; o
 
     if (!open) {
         return (
-            <button ref={el => { btnRef.current = el; }} onClick={() => setOpen(true)} title="Vincular Loja"
+            <button onClick={() => setOpen(true)} title="Vincular Loja"
                 style={{ background: "rgba(129,140,248,0.08)", border: "1px solid rgba(129,140,248,0.2)", borderRadius: 6, padding: "4px 10px", cursor: "pointer", color: "var(--accent)", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
                 <Link2 size={12} /> Vincular
             </button>
