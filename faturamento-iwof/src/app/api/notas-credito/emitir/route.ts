@@ -96,71 +96,51 @@ export async function POST(req: NextRequest) {
             "gerar_nota_credito": true,
         }));
 
-        /* ─── Disparo individual para cada loja ─── */
-        const resultados: { loja: string; ok: boolean; mensagem: string }[] = [];
-        let enviados = 0;
-        let erros = 0;
-
-        for (const payload of payloadsNC) {
-            try {
-                const res = await fetch(pubNCUrl, {
-                    method: "POST",
-                    headers,
-                    body: JSON.stringify(payload),
-                });
-
-                if (!res.ok) {
-                    const txt = await res.text();
-                    console.error(`[NC EMITIR] Erro GCP para ${payload["LOJA"]}: ${res.status} — ${txt}`);
-                    resultados.push({ loja: payload["LOJA"], ok: false, mensagem: `Status ${res.status}: ${txt.slice(0, 120)}` });
-                    erros++;
-                } else {
-                    resultados.push({ loja: payload["LOJA"], ok: true, mensagem: "Enviado" });
-                    enviados++;
-                }
-            } catch (fetchErr: unknown) {
-                const msg = fetchErr instanceof Error ? fetchErr.message : "Erro desconhecido";
-                console.error(`[NC EMITIR] Fetch error para ${payload["LOJA"]}:`, msg);
-                resultados.push({ loja: payload["LOJA"], ok: false, mensagem: msg });
-                erros++;
-            }
+        /* ─── Gatilho Master NC (Payload Único) ─── */
+        if (!pubMasterNCUrl) {
+            console.error("[NC EMITIR] GCP_PUB_MASTER_NC_URL não configurada.");
+            return NextResponse.json(
+                { error: "URL do Gatilho Master não encontrada no ambiente." },
+                { status: 500 }
+            );
         }
 
-        /* ─── Gatilho Master NC (após todos individuais) ─── */
-        if (pubMasterNCUrl && enviados > 0) {
-            try {
-                const masterPayload = {
-                    nome_pasta_ciclo: nomePasta || "Notas_Credito",
-                    ciclo_mensal: cyclePeriod,
-                    data_faturamento: new Date().toLocaleDateString("pt-BR"),
-                    lojas: payloadsNC,
-                };
-                const masterRes = await fetch(pubMasterNCUrl, {
-                    method: "POST",
-                    headers,
-                    body: JSON.stringify(masterPayload),
-                });
-                if (!masterRes.ok) {
-                    const txt = await masterRes.text();
-                    console.warn("[NC EMITIR] Master NC retornou erro (não bloqueante):", masterRes.status, txt);
-                } else {
-                    console.log(`[NC EMITIR] Master NC disparado para pasta: ${nomePasta}`);
-                }
-            } catch (e) {
-                console.warn("[NC EMITIR] Falha no Master NC (não bloqueante):", e);
-            }
+        const masterPayload = {
+            nome_pasta_ciclo: nomePasta || "Notas_Credito",
+            ciclo_mensal: cyclePeriod,
+            data_faturamento: new Date().toLocaleDateString("pt-BR"),
+            lojas: payloadsNC,
+        };
+
+        const responseGCP = await fetch(pubMasterNCUrl, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(masterPayload),
+        });
+
+        if (!responseGCP.ok) {
+            const txt = await responseGCP.text();
+            console.error(`[NC EMITIR] Erro no Gatilho Master: ${responseGCP.status} — ${txt}`);
+            return NextResponse.json(
+                { error: `Erro no GCP Master: ${txt.slice(0, 150)}` },
+                { status: responseGCP.status }
+            );
         }
 
-        console.log(`[NC EMITIR] Concluído: ${enviados} enviados, ${erros} erros de ${items.length} total.`);
+        console.log(`[NC EMITIR] Master NC disparado com sucesso para ${items.length} lojas.`);
+
+        const resultados = items.map(item => ({
+            loja: item.loja,
+            ok: true,
+            mensagem: "Enviado via mestre",
+        }));
 
         return NextResponse.json({
-            success: erros === 0,
-            enviados,
-            erros,
+            success: true,
+            enviados: items.length,
+            erros: 0,
             resultados,
-            message: erros === 0
-                ? "Todas as Notas de Crédito foram disparadas com sucesso."
-                : `${enviados} enviadas, ${erros} com erro.`,
+            message: `Lote de ${items.length} Notas de Crédito enviado com sucesso para processamento master.`,
         });
 
     } catch (error: unknown) {
