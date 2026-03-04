@@ -41,7 +41,9 @@ export interface NotaCreditoPlanilha {
     valorBoleto: number;    // "R$ 1.572,30" → 1572.30
     valorNF: number;
     valorNC: number;
-    descricaoServico: string; // concatenação de "Nº NF" e "DESCONTO"
+    numNF: string;          // Número da NF original
+    numNC: string;          // Número da NC ou Pedido
+    descricaoServico: string; // "numNF - Nº do pedido: numNC"
 }
 
 type EmissaoStatus = "idle" | "parsing" | "ready" | "emitting" | "done" | "error";
@@ -166,8 +168,8 @@ function parsearPlanilhaNC(rawRows: Record<string, string>[]): {
     const colBoleto = findColNC(headers, "valor boleto", "vlr boleto", "boleto", "valor do boleto");
     const colNF = findColNC(headers, "valor nf", "vlr nf", "valor da nf", "valor nota fiscal");
     const colNC = findColNC(headers, "valor nc", "vlr nc", "valor da nc", "valor nota crédito");
-    const colNumNF = findColNC(headers, "nº nf", "num nf", "numero nf", "número nf", "nf numero", "nº da nf", "nf");
-    const colDesconto = findColNC(headers, "desconto", "discount", "número do pedido", "pedido", "nc", "nota crédito");
+    const colNumNF = findColNC(headers, "nº nf", "num nf", "numero nf", "número nf", "nf numero", "nº da nf", "nota fiscal", "nf", "nota");
+    const colDesconto = findColNC(headers, "desconto", "discount", "número do pedido", "pedido", "nc", "nota crédito", "nº nc", "num nc", "numero nc");
 
     const missing: string[] = [];
     if (!colLoja) missing.push("LOJA");
@@ -197,11 +199,14 @@ function parsearPlanilhaNC(rawRows: Record<string, string>[]): {
         }
 
         // Concatenação: "NF - Nº do pedido: NC"
-        let descricaoServico = "";
-        if (numNF && desc) {
-            descricaoServico = `${numNF} - Nº do pedido: ${desc}`;
+        const finalNF = numNF || "";
+        const finalNC = desc || "";
+        let descServico = "";
+
+        if (finalNF && finalNC) {
+            descServico = `${finalNF} - Nº do pedido: ${finalNC}`;
         } else {
-            descricaoServico = numNF || desc;
+            descServico = finalNF || finalNC || "";
         }
 
         dados.push({
@@ -211,7 +216,9 @@ function parsearPlanilhaNC(rawRows: Record<string, string>[]): {
             valorBoleto: boleto,
             valorNF: nf,
             valorNC: nc,
-            descricaoServico: descricaoServico.trim(),
+            numNF: finalNF,
+            numNC: finalNC,
+            descricaoServico: descServico.trim(),
         });
     });
 
@@ -369,7 +376,15 @@ export default function EmissaoNotaCredito() {
             if (field === "cnpj") {
                 return { ...d, cnpj: normalizarCNPJ_NC(rawValue) };
             }
-            return { ...d, [field]: rawValue };
+
+            // Re-calcular a descrição se mudar NF ou NC
+            const updated = { ...d, [field]: rawValue };
+            if (field === "numNF" || field === "numNC") {
+                const n = updated.numNF || "";
+                const c = updated.numNC || "";
+                updated.descricaoServico = (n && c) ? `${n} - Nº do pedido: ${c}` : (n || c || "");
+            }
+            return updated;
         }));
     };
 
@@ -510,6 +525,8 @@ export default function EmissaoNotaCredito() {
                                     <th>Loja</th>
                                     <th>CNPJ</th>
                                     <th>UF</th>
+                                    <th>NF</th>
+                                    <th>NC</th>
                                     <th>Descrição Serviço</th>
                                     <th style={{ textAlign: "right" }}>Valor Boleto</th>
                                     <th style={{ textAlign: "right" }}>Valor NF</th>
@@ -543,6 +560,20 @@ export default function EmissaoNotaCredito() {
                                                     <EditableCell_NC value={row.estado} onSave={v => handleFieldChange_NC(idx, "estado", v)} />
                                                 ) : (
                                                     <span className="badge badge-info" style={{ fontSize: 11 }}>{row.estado || "—"}</span>
+                                                )}
+                                            </td>
+                                            <td>
+                                                {canEdit ? (
+                                                    <EditableCell_NC value={row.numNF} onSave={v => handleFieldChange_NC(idx, "numNF", v)} mono />
+                                                ) : (
+                                                    <span className="table-mono">{row.numNF || "—"}</span>
+                                                )}
+                                            </td>
+                                            <td>
+                                                {canEdit ? (
+                                                    <EditableCell_NC value={row.numNC} onSave={v => handleFieldChange_NC(idx, "numNC", v)} mono />
+                                                ) : (
+                                                    <span className="table-mono">{row.numNC || "—"}</span>
                                                 )}
                                             </td>
                                             <td style={{ maxWidth: 280 }}>
