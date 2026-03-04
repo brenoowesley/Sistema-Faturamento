@@ -152,8 +152,9 @@ export default function FechamentoLote({
                             numeroNF = nfMatch ? nfMatch[1] : "";
                         }
 
-                        // 3. IRRF: Procura a sigla IRRF e varre até 30 caracteres à frente procurando pelo valor numérico
-                        const irrfMatch = fullText.match(/IRRF[\s\S]{0,30}?(?:R\$)?\s*([\d.,]+)/i);
+                        // 3. IRRF: Ancora na seção "TRIBUTAÇÃO FEDERAL" e extrai o valor logo após "IRRF"
+                        const tributacaoBlock = fullText.match(/TRIBUTA[ÇC][AÃ]O FEDERAL[\s\S]{0,500}?(?:VALOR\s+TOTAL|$)/i)?.[0] || fullText;
+                        const irrfMatch = tributacaoBlock.match(/\bIRRF\b[\s\S]{0,60}?(?:R\$)?\s*([\d.,]+)/i);
                         let irrfExtraido = 0;
                         if (irrfMatch && irrfMatch[1]) {
                             const limpo = irrfMatch[1].replace(/\./g, '').replace(',', '.');
