@@ -37,6 +37,7 @@ import {
     Link2,
     Unlink,
     FileCode,
+    Copy,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -302,6 +303,8 @@ export default function CentralLancamentos() {
     const [exportando, setExportando] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [preFilterEmpresa, setPreFilterEmpresa] = useState("");
+    const [nomePastaGCP, setNomePastaGCP] = useState("Notas_Credito");
+    const [filterTipo, setFilterTipo] = useState<"ALL" | "NF" | "NC">("ALL");
 
     /* --- Totalizadores --- */
     const totalNF = useMemo(() => lancamentos.filter(l => l.tipo === "NF").reduce((s, l) => s + l.valor, 0), [lancamentos]);
@@ -505,17 +508,38 @@ export default function CentralLancamentos() {
 
     /* --- Inline field edit --- */
     const handleFieldChange = (lancId: string, field: keyof LancamentoParcial, rawValue: string) => {
-        setLancamentos(prev => prev.map(l => {
-            if (l.id !== lancId) return l;
-            if (field === "valor" || field === "irrf") {
-                return { ...l, [field]: parseMoedaBR_LP(rawValue) };
+        setLancamentos(prev => {
+            const updated = prev.map(l => {
+                if (l.id !== lancId) return l;
+                if (field === "valor" || field === "irrf") {
+                    return { ...l, [field]: parseMoedaBR_LP(rawValue) };
+                }
+                if (field === "tipo") {
+                    const v = rawValue.toUpperCase();
+                    return { ...l, tipo: v === "NC" ? "NC" : "NF" };
+                }
+                return { ...l, [field]: rawValue };
+            });
+
+            // ⚠️ Automação: Replicar Nº NF da NF para as NCs da mesma loja/cnpj
+            if (field === "numeroNFGerada") {
+                const itemOrigem = updated.find(l => l.id === lancId);
+                if (itemOrigem?.tipo === "NF") {
+                    return updated.map(l => {
+                        if (l.tipo === "NC") {
+                            const matchId = l.lojaIdentificadaId && itemOrigem.lojaIdentificadaId && l.lojaIdentificadaId === itemOrigem.lojaIdentificadaId;
+                            const matchCnpj = l.cnpj && itemOrigem.cnpj && l.cnpj === itemOrigem.cnpj;
+                            if (matchId || matchCnpj) {
+                                return { ...l, numeroNFGerada: rawValue };
+                            }
+                        }
+                        return l;
+                    });
+                }
             }
-            if (field === "tipo") {
-                const v = rawValue.toUpperCase();
-                return { ...l, tipo: v === "NC" ? "NC" : "NF" };
-            }
-            return { ...l, [field]: rawValue };
-        }));
+
+            return updated;
+        });
     };
 
     /* ================================================================
@@ -641,6 +665,7 @@ export default function CentralLancamentos() {
         const agrupado = new Map<string, {
             loja: string; cnpj: string; pedidos: string[];
             totalValor: number; descricoes: string[];
+            listaItens: LancamentoParcial[];
         }>();
 
         for (const l of ncItems) {
@@ -648,36 +673,44 @@ export default function CentralLancamentos() {
             const existing = agrupado.get(key);
             if (existing) {
                 existing.totalValor += l.valor;
-                if (l.pedido && !existing.pedidos.includes(l.pedido)) {
-                    existing.pedidos.push(l.pedido);
-                }
-                if (l.descricao) existing.descricoes.push(l.descricao);
+                existing.listaItens.push(l);
             } else {
                 agrupado.set(key, {
                     loja: l.nomeContaAzulMatch || l.razaoSocialMatch || l.lojaNomeSugerido || "Desconhecido",
                     cnpj: l.cnpj || "",
-                    pedidos: l.pedido ? [l.pedido] : [],
+                    pedidos: [],
                     totalValor: l.valor,
-                    descricoes: l.descricao ? [l.descricao] : [],
+                    descricoes: [],
+                    listaItens: [l],
                 });
             }
         }
 
-        const items = Array.from(agrupado.values()).map(g => ({
-            loja: g.loja,
-            cnpj: g.cnpj,
-            estado: "",
-            valorBoleto: 0,
-            valorNF: g.totalValor * 0.115,
-            valorNC: g.totalValor * 0.885,
-            descricaoServico: g.pedidos.join(", "),  // envia apenas os números de pedido
-        }));
+        const items = Array.from(agrupado.values()).map(g => {
+            // Regra de Concatenação: {numeroNFGerada} - Nº do pedido: {pedido}
+            // Como pode haver vários pedidos por loja, vamos gerar uma descrição composta ou individual
+            const descricoes = g.listaItens.map(item => {
+                const nf = item.numeroNFGerada || "A Gerar";
+                const ped = item.pedido || "S/N";
+                return `${nf} - Nº do pedido: ${ped}`;
+            });
+
+            return {
+                loja: g.loja,
+                cnpj: g.cnpj,
+                estado: "",
+                valorBoleto: 0,
+                valorNF: g.totalValor * 0.115,
+                valorNC: g.totalValor * 0.885,
+                descricaoServico: descricoes.join("; "),
+            };
+        });
 
         try {
             const res = await fetch("/api/notas-credito/emitir", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ items, nomePasta: "Notas_Credito" }),
+                body: JSON.stringify({ items, nomePasta: nomePastaGCP || "Notas_Credito" }),
             });
             const json = await res.json();
             if (!res.ok) throw new Error(json.error);
@@ -976,16 +1009,48 @@ export default function CentralLancamentos() {
             {step === "preview" && (
                 <>
                     <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid var(--border)" }}>
-                            <h2 style={{ fontSize: 16, fontWeight: 600, color: "#fff", margin: 0 }}>
-                                Preview Consolidado
-                                <span className="badge badge-info" style={{ marginLeft: 10, fontSize: 11 }}>{lancamentos.length} lançamentos</span>
-                            </h2>
-                            <div style={{ position: "relative" }}>
-                                <Search size={14} style={{ position: "absolute", left: 10, top: 10, color: "var(--fg-dim)" }} />
-                                <input type="text" placeholder="Filtrar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-                                    className="input" style={{ padding: "8px 8px 8px 32px", fontSize: 12, width: 200 }} />
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid var(--border)", flexWrap: "wrap", gap: 12 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                                <h2 style={{ fontSize: 16, fontWeight: 600, color: "#fff", margin: 0 }}>
+                                    Preview Consolidado
+                                    <span className="badge badge-info" style={{ marginLeft: 10, fontSize: 11 }}>{lancamentos.length} lançamentos</span>
+                                </h2>
+                                {/* FILTRO DE FLUXO */}
+                                <div style={{ display: "flex", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, padding: 2 }}>
+                                    {(["ALL", "NF", "NC"] as const).map(t => (
+                                        <button key={t} onClick={() => setFilterTipo(t)}
+                                            style={{
+                                                padding: "4px 12px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: "none", cursor: "pointer",
+                                                background: filterTipo === t ? "var(--accent)" : "transparent",
+                                                color: filterTipo === t ? "#fff" : "var(--fg-dim)",
+                                                transition: "all 0.2s"
+                                            }}>
+                                            {t === "ALL" ? "TODOS" : t}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                                <div style={{ position: "relative" }}>
+                                    <Search size={14} style={{ position: "absolute", left: 10, top: 10, color: "var(--fg-dim)" }} />
+                                    <input type="text" placeholder="Filtrar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+                                        className="input" style={{ padding: "8px 8px 8px 32px", fontSize: 12, width: 200 }} />
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* FOLDER CONFIG */}
+                        <div style={{ padding: "12px 20px", background: "rgba(129,140,248,0.03)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12 }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--fg-muted)" }}>Nome da Pasta (GCP):</span>
+                            <input
+                                type="text"
+                                value={nomePastaGCP}
+                                onChange={e => setNomePastaGCP(e.target.value)}
+                                placeholder="Notas_Credito"
+                                className="input"
+                                style={{ padding: "6px 12px", fontSize: 12, width: 240 }}
+                            />
+                            <p style={{ fontSize: 11, color: "var(--fg-dim)", margin: 0 }}>Destino no Google Drive para as NCs.</p>
                         </div>
                         <div style={{ overflowX: "auto", maxHeight: 600, overflowY: "auto" }}>
                             <table className="data-table">
@@ -1004,36 +1069,58 @@ export default function CentralLancamentos() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {filteredLancamentos.map((l, idx) => {
-                                        const nf115 = l.valor * 0.115;
-                                        const nc885 = l.valor * 0.885;
-                                        return (
-                                            <tr key={l.id}>
-                                                <td style={{ color: "var(--fg-dim)", fontSize: 12 }}>{idx + 1}</td>
-                                                <td><EditableCell value={l.pedido} onSave={v => handleFieldChange(l.id, "pedido", v)} mono /></td>
-                                                <td>
-                                                    <select value={l.tipo} onChange={e => handleFieldChange(l.id, "tipo", e.target.value)}
-                                                        style={{ background: "transparent", border: "1px solid var(--border)", borderRadius: 4, color: l.tipo === "NF" ? "var(--warning)" : "var(--success)", fontSize: 11, fontWeight: 700, padding: "2px 6px", cursor: "pointer" }}>
-                                                        <option value="NF">NF</option>
-                                                        <option value="NC">NC</option>
-                                                    </select>
-                                                </td>
-                                                <td>
-                                                    {l.lojaIdentificadaId ? (
-                                                        <span style={{ fontSize: 12, fontWeight: 600, color: "#fff" }}>{l.nomeContaAzulMatch || l.razaoSocialMatch}</span>
-                                                    ) : (
-                                                        <EditableCell value={l.lojaNomeSugerido || ""} onSave={v => handleFieldChange(l.id, "lojaNomeSugerido", v)} placeholder="Nome loja" />
-                                                    )}
-                                                </td>
-                                                <td><EditableCell value={l.cnpj || ""} onSave={v => handleFieldChange(l.id, "cnpj", v)} mono placeholder="CNPJ" /></td>
-                                                <td><EditableCell value={l.numeroNFGerada || ""} onSave={v => handleFieldChange(l.id, "numeroNFGerada", v)} placeholder="—" /></td>
-                                                <td style={{ textAlign: "right" }}><EditableCell value={fmtBRL_LP(l.valor)} onSave={v => handleFieldChange(l.id, "valor", v)} align="right" bold /></td>
-                                                <td style={{ textAlign: "right" }}><span style={{ color: "var(--warning)", fontVariantNumeric: "tabular-nums" }}>{fmtBRL_LP(nf115)}</span></td>
-                                                <td style={{ textAlign: "right" }}><span style={{ color: "var(--success)", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtBRL_LP(nc885)}</span></td>
-                                                <td style={{ textAlign: "right" }}><EditableCell value={l.irrf ? fmtBRL_LP(l.irrf) : ""} onSave={v => handleFieldChange(l.id, "irrf", v)} align="right" placeholder="—" /></td>
-                                            </tr>
-                                        );
-                                    })}
+                                    {filteredLancamentos
+                                        .filter(l => filterTipo === "ALL" || l.tipo === filterTipo)
+                                        .map((l, idx) => {
+                                            const nf115 = l.valor * 0.115;
+                                            const nc885 = l.valor * 0.885;
+                                            const isPendingNF = l.tipo === "NF" && !l.numeroNFGerada;
+
+                                            return (
+                                                <tr key={l.id} style={{ background: isPendingNF ? "rgba(245,158,11,0.04)" : undefined }}>
+                                                    <td style={{ color: "var(--fg-dim)", fontSize: 12 }}>{idx + 1}</td>
+                                                    <td style={{ verticalAlign: "middle" }}>
+                                                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                                            <EditableCell value={l.pedido} onSave={v => handleFieldChange(l.id, "pedido", v)} mono />
+                                                            <button onClick={() => { navigator.clipboard.writeText(l.pedido); }} title="Copiar Pedido"
+                                                                style={{ background: "none", border: "none", color: "var(--fg-dim)", cursor: "pointer", padding: 2 }}>
+                                                                <Copy size={12} />
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                    <td>
+                                                        <select value={l.tipo} onChange={e => handleFieldChange(l.id, "tipo", e.target.value)}
+                                                            style={{ background: "transparent", border: "1px solid var(--border)", borderRadius: 4, color: l.tipo === "NF" ? "var(--warning)" : "var(--success)", fontSize: 11, fontWeight: 700, padding: "2px 6px", cursor: "pointer" }}>
+                                                            <option value="NF">NF</option>
+                                                            <option value="NC">NC</option>
+                                                        </select>
+                                                    </td>
+                                                    <td>
+                                                        {l.lojaIdentificadaId ? (
+                                                            <span style={{ fontSize: 12, fontWeight: 600, color: "#fff" }}>{l.nomeContaAzulMatch || l.razaoSocialMatch}</span>
+                                                        ) : (
+                                                            <EditableCell value={l.lojaNomeSugerido || ""} onSave={v => handleFieldChange(l.id, "lojaNomeSugerido", v)} placeholder="Nome loja" />
+                                                        )}
+                                                    </td>
+                                                    <td>
+                                                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                                            <EditableCell value={l.cnpj || ""} onSave={v => handleFieldChange(l.id, "cnpj", v)} mono placeholder="CNPJ" />
+                                                            {l.cnpj && (
+                                                                <button onClick={() => { navigator.clipboard.writeText(l.cnpj!); }} title="Copiar CNPJ"
+                                                                    style={{ background: "none", border: "none", color: "var(--fg-dim)", cursor: "pointer", padding: 2 }}>
+                                                                    <Copy size={12} />
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    <td><EditableCell value={l.numeroNFGerada || ""} onSave={v => handleFieldChange(l.id, "numeroNFGerada", v)} placeholder="—" bold={isPendingNF} /></td>
+                                                    <td style={{ textAlign: "right" }}><EditableCell value={fmtBRL_LP(l.valor)} onSave={v => handleFieldChange(l.id, "valor", v)} align="right" bold /></td>
+                                                    <td style={{ textAlign: "right" }}><span style={{ color: "var(--warning)", fontVariantNumeric: "tabular-nums" }}>{fmtBRL_LP(nf115)}</span></td>
+                                                    <td style={{ textAlign: "right" }}><span style={{ color: "var(--success)", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtBRL_LP(nc885)}</span></td>
+                                                    <td style={{ textAlign: "right" }}><EditableCell value={l.irrf ? fmtBRL_LP(l.irrf) : ""} onSave={v => handleFieldChange(l.id, "irrf", v)} align="right" placeholder="—" /></td>
+                                                </tr>
+                                            );
+                                        })}
                                 </tbody>
                             </table>
                         </div>
