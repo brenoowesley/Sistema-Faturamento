@@ -311,7 +311,19 @@ export default function CentralLancamentos() {
     const [nomePastaGCP, setNomePastaGCP] = useState("Notas_Credito");
     const [filterTipo, setFilterTipo] = useState<"ALL" | "NF" | "NC">("ALL");
     const [availableClients, setAvailableClients] = useState<ClientBrief_LP[]>([]);
-    const [matchingTargets, setMatchingTargets] = useState<string[]>([]);
+    const [matchingTargets, setMatchingTargets] = useState<string[]>([]); // Agora armazena Razão Social
+    const [searchTargetTerm, setSearchTargetTerm] = useState("");
+
+    const uniqueRazaoSociais = useMemo(() => {
+        const names = availableClients.map(c => c.razao_social).filter(Boolean);
+        return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
+    }, [availableClients]);
+
+    const filteredRazaoSociais = useMemo(() => {
+        if (!searchTargetTerm) return uniqueRazaoSociais;
+        const term = searchTargetTerm.toLowerCase();
+        return uniqueRazaoSociais.filter(n => n.toLowerCase().includes(term));
+    }, [uniqueRazaoSociais, searchTargetTerm]);
 
     /* --- Fetch initial clients for matchmaking targets --- */
     useEffect(() => {
@@ -414,7 +426,7 @@ export default function CentralLancamentos() {
 
             // 🎯 Targeted Matchmaking: Filtra pelos alvos se houver seleção
             if (matchingTargets.length > 0) {
-                query = query.in("id", matchingTargets);
+                query = query.in("razao_social", matchingTargets);
             }
 
             const { data: chunk, error } = await query
@@ -859,22 +871,45 @@ export default function CentralLancamentos() {
                                 <Building2 size={16} style={{ color: "var(--accent)" }} /> Alvos do Matchmaking
                             </h3>
                             <span style={{ fontSize: 11, fontWeight: 600, color: matchingTargets.length > 0 ? "var(--accent)" : "var(--fg-dim)" }}>
-                                {matchingTargets.length} empresas selecionadas
+                                {matchingTargets.length} razões sociais selecionadas
                             </span>
+                        </div>
+
+                        {/* Search Input for Targets */}
+                        <div style={{ position: "relative", marginBottom: 12 }}>
+                            <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--fg-dim)" }} />
+                            <input
+                                type="text"
+                                placeholder="Pesquisar razão social..."
+                                value={searchTargetTerm}
+                                onChange={e => setSearchTargetTerm(e.target.value)}
+                                style={{
+                                    width: "100%", padding: "8px 12px 8px 34px", borderRadius: 8, background: "rgba(15,23,42,0.5)",
+                                    border: "1px solid var(--border)", fontSize: 12, color: "#fff", outline: "none"
+                                }}
+                            />
+                            {searchTargetTerm && (
+                                <button
+                                    onClick={() => setSearchTargetTerm("")}
+                                    style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "var(--fg-dim)", cursor: "pointer" }}
+                                >
+                                    <X size={14} />
+                                </button>
+                            )}
                         </div>
 
                         <div style={{
                             display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 120, overflowY: "auto",
                             padding: "12px", background: "rgba(129,140,248,0.03)", borderRadius: 8, border: "1px solid var(--border)"
                         }}>
-                            {availableClients.map(c => {
-                                const isSelected = matchingTargets.includes(c.id);
+                            {filteredRazaoSociais.map(name => {
+                                const isSelected = matchingTargets.includes(name);
                                 return (
                                     <button
-                                        key={c.id}
+                                        key={name}
                                         onClick={() => {
                                             setMatchingTargets(prev =>
-                                                isSelected ? prev.filter(tid => tid !== c.id) : [...prev, c.id]
+                                                isSelected ? prev.filter(n => n !== name) : [...prev, name]
                                             );
                                         }}
                                         style={{
@@ -885,12 +920,15 @@ export default function CentralLancamentos() {
                                             color: isSelected ? "#fff" : "var(--fg-dim)",
                                         }}
                                     >
-                                        {c.razao_social}
+                                        {name}
                                     </button>
                                 );
                             })}
-                            {availableClients.length === 0 && (
+                            {uniqueRazaoSociais.length === 0 && (
                                 <p style={{ fontSize: 12, color: "var(--fg-dim)", margin: 0, padding: "4px 8px" }}>Carregando empresas...</p>
+                            )}
+                            {uniqueRazaoSociais.length > 0 && filteredRazaoSociais.length === 0 && (
+                                <p style={{ fontSize: 12, color: "var(--fg-dim)", margin: 0, padding: "4px 8px" }}>Nenhuma razão social encontrada.</p>
                             )}
                         </div>
 
