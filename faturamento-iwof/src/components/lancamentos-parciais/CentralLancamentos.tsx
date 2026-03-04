@@ -512,13 +512,13 @@ export default function CentralLancamentos() {
             const updated = prev.map(l => {
                 if (l.id !== lancId) return l;
                 if (field === "valor" || field === "irrf") {
-                    return { ...l, [field]: parseMoedaBR_LP(rawValue) };
+                    return { ...l, [field]: parseMoedaBR_LP(rawValue) } as LancamentoParcial;
                 }
                 if (field === "tipo") {
                     const v = rawValue.toUpperCase();
-                    return { ...l, tipo: v === "NC" ? "NC" : "NF" };
+                    return { ...l, tipo: v === "NC" ? "NC" : "NF" } as LancamentoParcial;
                 }
-                return { ...l, [field]: rawValue };
+                return { ...l, [field]: rawValue } as LancamentoParcial;
             });
 
             // ⚠️ Automação: Replicar Nº NF da NF para as NCs da mesma loja/cnpj
@@ -1114,10 +1114,44 @@ export default function CentralLancamentos() {
                                                         </div>
                                                     </td>
                                                     <td><EditableCell value={l.numeroNFGerada || ""} onSave={v => handleFieldChange(l.id, "numeroNFGerada", v)} placeholder="—" bold={isPendingNF} /></td>
-                                                    <td style={{ textAlign: "right" }}><EditableCell value={fmtBRL_LP(l.valor)} onSave={v => handleFieldChange(l.id, "valor", v)} align="right" bold /></td>
-                                                    <td style={{ textAlign: "right" }}><span style={{ color: "var(--warning)", fontVariantNumeric: "tabular-nums" }}>{fmtBRL_LP(nf115)}</span></td>
-                                                    <td style={{ textAlign: "right" }}><span style={{ color: "var(--success)", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtBRL_LP(nc885)}</span></td>
-                                                    <td style={{ textAlign: "right" }}><EditableCell value={l.irrf ? fmtBRL_LP(l.irrf) : ""} onSave={v => handleFieldChange(l.id, "irrf", v)} align="right" placeholder="—" /></td>
+                                                    <td style={{ textAlign: "right" }}>
+                                                        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+                                                            <EditableCell value={fmtBRL_LP(l.valor)} onSave={v => handleFieldChange(l.id, "valor", v)} align="right" bold />
+                                                            <button onClick={() => { navigator.clipboard.writeText(l.valor.toFixed(2).replace(".", ",")); }} title="Copiar Valor"
+                                                                style={{ background: "none", border: "none", color: "var(--fg-dim)", cursor: "pointer", padding: 2 }}>
+                                                                <Copy size={12} />
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ textAlign: "right" }}>
+                                                        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+                                                            <span style={{ color: "var(--warning)", fontVariantNumeric: "tabular-nums" }}>{fmtBRL_LP(nf115)}</span>
+                                                            <button onClick={() => { navigator.clipboard.writeText(nf115.toFixed(2).replace(".", ",")); }} title="Copiar NF (11.5%)"
+                                                                style={{ background: "none", border: "none", color: "var(--fg-dim)", cursor: "pointer", padding: 2 }}>
+                                                                <Copy size={12} />
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ textAlign: "right" }}>
+                                                        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+                                                            <span style={{ color: "var(--success)", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtBRL_LP(nc885)}</span>
+                                                            <button onClick={() => { navigator.clipboard.writeText(nc885.toFixed(2).replace(".", ",")); }} title="Copiar NC (88.5%)"
+                                                                style={{ background: "none", border: "none", color: "var(--fg-dim)", cursor: "pointer", padding: 2 }}>
+                                                                <Copy size={12} />
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ textAlign: "right" }}>
+                                                        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+                                                            <EditableCell value={l.irrf ? fmtBRL_LP(l.irrf) : ""} onSave={v => handleFieldChange(l.id, "irrf", v)} align="right" placeholder="—" />
+                                                            {l.irrf ? (
+                                                                <button onClick={() => { navigator.clipboard.writeText(l.irrf!.toFixed(2).replace(".", ",")); }} title="Copiar IRRF"
+                                                                    style={{ background: "none", border: "none", color: "var(--fg-dim)", cursor: "pointer", padding: 2 }}>
+                                                                    <Copy size={12} />
+                                                                </button>
+                                                            ) : null}
+                                                        </div>
+                                                    </td>
                                                 </tr>
                                             );
                                         })}
