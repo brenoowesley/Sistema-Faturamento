@@ -59,7 +59,7 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string) {
         const res = await drive.files.list({
             q,
             fields: 'files(id, name)',
-            spaces: 'allDrives',          // Shared Drive requer 'allDrives', não 'drive'
+            spaces: 'drive',              // Único valor válido para files.list ('drive' ou 'appDataFolder')
             pageSize: 1,
             supportsAllDrives: true,
             includeItemsFromAllDrives: true,
