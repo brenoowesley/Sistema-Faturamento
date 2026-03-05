@@ -49,52 +49,58 @@ const supabaseAdmin = createClient(
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-async function findOrCreateFolder(folderName: string, parentFolderId: string) {
+async function findOrCreateFolder(folderName: string, parentFolderId: string): Promise<string> {
     try {
-        // Blindagem contra Apóstrofos (Escape de aspas simples para a API do Google Drive)
+        // Escape de aspas simples para a query da Drive API
         const safeFolderName = folderName.replace(/'/g, "\\'");
 
         const q = `name='${safeFolderName}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`;
 
+        // CORREÇÃO: Não usar driveId/corpora no files.list.
+        // O filtro '${parentFolderId}' in parents já escopa a busca ao local correto.
+        // Usar driveId+corpora com Service Account causava falso "não encontrado",
+        // forçando criação de pastas duplicadas no My Drive da service account.
         const res = await drive.files.list({
             q,
             fields: 'files(id, name)',
-            spaces: 'drive',              // Único valor válido para files.list ('drive' ou 'appDataFolder')
+            spaces: 'drive',
             pageSize: 1,
             supportsAllDrives: true,
             includeItemsFromAllDrives: true,
-            driveId: SHARED_DRIVE_ID,     // ID da Unidade Compartilhada, não da pasta
-            corpora: 'drive'
         });
 
         if (res.data.files && res.data.files.length > 0 && res.data.files[0].id) {
+            console.log(`[Drive Cache] Pasta encontrada: "${folderName}" → ${res.data.files[0].id}`);
             return res.data.files[0].id;
-        } else {
-            // Tratamento de Erros de Listagem: Verificação de permissão antes de criar
-            try {
-                await drive.files.get({
-                    fileId: parentFolderId,
-                    fields: 'id, capabilities',
-                    supportsAllDrives: true
-                });
-            } catch (permError) {
-                console.error(`[Drive API] Sem acesso de leitura na pasta pai (${parentFolderId}):`, permError);
-                throw new Error(`Permissão insuficiente na pasta pai: ${parentFolderId}`);
-            }
-
-            const fileMetadata = { name: folderName, mimeType: 'application/vnd.google-apps.folder', parents: [parentFolderId] };
-            const createRes = await drive.files.create({
-                requestBody: fileMetadata,
-                fields: 'id',
-                supportsAllDrives: true
-            });
-            return createRes.data.id;
         }
+
+        // Pasta não existe: criar dentro do pai (que está no Shared Drive)
+        const fileMetadata = {
+            name: folderName,
+            mimeType: 'application/vnd.google-apps.folder',
+            parents: [parentFolderId]
+        };
+        const createRes = await drive.files.create({
+            requestBody: fileMetadata,
+            fields: 'id, driveId',  // driveId no retorno confirma que está no Shared Drive
+            supportsAllDrives: true
+        });
+
+        const newId = createRes.data.id!;
+        const newDriveId = (createRes.data as any).driveId;
+        console.log(`[Drive Create] Pasta criada: "${folderName}" → ${newId} | driveId: ${newDriveId || 'MY_DRIVE (ATENCAO!)'}`);
+
+        if (newDriveId && newDriveId !== SHARED_DRIVE_ID) {
+            console.error(`[Drive ALERTA] Pasta criada fora do Shared Drive! Criado em: ${newDriveId}, esperado: ${SHARED_DRIVE_ID}`);
+        }
+
+        return newId;
     } catch (error) {
-        console.error('Erro ao procurar/criar pasta:', folderName, error);
+        console.error('[Drive Error] findOrCreateFolder:', folderName, 'pai:', parentFolderId, error);
         throw error;
     }
 }
+
 
 async function findOrCreatePath(rootFolderId: string, segments: string[]) {
     let currentParentId = rootFolderId;
