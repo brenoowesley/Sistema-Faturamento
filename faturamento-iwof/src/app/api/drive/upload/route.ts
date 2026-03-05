@@ -13,6 +13,9 @@ const auth = new google.auth.GoogleAuth({
 
 const drive = google.drive({ version: 'v3', auth });
 
+// ID da Unidade Compartilhada (Shared Drive) — diferente do ID da pasta de partida
+const SHARED_DRIVE_ID = process.env.GOOGLE_DRIVE_SHARED_DRIVE_ID || '0AHsO4r32U6gpUk9PVA';
+
 // 1. Extração Inteligente do ID da Pasta (Movida para dentro do POST para maior flexibilidade)
 const getRootFolderId = () => {
     // Ordem de Prioridade: GOOGLE_DRIVE_ROOT_FOLDER_ID > DRIVE_FOLDER_URL
@@ -56,11 +59,11 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string) {
         const res = await drive.files.list({
             q,
             fields: 'files(id, name)',
-            spaces: 'drive',
+            spaces: 'allDrives',          // Shared Drive requer 'allDrives', não 'drive'
             pageSize: 1,
             supportsAllDrives: true,
             includeItemsFromAllDrives: true,
-            driveId: '1vBylgUjKl1LC8-Ttf8rrL5CdEJYpi9AT',
+            driveId: SHARED_DRIVE_ID,     // ID da Unidade Compartilhada, não da pasta
             corpora: 'drive'
         });
 
