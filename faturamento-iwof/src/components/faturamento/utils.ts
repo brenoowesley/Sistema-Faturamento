@@ -68,13 +68,16 @@ export function fmtTime(d: Date | null): string {
     return d.toLocaleTimeString("pt-BR", { hour: '2-digit', minute: '2-digit' });
 }
 
-export const normalizarNome = (nome?: string) => {
+export const normalizarNome = (nome?: string): string => {
     if (!nome) return "";
     return nome
         .trim()
-        .replace(/_/g, " ") // Suporte Conta Azul: troca _ por espaço
-        .replace(/'/g, "")  // Remove apóstrofos (ex: d'italia -> ditalia)
+        // Conta Azul substitui qualquer char especial (', &, ., ,, /, (, ), @, +, etc.) por _.
+        // Tratamos todos os chars não-alfanuméricos e não-espaço como separadores (espaço)
+        // para que ambos os lados cheguem ao mesmo denominador na comparação.
+        .replace(/[^a-zA-ZÀ-ÿ0-9\s]/g, " ")
         .toLowerCase()
         .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        .replace(/\s+/g, " ");
+        .replace(/\s+/g, " ")
+        .trim();
 };

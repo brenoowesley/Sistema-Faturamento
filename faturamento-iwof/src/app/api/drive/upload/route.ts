@@ -13,6 +13,9 @@ const auth = new google.auth.GoogleAuth({
 
 const drive = google.drive({ version: 'v3', auth });
 
+// ID da Unidade Compartilhada (Shared Drive) — diferente do ID da pasta de partida
+const SHARED_DRIVE_ID = process.env.GOOGLE_DRIVE_SHARED_DRIVE_ID || '0AHsO4r32U6gpUk9PVA';
+
 // 1. Extração Inteligente do ID da Pasta (Movida para dentro do POST para maior flexibilidade)
 const getRootFolderId = () => {
     // Ordem de Prioridade: GOOGLE_DRIVE_ROOT_FOLDER_ID > DRIVE_FOLDER_URL
@@ -46,13 +49,17 @@ const supabaseAdmin = createClient(
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-async function findOrCreateFolder(folderName: string, parentFolderId: string) {
+async function findOrCreateFolder(folderName: string, parentFolderId: string): Promise<string> {
     try {
-        // Blindagem contra Apóstrofos (Escape de aspas simples para a API do Google Drive)
+        // Escape de aspas simples para a query da Drive API
         const safeFolderName = folderName.replace(/'/g, "\\'");
 
         const q = `name='${safeFolderName}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`;
 
+        // CORREÇÃO: Não usar driveId/corpora no files.list.
+        // O filtro '${parentFolderId}' in parents já escopa a busca ao local correto.
+        // Usar driveId+corpora com Service Account causava falso "não encontrado",
+        // forçando criação de pastas duplicadas no My Drive da service account.
         const res = await drive.files.list({
             q,
             fields: 'files(id, name)',
@@ -60,38 +67,40 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string) {
             pageSize: 1,
             supportsAllDrives: true,
             includeItemsFromAllDrives: true,
-            driveId: '1vBylgUjKl1LC8-Ttf8rrL5CdEJYpi9AT',
-            corpora: 'drive'
         });
 
         if (res.data.files && res.data.files.length > 0 && res.data.files[0].id) {
+            console.log(`[Drive Cache] Pasta encontrada: "${folderName}" → ${res.data.files[0].id}`);
             return res.data.files[0].id;
-        } else {
-            // Tratamento de Erros de Listagem: Verificação de permissão antes de criar
-            try {
-                await drive.files.get({
-                    fileId: parentFolderId,
-                    fields: 'id, capabilities',
-                    supportsAllDrives: true
-                });
-            } catch (permError) {
-                console.error(`[Drive API] Sem acesso de leitura na pasta pai (${parentFolderId}):`, permError);
-                throw new Error(`Permissão insuficiente na pasta pai: ${parentFolderId}`);
-            }
-
-            const fileMetadata = { name: folderName, mimeType: 'application/vnd.google-apps.folder', parents: [parentFolderId] };
-            const createRes = await drive.files.create({
-                requestBody: fileMetadata,
-                fields: 'id',
-                supportsAllDrives: true
-            });
-            return createRes.data.id;
         }
+
+        // Pasta não existe: criar dentro do pai (que está no Shared Drive)
+        const fileMetadata = {
+            name: folderName,
+            mimeType: 'application/vnd.google-apps.folder',
+            parents: [parentFolderId]
+        };
+        const createRes = await drive.files.create({
+            requestBody: fileMetadata,
+            fields: 'id, driveId',  // driveId no retorno confirma que está no Shared Drive
+            supportsAllDrives: true
+        });
+
+        const newId = createRes.data.id!;
+        const newDriveId = (createRes.data as any).driveId;
+        console.log(`[Drive Create] Pasta criada: "${folderName}" → ${newId} | driveId: ${newDriveId || 'MY_DRIVE (ATENCAO!)'}`);
+
+        if (newDriveId && newDriveId !== SHARED_DRIVE_ID) {
+            console.error(`[Drive ALERTA] Pasta criada fora do Shared Drive! Criado em: ${newDriveId}, esperado: ${SHARED_DRIVE_ID}`);
+        }
+
+        return newId;
     } catch (error) {
-        console.error('Erro ao procurar/criar pasta:', folderName, error);
+        console.error('[Drive Error] findOrCreateFolder:', folderName, 'pai:', parentFolderId, error);
         throw error;
     }
 }
+
 
 async function findOrCreatePath(rootFolderId: string, segments: string[]) {
     let currentParentId = rootFolderId;
@@ -131,8 +140,17 @@ export async function POST(request: Request) {
         const { Readable } = require('stream');
         const results = [];
 
+        // Ano/Mês: calculados uma única vez para o lote inteiro
+        const now = new Date();
+        const uploadAno = now.getFullYear().toString();
+        const uploadMes = (now.getMonth() + 1).toString().padStart(2, '0');
+
         // Cache de IDs de pastas para evitar chamadas duplicadas na mesma requisição
         const folderCache: Record<string, string> = {};
+
+        // mesFolderId: se vier no metadata (chunks 2+), salta resolução de Ano e Mês
+        // Se não vier (chunk 1), resolve e retorna para o frontend reutilizar
+        let resolvedMesFolderId: string | null = (metadataArray[0]?.mesFolderId) || null;
 
         for (const meta of metadataArray) {
             const file = files.find(f => f.name === meta.filename);
@@ -141,12 +159,11 @@ export async function POST(request: Request) {
                 continue;
             }
 
-            // --- Lógica de Pareamento Dinâmico (Phase 9) ---
+            // --- Lógica de Pareamento Dinâmico ---
             let empresaParaPasta = (meta.nome_empresa_extraido || meta.nome_conta_azul || "Indefinido").trim();
 
             if (meta.docType === 'nf' && meta.numeroNF) {
                 try {
-                    // Busca na tabela faturamento_consolidados pelo número da nota
                     const { data: consData, error: consErr } = await supabaseAdmin
                         .from('faturamento_consolidados')
                         .select('nome_empresa')
@@ -162,21 +179,34 @@ export async function POST(request: Request) {
                 }
             }
 
-            // 1. Construir árvore de pastas: [Ano] -> [Mês] -> [Empresa] -> [Ciclo]
-            const segments = [
-                meta.ano,
-                meta.mes,
-                empresaParaPasta,
-                meta.ciclo
-            ].map(s => String(s || "Indefinido").trim());
+            const nomePastaFinal = String(meta.nomePasta || meta.ciclo || "Geral").trim();
 
-            const cacheKey = segments.join('/');
-            let targetFolderId = folderCache[cacheKey];
+            let targetFolderId: string;
 
-            if (!targetFolderId) {
-                targetFolderId = await findOrCreatePath(rootFolderId, segments);
-                folderCache[cacheKey] = targetFolderId;
+            if (resolvedMesFolderId) {
+                // Chunks 2+: Ano e Mês já resolvidos — só precisa de empresa → nomePasta (2 chamadas)
+                const cacheKey = `${resolvedMesFolderId}/${empresaParaPasta}/${nomePastaFinal}`;
+                if (folderCache[cacheKey]) {
+                    targetFolderId = folderCache[cacheKey];
+                } else {
+                    targetFolderId = await findOrCreatePath(resolvedMesFolderId, [empresaParaPasta, nomePastaFinal]);
+                    folderCache[cacheKey] = targetFolderId;
+                }
+            } else {
+                // Chunk 1: resolve caminho completo e captura mesFolderId no caminho
+                const anoFolderId = await findOrCreateFolder(uploadAno, rootFolderId);
+                resolvedMesFolderId = await findOrCreateFolder(uploadMes, anoFolderId);
+
+                const cacheKey = `${resolvedMesFolderId}/${empresaParaPasta}/${nomePastaFinal}`;
+                if (folderCache[cacheKey]) {
+                    targetFolderId = folderCache[cacheKey];
+                } else {
+                    targetFolderId = await findOrCreatePath(resolvedMesFolderId, [empresaParaPasta, nomePastaFinal]);
+                    folderCache[cacheKey] = targetFolderId;
+                }
             }
+
+            console.log(`[Drive Path] ${meta.filename} → ${uploadAno}/${uploadMes}/${empresaParaPasta}/${nomePastaFinal} → ${targetFolderId}`);
 
             // 2. Upload para o Drive
             const buffer = Buffer.from(await file.arrayBuffer());
@@ -188,9 +218,6 @@ export async function POST(request: Request) {
                 mimeType: file.type || 'application/pdf',
                 body: Readable.from(buffer)
             };
-
-            console.log(`[Drive Debug] Uploading ${file.name} para a pasta final: ${targetFolderId}`);
-            console.log(`[Drive API] Destino Final do Arquivo [${file.name}]:`, targetFolderId);
 
             const driveRes = await drive.files.create({
                 requestBody: fileMetadata,
@@ -222,7 +249,9 @@ export async function POST(request: Request) {
             }
         }
 
-        return NextResponse.json({ success: true, results });
+        // Retorna mesFolderId para o frontend reutilizar nos chunks seguintes
+        return NextResponse.json({ success: true, results, mesFolderId: resolvedMesFolderId });
+
 
     } catch (error: any) {
         console.error("Erro no API /drive/upload:", error);

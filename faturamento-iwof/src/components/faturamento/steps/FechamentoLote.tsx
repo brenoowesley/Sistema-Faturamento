@@ -630,8 +630,10 @@ export default function FechamentoLote({
                 return;
             }
 
-            // Envio em lotes de 5 para equilibrar limite da Vercel vs Rate Limit do Google Drive
-            const chunkSize = 5;
+            // Chunk size 15: PDFs de 5-50KB → ~750KB por chunk (limite Vercel: 4.5MB)
+            const chunkSize = 15;
+            let mesFolderId: string | null = null;
+
             for (let i = 0; i < reportsWithBoletos.length; i += chunkSize) {
                 const chunk = reportsWithBoletos.slice(i, i + chunkSize);
                 const formData = new FormData();
@@ -649,11 +651,10 @@ export default function FechamentoLote({
                         clienteId: r.id,
                         consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
                         nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
-                        ciclo: r.ciclo || "Geral",
-                        ano: ano || new Date().getFullYear().toString(),
-                        mes: mes || (new Date().getMonth() + 1).toString().padStart(2, '0'),
+                        nomePasta: nomePasta,
                         docType: "hc",
-                        nome_empresa_extraido: r.nomeContaAzul || r.razaoSocial
+                        nome_empresa_extraido: r.nomeContaAzul || r.razaoSocial,
+                        ...(mesFolderId ? { mesFolderId } : {})  // reutiliza nos chunks 2+
                     });
                 }
 
@@ -664,6 +665,9 @@ export default function FechamentoLote({
                     const errData = await res.json().catch(() => ({}));
                     throw new Error(`Erro na API (Boletos Lote ${i / chunkSize + 1}): ${errData.error || res.statusText}`);
                 }
+                // Captura mesFolderId do primeiro chunk para reutilizar nos seguintes
+                const resData = await res.json();
+                if (!mesFolderId && resData.mesFolderId) mesFolderId = resData.mesFolderId;
             }
 
             setActionState(p => ({ ...p, boletosSuccess: true }));
@@ -692,8 +696,10 @@ export default function FechamentoLote({
                 return;
             }
 
-            // Envio em lotes de 5 para equilibrar limite da Vercel vs Rate Limit do Google Drive
-            const chunkSize = 5;
+            // Chunk size 15: PDFs de 5-50KB → ~750KB por chunk (limite Vercel: 4.5MB)
+            const chunkSize = 15;
+            let mesFolderId: string | null = null;
+
             for (let i = 0; i < reportsWithNf.length; i += chunkSize) {
                 const chunk = reportsWithNf.slice(i, i + chunkSize);
                 const formData = new FormData();
@@ -702,11 +708,8 @@ export default function FechamentoLote({
                 const metadataArray = [];
 
                 for (const r of chunk) {
-                    // CORREÇÃO: Extraindo o blob e montando o File corretamente
                     const fileContent = r.nfse!.blob || r.nfse!.file || r.nfse!;
                     const fileObj = fileContent instanceof Blob ? fileContent : new File([fileContent], r.nfse!.name, { type: "application/pdf" });
-
-                    // Agora sim, garantimos que fileObj é um Blob/File
                     formData.append("files", fileObj, r.nfse!.name);
 
                     metadataArray.push({
@@ -714,11 +717,10 @@ export default function FechamentoLote({
                         clienteId: r.id,
                         consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
                         nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
-                        ciclo: r.ciclo || "Geral",
-                        ano: ano || new Date().getFullYear().toString(),
-                        mes: mes || (new Date().getMonth() + 1).toString().padStart(2, '0'),
+                        nomePasta: nomePasta,
                         docType: "nf",
-                        numeroNF: r.numeroNF
+                        numeroNF: r.numeroNF,
+                        ...(mesFolderId ? { mesFolderId } : {})  // reutiliza nos chunks 2+
                     });
                 }
 
@@ -729,6 +731,9 @@ export default function FechamentoLote({
                     const errData = await res.json().catch(() => ({}));
                     throw new Error(`Erro na API (NFs Lote ${i / chunkSize + 1}): ${errData.error || res.statusText}`);
                 }
+                // Captura mesFolderId do primeiro chunk para reutilizar nos seguintes
+                const resData = await res.json();
+                if (!mesFolderId && resData.mesFolderId) mesFolderId = resData.mesFolderId;
             }
 
             setActionState(p => ({ ...p, nfsSuccess: true }));
@@ -836,8 +841,10 @@ export default function FechamentoLote({
 
     const filteredReports = matchFiles.reports.filter(r => {
         if (filterStatus === "FALTA_NF") return r.statusNF === 'PENDENTE';
-        if (filterStatus === "FALTA_NC") return r.statusNC === 'PENDENTE';
-        if (filterStatus === "COM_DESCONTO_IR") return r.descontoIR && r.descontoIR > 0;
+        if (filterStatus === "TEM_NF") return r.statusNF === 'EMITIDA';
+        if (filterStatus === "TEM_BOLETO") return !!r.boleto;
+        if (filterStatus === "COM_NC") return r.statusNC === 'PENDENTE' || r.statusNC === 'EMITIDA';
+        if (filterStatus === "COM_IRRF") return !!r.descontoIR && r.descontoIR > 0;
         return true;
     });
 
@@ -1135,86 +1142,126 @@ export default function FechamentoLote({
                         </div>
 
                         {/* Quick Filters */}
-                        <div className="flex bg-[var(--bg-card)] border border-[var(--border)] p-1 rounded-xl w-full sm:w-auto overflow-x-auto no-scrollbar">
-                            <button
-                                onClick={() => setFilterStatus("TODAS")}
-                                className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors whitespace-nowrap ${filterStatus === "TODAS" ? "bg-[var(--accent)] text-white shadow" : "text-[var(--fg-dim)] hover:text-[var(--fg)]"}`}
-                            >
-                                Todas
-                            </button>
-                            <button
-                                onClick={() => setFilterStatus("FALTA_NF")}
-                                className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors whitespace-nowrap ${filterStatus === "FALTA_NF" ? "bg-[var(--danger)] text-white shadow" : "text-[var(--fg-dim)] hover:text-[var(--danger)]"}`}
-                            >
-                                Falta NF
-                            </button>
-                            <button
-                                onClick={() => setFilterStatus("FALTA_NC")}
-                                className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors whitespace-nowrap ${filterStatus === "FALTA_NC" ? "bg-amber-500 text-white shadow" : "text-[var(--fg-dim)] hover:text-amber-500"}`}
-                            >
-                                Falta NC
-                            </button>
-                            <button
-                                onClick={() => setFilterStatus("COM_DESCONTO_IR")}
-                                className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors whitespace-nowrap ${filterStatus === "COM_DESCONTO_IR" ? "bg-purple-500 text-white shadow" : "text-[var(--fg-dim)] hover:text-purple-500"}`}
-                            >
-                                Desc. IR
-                            </button>
+                        <div className="flex flex-wrap bg-[var(--bg-card)] border border-[var(--border)] p-1 rounded-xl w-full sm:w-auto gap-0.5">
+                            {([
+                                { key: "TODAS", label: "Todas", color: "var(--accent)" },
+                                { key: "TEM_NF", label: "✓ NF Emitida", color: "#3b82f6" },
+                                { key: "FALTA_NF", label: "⚠ Falta NF", color: "var(--danger)" },
+                                { key: "TEM_BOLETO", label: "✓ Boleto", color: "#10b981" },
+                                { key: "COM_NC", label: "NC", color: "#f59e0b" },
+                                { key: "COM_IRRF", label: "IRRF", color: "#a855f7" },
+                            ] as const).map(f => (
+                                <button
+                                    key={f.key}
+                                    onClick={() => setFilterStatus(f.key)}
+                                    style={filterStatus === f.key ? { background: f.color } : {}}
+                                    className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition-all whitespace-nowrap ${filterStatus === f.key ? "text-white shadow" : "text-[var(--fg-dim)] hover:text-[var(--fg)]"
+                                        }`}
+                                >
+                                    {f.label}
+                                </button>
+                            ))}
                         </div>
                     </div>
 
                     <div className="max-h-[500px] overflow-y-auto custom-scrollbar p-0">
-                        <table className="w-full text-left text-sm whitespace-nowrap min-w-[700px]">
+                        <table className="w-full text-left text-sm whitespace-nowrap min-w-[900px]">
                             <thead className="bg-[var(--bg-card)] sticky top-0 shadow-sm z-10 border-b border-[var(--border)]">
                                 <tr>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold uppercase text-[10px] tracking-wider">Nome conta azul (CNPJ ABAIXO)</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Valor boleto base</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Valor boleto pós ajustes</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Valor descontos</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Valor acréscimos</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Valor NC</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Valor NF</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Valor IRRF</th>
-                                    <th className="py-4 px-6 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Boleto final</th>
+                                    <th className="py-4 px-4 text-[var(--fg-dim)] font-semibold uppercase text-[10px] tracking-wider">Empresa (CNPJ)</th>
+                                    <th className="py-4 px-3 text-[var(--fg-dim)] font-semibold text-center uppercase text-[10px] tracking-wider">Nº NF</th>
+                                    <th className="py-4 px-3 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Base</th>
+                                    <th className="py-4 px-3 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Pós Ajustes</th>
+                                    <th className="py-4 px-3 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Descontos</th>
+                                    <th className="py-4 px-3 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider">Acréscimos</th>
+                                    <th className="py-4 px-3 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider text-amber-400">Valor NC</th>
+                                    <th className="py-4 px-3 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider text-blue-400">Valor NF</th>
+                                    <th className="py-4 px-3 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider text-purple-400">Valor IRRF</th>
+                                    <th className="py-4 px-3 text-[var(--fg-dim)] font-semibold text-right uppercase text-[10px] tracking-wider text-emerald-400">Boleto Final</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[var(--border)]">
                                 {filteredReports.map((r, i) => (
-                                    <tr key={i} className="hover:bg-[rgba(33,118,255,0.02)] transition-colors">
-                                        <td className="py-4 px-6">
-                                            <p className="font-bold text-[var(--fg)] text-ellipsis overflow-hidden max-w-[200px]">{r.razaoSocial}</p>
-                                            <div className="flex gap-2 items-center mt-1">
-                                                <span className="text-[10px] text-[var(--fg-muted)] font-mono">{r.cnpj ? r.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5") : r.nome}</span>
-                                            </div>
-                                        </td>
-                                        <td className="py-4 px-6 text-right font-mono text-[12px] text-[var(--fg-muted)]">
-                                            {fmtCurrency(r.valorBase)}
-                                        </td>
-                                        <td className="py-4 px-6 text-right font-mono text-[13px] font-bold text-[var(--fg)]">
-                                            {fmtCurrency(r.totalFaturar)}
-                                        </td>
-                                        <td className="py-4 px-6 text-right font-mono text-[12px] text-red-400">
-                                            {r.valorDescontos > 0 ? `- ${fmtCurrency(r.valorDescontos)}` : '—'}
-                                        </td>
-                                        <td className="py-4 px-6 text-right font-mono text-[12px] text-green-400">
-                                            {r.valorAcrescimos > 0 ? `+ ${fmtCurrency(r.valorAcrescimos)}` : '—'}
-                                        </td>
-                                        <td className="py-4 px-6 text-right font-mono text-[12px] text-amber-500">
-                                            {r.statusNF === 'PENDENTE' ? fmtCurrency(r.totalFaturar) : '—'}
-                                        </td>
-                                        <td className="py-4 px-6 text-right font-mono text-[12px] text-blue-400">
-                                            {r.statusNF === 'EMITIDA' ? fmtCurrency(r.totalFaturar) : '—'}
-                                        </td>
-                                        <td className="py-4 px-6 text-right font-mono text-[12px] text-purple-400">
-                                            <div className="flex flex-col items-end">
-                                                {r.descontoIR && r.descontoIR > 0 ? `- ${fmtCurrency(r.descontoIR)}` : '—'}
-                                                {r.isXmlMatched && (
-                                                    <span className="text-[9px] bg-purple-500/20 text-purple-400 px-1 rounded border border-purple-500/30 mt-0.5 font-bold">XML</span>
+                                    <tr key={i} className="hover:bg-[rgba(33,118,255,0.03)] transition-colors group">
+                                        {/* Empresa + CNPJ */}
+                                        <td className="py-3 px-4">
+                                            <p className="font-bold text-[var(--fg)] text-ellipsis overflow-hidden max-w-[200px] text-[13px]" title={r.razaoSocial}>{r.razaoSocial}</p>
+                                            <div className="flex gap-2 items-center mt-0.5">
+                                                <span className="text-[10px] text-[var(--fg-dim)] font-mono">
+                                                    {r.cnpj ? r.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5") : r.nome}
+                                                </span>
+                                                {r.boleto && (
+                                                    <span className="text-[9px] bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 rounded font-bold border border-emerald-500/25">BOLETO ✓</span>
                                                 )}
                                             </div>
                                         </td>
-                                        <td className="py-4 px-6 text-right">
-                                            <span className="font-mono text-[13px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-md">
+                                        {/* Nº NF */}
+                                        <td className="py-3 px-3 text-center">
+                                            {r.numeroNF ? (
+                                                <span className="font-mono text-[11px] font-bold bg-blue-500/10 text-blue-400 px-2 py-1 rounded border border-blue-500/20">
+                                                    #{r.numeroNF}
+                                                </span>
+                                            ) : (
+                                                <span className="text-[10px] text-[var(--fg-dim)]/40">—</span>
+                                            )}
+                                        </td>
+                                        {/* Base */}
+                                        <td className="py-3 px-3 text-right font-mono text-[11px] text-[var(--fg-dim)]">
+                                            {fmtCurrency(r.valorBase)}
+                                        </td>
+                                        {/* Pós Ajustes */}
+                                        <td className="py-3 px-3 text-right font-mono text-[12px] font-bold text-[var(--fg)]">
+                                            {fmtCurrency(r.totalFaturar)}
+                                        </td>
+                                        {/* Descontos */}
+                                        <td className="py-3 px-3 text-right font-mono text-[11px] text-red-400">
+                                            {r.valorDescontos > 0 ? (
+                                                <span className="bg-red-500/10 px-1.5 py-0.5 rounded">- {fmtCurrency(r.valorDescontos)}</span>
+                                            ) : <span className="text-[var(--fg-dim)]/30">—</span>}
+                                        </td>
+                                        {/* Acréscimos */}
+                                        <td className="py-3 px-3 text-right font-mono text-[11px] text-green-400">
+                                            {r.valorAcrescimos > 0 ? (
+                                                <span className="bg-green-500/10 px-1.5 py-0.5 rounded">+ {fmtCurrency(r.valorAcrescimos)}</span>
+                                            ) : <span className="text-[var(--fg-dim)]/30">—</span>}
+                                        </td>
+                                        {/* Valor NC — só aparece quando statusNF é PENDENTE (emitirá NC em vez de NF) */}
+                                        <td className="py-3 px-3 text-right font-mono text-[11px]">
+                                            {r.statusNF === 'PENDENTE' ? (
+                                                <span className="text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                                                    {fmtCurrency(r.totalFaturar)}
+                                                </span>
+                                            ) : <span className="text-[var(--fg-dim)]/30">—</span>}
+                                        </td>
+                                        {/* Valor NF — valor extraído do XML/PDF quando emitida */}
+                                        <td className="py-3 px-3 text-right font-mono text-[11px]">
+                                            {r.statusNF === 'EMITIDA' ? (
+                                                <div className="flex flex-col items-end gap-0.5">
+                                                    <span className="text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20">
+                                                        {fmtCurrency(r.xmlValorServicos && r.xmlValorServicos > 0 ? r.xmlValorServicos : r.totalFaturar)}
+                                                    </span>
+                                                    {r.isXmlMatched && (
+                                                        <span className="text-[9px] text-blue-300/60 font-bold">via XML</span>
+                                                    )}
+                                                </div>
+                                            ) : <span className="text-[var(--fg-dim)]/30">—</span>}
+                                        </td>
+                                        {/* IRRF */}
+                                        <td className="py-3 px-3 text-right font-mono text-[11px]">
+                                            {r.descontoIR && r.descontoIR > 0 ? (
+                                                <div className="flex flex-col items-end gap-0.5">
+                                                    <span className="text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded border border-purple-500/20">
+                                                        - {fmtCurrency(r.descontoIR)}
+                                                    </span>
+                                                    {r.isXmlMatched && (
+                                                        <span className="text-[9px] text-purple-300/60 font-bold">via XML</span>
+                                                    )}
+                                                </div>
+                                            ) : <span className="text-[var(--fg-dim)]/30">—</span>}
+                                        </td>
+                                        {/* Boleto Final = pós ajustes − IRRF */}
+                                        <td className="py-3 px-3 text-right">
+                                            <span className="font-mono text-[12px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-md border border-emerald-500/20">
                                                 {fmtCurrency(r.totalFaturar - (r.descontoIR || 0))}
                                             </span>
                                         </td>
@@ -1222,7 +1269,7 @@ export default function FechamentoLote({
                                 ))}
                                 {filteredReports.length === 0 && (
                                     <tr>
-                                        <td colSpan={5} className="py-12 text-center text-[var(--fg-dim)] text-sm">
+                                        <td colSpan={10} className="py-12 text-center text-[var(--fg-dim)] text-sm">
                                             Nenhuma loja corresponde ao filtro selecionado.
                                         </td>
                                     </tr>
