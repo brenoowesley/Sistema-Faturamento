@@ -630,8 +630,10 @@ export default function FechamentoLote({
                 return;
             }
 
-            // Envio em lotes de 5 para equilibrar limite da Vercel vs Rate Limit do Google Drive
-            const chunkSize = 5;
+            // Chunk size 15: PDFs de 5-50KB → ~750KB por chunk (limite Vercel: 4.5MB)
+            const chunkSize = 15;
+            let mesFolderId: string | null = null;
+
             for (let i = 0; i < reportsWithBoletos.length; i += chunkSize) {
                 const chunk = reportsWithBoletos.slice(i, i + chunkSize);
                 const formData = new FormData();
@@ -649,9 +651,10 @@ export default function FechamentoLote({
                         clienteId: r.id,
                         consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
                         nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
-                        nomePasta: nomePasta,           // nome do lote definido no Setup
+                        nomePasta: nomePasta,
                         docType: "hc",
-                        nome_empresa_extraido: r.nomeContaAzul || r.razaoSocial
+                        nome_empresa_extraido: r.nomeContaAzul || r.razaoSocial,
+                        ...(mesFolderId ? { mesFolderId } : {})  // reutiliza nos chunks 2+
                     });
                 }
 
@@ -662,6 +665,9 @@ export default function FechamentoLote({
                     const errData = await res.json().catch(() => ({}));
                     throw new Error(`Erro na API (Boletos Lote ${i / chunkSize + 1}): ${errData.error || res.statusText}`);
                 }
+                // Captura mesFolderId do primeiro chunk para reutilizar nos seguintes
+                const resData = await res.json();
+                if (!mesFolderId && resData.mesFolderId) mesFolderId = resData.mesFolderId;
             }
 
             setActionState(p => ({ ...p, boletosSuccess: true }));
@@ -690,8 +696,10 @@ export default function FechamentoLote({
                 return;
             }
 
-            // Envio em lotes de 5 para equilibrar limite da Vercel vs Rate Limit do Google Drive
-            const chunkSize = 5;
+            // Chunk size 15: PDFs de 5-50KB → ~750KB por chunk (limite Vercel: 4.5MB)
+            const chunkSize = 15;
+            let mesFolderId: string | null = null;
+
             for (let i = 0; i < reportsWithNf.length; i += chunkSize) {
                 const chunk = reportsWithNf.slice(i, i + chunkSize);
                 const formData = new FormData();
@@ -700,11 +708,8 @@ export default function FechamentoLote({
                 const metadataArray = [];
 
                 for (const r of chunk) {
-                    // CORREÇÃO: Extraindo o blob e montando o File corretamente
                     const fileContent = r.nfse!.blob || r.nfse!.file || r.nfse!;
                     const fileObj = fileContent instanceof Blob ? fileContent : new File([fileContent], r.nfse!.name, { type: "application/pdf" });
-
-                    // Agora sim, garantimos que fileObj é um Blob/File
                     formData.append("files", fileObj, r.nfse!.name);
 
                     metadataArray.push({
@@ -712,9 +717,10 @@ export default function FechamentoLote({
                         clienteId: r.id,
                         consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
                         nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
-                        nomePasta: nomePasta,           // nome do lote definido no Setup
+                        nomePasta: nomePasta,
                         docType: "nf",
-                        numeroNF: r.numeroNF
+                        numeroNF: r.numeroNF,
+                        ...(mesFolderId ? { mesFolderId } : {})  // reutiliza nos chunks 2+
                     });
                 }
 
@@ -725,6 +731,9 @@ export default function FechamentoLote({
                     const errData = await res.json().catch(() => ({}));
                     throw new Error(`Erro na API (NFs Lote ${i / chunkSize + 1}): ${errData.error || res.statusText}`);
                 }
+                // Captura mesFolderId do primeiro chunk para reutilizar nos seguintes
+                const resData = await res.json();
+                if (!mesFolderId && resData.mesFolderId) mesFolderId = resData.mesFolderId;
             }
 
             setActionState(p => ({ ...p, nfsSuccess: true }));

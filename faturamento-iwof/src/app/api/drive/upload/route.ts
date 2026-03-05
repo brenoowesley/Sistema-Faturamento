@@ -140,8 +140,17 @@ export async function POST(request: Request) {
         const { Readable } = require('stream');
         const results = [];
 
+        // Ano/Mês: calculados uma única vez para o lote inteiro
+        const now = new Date();
+        const uploadAno = now.getFullYear().toString();
+        const uploadMes = (now.getMonth() + 1).toString().padStart(2, '0');
+
         // Cache de IDs de pastas para evitar chamadas duplicadas na mesma requisição
         const folderCache: Record<string, string> = {};
+
+        // mesFolderId: se vier no metadata (chunks 2+), salta resolução de Ano e Mês
+        // Se não vier (chunk 1), resolve e retorna para o frontend reutilizar
+        let resolvedMesFolderId: string | null = (metadataArray[0]?.mesFolderId) || null;
 
         for (const meta of metadataArray) {
             const file = files.find(f => f.name === meta.filename);
@@ -150,12 +159,11 @@ export async function POST(request: Request) {
                 continue;
             }
 
-            // --- Lógica de Pareamento Dinâmico (Phase 9) ---
+            // --- Lógica de Pareamento Dinâmico ---
             let empresaParaPasta = (meta.nome_empresa_extraido || meta.nome_conta_azul || "Indefinido").trim();
 
             if (meta.docType === 'nf' && meta.numeroNF) {
                 try {
-                    // Busca na tabela faturamento_consolidados pelo número da nota
                     const { data: consData, error: consErr } = await supabaseAdmin
                         .from('faturamento_consolidados')
                         .select('nome_empresa')
@@ -171,28 +179,34 @@ export async function POST(request: Request) {
                 }
             }
 
-            // Ano/Mês: sempre do momento do upload no servidor (não do frontend)
-            const now = new Date();
-            const uploadAno = now.getFullYear().toString();
-            const uploadMes = (now.getMonth() + 1).toString().padStart(2, '0');
+            const nomePastaFinal = String(meta.nomePasta || meta.ciclo || "Geral").trim();
 
-            // 1. Construir árvore de pastas: [Ano] -> [Mês] -> [Empresa] -> [Nome do Lote]
-            const segments = [
-                uploadAno,
-                uploadMes,
-                empresaParaPasta,
-                meta.nomePasta || meta.ciclo || "Geral"  // nomePasta do Setup tem prioridade
-            ].map(s => String(s || "Indefinido").trim());
+            let targetFolderId: string;
 
-            console.log(`[Drive Path] ${meta.filename} → ${segments.join(' / ')}`);
+            if (resolvedMesFolderId) {
+                // Chunks 2+: Ano e Mês já resolvidos — só precisa de empresa → nomePasta (2 chamadas)
+                const cacheKey = `${resolvedMesFolderId}/${empresaParaPasta}/${nomePastaFinal}`;
+                if (folderCache[cacheKey]) {
+                    targetFolderId = folderCache[cacheKey];
+                } else {
+                    targetFolderId = await findOrCreatePath(resolvedMesFolderId, [empresaParaPasta, nomePastaFinal]);
+                    folderCache[cacheKey] = targetFolderId;
+                }
+            } else {
+                // Chunk 1: resolve caminho completo e captura mesFolderId no caminho
+                const anoFolderId = await findOrCreateFolder(uploadAno, rootFolderId);
+                resolvedMesFolderId = await findOrCreateFolder(uploadMes, anoFolderId);
 
-            const cacheKey = segments.join('/');
-            let targetFolderId = folderCache[cacheKey];
-
-            if (!targetFolderId) {
-                targetFolderId = await findOrCreatePath(rootFolderId, segments);
-                folderCache[cacheKey] = targetFolderId;
+                const cacheKey = `${resolvedMesFolderId}/${empresaParaPasta}/${nomePastaFinal}`;
+                if (folderCache[cacheKey]) {
+                    targetFolderId = folderCache[cacheKey];
+                } else {
+                    targetFolderId = await findOrCreatePath(resolvedMesFolderId, [empresaParaPasta, nomePastaFinal]);
+                    folderCache[cacheKey] = targetFolderId;
+                }
             }
+
+            console.log(`[Drive Path] ${meta.filename} → ${uploadAno}/${uploadMes}/${empresaParaPasta}/${nomePastaFinal} → ${targetFolderId}`);
 
             // 2. Upload para o Drive
             const buffer = Buffer.from(await file.arrayBuffer());
@@ -204,9 +218,6 @@ export async function POST(request: Request) {
                 mimeType: file.type || 'application/pdf',
                 body: Readable.from(buffer)
             };
-
-            console.log(`[Drive Debug] Uploading ${file.name} para a pasta final: ${targetFolderId}`);
-            console.log(`[Drive API] Destino Final do Arquivo [${file.name}]:`, targetFolderId);
 
             const driveRes = await drive.files.create({
                 requestBody: fileMetadata,
@@ -238,7 +249,9 @@ export async function POST(request: Request) {
             }
         }
 
-        return NextResponse.json({ success: true, results });
+        // Retorna mesFolderId para o frontend reutilizar nos chunks seguintes
+        return NextResponse.json({ success: true, results, mesFolderId: resolvedMesFolderId });
+
 
     } catch (error: any) {
         console.error("Erro no API /drive/upload:", error);
