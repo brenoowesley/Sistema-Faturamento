@@ -171,13 +171,20 @@ export async function POST(request: Request) {
                 }
             }
 
-            // 1. Construir árvore de pastas: [Ano] -> [Mês] -> [Empresa] -> [Ciclo]
+            // Ano/Mês: sempre do momento do upload no servidor (não do frontend)
+            const now = new Date();
+            const uploadAno = now.getFullYear().toString();
+            const uploadMes = (now.getMonth() + 1).toString().padStart(2, '0');
+
+            // 1. Construir árvore de pastas: [Ano] -> [Mês] -> [Empresa] -> [Nome do Lote]
             const segments = [
-                meta.ano,
-                meta.mes,
+                uploadAno,
+                uploadMes,
                 empresaParaPasta,
-                meta.ciclo
+                meta.nomePasta || meta.ciclo || "Geral"  // nomePasta do Setup tem prioridade
             ].map(s => String(s || "Indefinido").trim());
+
+            console.log(`[Drive Path] ${meta.filename} → ${segments.join(' / ')}`);
 
             const cacheKey = segments.join('/');
             let targetFolderId = folderCache[cacheKey];

@@ -649,9 +649,7 @@ export default function FechamentoLote({
                         clienteId: r.id,
                         consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
                         nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
-                        ciclo: r.ciclo || "Geral",
-                        ano: ano || new Date().getFullYear().toString(),
-                        mes: mes || (new Date().getMonth() + 1).toString().padStart(2, '0'),
+                        nomePasta: nomePasta,           // nome do lote definido no Setup
                         docType: "hc",
                         nome_empresa_extraido: r.nomeContaAzul || r.razaoSocial
                     });
@@ -714,9 +712,7 @@ export default function FechamentoLote({
                         clienteId: r.id,
                         consolidadoId: dbConsolidados[r.id] || r.consolidadoId,
                         nome_conta_azul: r.nomeContaAzul || r.razaoSocial,
-                        ciclo: r.ciclo || "Geral",
-                        ano: ano || new Date().getFullYear().toString(),
-                        mes: mes || (new Date().getMonth() + 1).toString().padStart(2, '0'),
+                        nomePasta: nomePasta,           // nome do lote definido no Setup
                         docType: "nf",
                         numeroNF: r.numeroNF
                     });
