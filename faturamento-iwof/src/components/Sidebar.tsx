@@ -17,6 +17,7 @@ import {
     HelpCircle,
     Sun,
     Moon,
+    Wallet,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
@@ -27,6 +28,7 @@ const navItems = [
     { label: "Triagem de NFs", href: "/triagem", icon: Receipt },
     { label: "Notas de Crédito", href: "/notas-credito", icon: ReceiptText },
     { label: "Lanç. Parciais", href: "/lancamentos-parciais", icon: ClipboardList },
+    { label: "Gestão de Saques", href: "/saques", icon: Wallet },
     { label: "Como Usar", href: "/como-usar", icon: HelpCircle },
     { label: "Ajustes", href: "/ajustes", icon: SlidersHorizontal },
 ];
