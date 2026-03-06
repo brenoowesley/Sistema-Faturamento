@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS itens_saque (
     lote_id          UUID REFERENCES lotes_saques(id) ON DELETE CASCADE,
     cpf_conta        TEXT,
     cpf_favorecido   TEXT,
+    nome_usuario     TEXT,
     chave_pix        TEXT,
     tipo_pix         TEXT,
     valor            NUMERIC(12,2),
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS itens_saque (
 
 ALTER TABLE itens_saque ADD COLUMN IF NOT EXISTS cpf_conta        TEXT;
 ALTER TABLE itens_saque ADD COLUMN IF NOT EXISTS cpf_favorecido   TEXT;
+ALTER TABLE itens_saque ADD COLUMN IF NOT EXISTS nome_usuario     TEXT;
 ALTER TABLE itens_saque ADD COLUMN IF NOT EXISTS chave_pix        TEXT;
 ALTER TABLE itens_saque ADD COLUMN IF NOT EXISTS tipo_pix         TEXT;
 ALTER TABLE itens_saque ADD COLUMN IF NOT EXISTS valor            NUMERIC(12,2);

@@ -682,6 +682,7 @@ function LotePanel({
                 lote_id: loteDb.id,
                 cpf_conta: i.cpf_conta,
                 cpf_favorecido: i.cpf_favorecido,
+                nome_usuario: i.nome_usuario || null,
                 chave_pix: i.chave_pix,
                 tipo_pix: i.tipo_pix,
                 valor: i.valor_real,

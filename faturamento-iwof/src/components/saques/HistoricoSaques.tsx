@@ -18,6 +18,7 @@ interface Lote {
 interface ItemSaque {
     id: string;
     cpf_favorecido: string;
+    nome_usuario: string | null;
     chave_pix: string;
     tipo_pix: string;
     valor: number;
@@ -147,7 +148,7 @@ function LoteRow({ lote, isAdmin, onDeleted }: { lote: Lote; isAdmin: boolean; o
                                         <div style={{ overflowX: "auto" }}>
                                             <table className="data-table">
                                                 <thead><tr>
-                                                    <th>CPF Favorecido</th><th>Tipo PIX</th><th>Chave PIX</th>
+                                                    <th>Trabalhador</th><th>CPF Favorecido</th><th>Tipo PIX</th><th>Chave PIX</th>
                                                     <th>Vlr. Solicitado</th><th>Vlr. Real</th><th>Receita</th>
                                                 </tr></thead>
                                                 <tbody>
@@ -155,6 +156,7 @@ function LoteRow({ lote, isAdmin, onDeleted }: { lote: Lote; isAdmin: boolean; o
                                                         const rec = i.valor_solicitado !== null ? Number(i.valor_solicitado) - Number(i.valor) : null;
                                                         return (
                                                             <tr key={i.id}>
+                                                                <td style={{ fontSize: 12, color: "var(--fg-dim)" }}>{i.nome_usuario || "—"}</td>
                                                                 <td className="table-mono">{i.cpf_favorecido}</td>
                                                                 <td><span className="badge badge-info">{i.tipo_pix}</span></td>
                                                                 <td className="table-mono" style={{ fontSize: 12 }}>{i.chave_pix}</td>
@@ -177,11 +179,12 @@ function LoteRow({ lote, isAdmin, onDeleted }: { lote: Lote; isAdmin: boolean; o
                                         <div style={{ overflowX: "auto" }}>
                                             <table className="data-table">
                                                 <thead><tr>
-                                                    <th>CPF Favorecido</th><th>Chave PIX</th><th>Valor Real</th><th>Status</th><th>Motivo</th>
+                                                    <th>Trabalhador</th><th>CPF Favorecido</th><th>Chave PIX</th><th>Valor Real</th><th>Status</th><th>Motivo</th>
                                                 </tr></thead>
                                                 <tbody>
                                                     {blocked.map((i) => (
                                                         <tr key={i.id}>
+                                                            <td style={{ fontSize: 12, color: "var(--fg-dim)" }}>{i.nome_usuario || "—"}</td>
                                                             <td className="table-mono">{i.cpf_favorecido}</td>
                                                             <td className="table-mono" style={{ fontSize: 12 }}>{i.chave_pix || "—"}</td>
                                                             <td style={{ color: "var(--danger)", fontWeight: 600 }}>{R(i.valor)}</td>
