@@ -368,7 +368,10 @@ export default function FiscalProcessingPage() {
             }
 
             // Fallback para agendamentos brutos se não houver consolidação ainda
+            let usedFallback = false;
+
             if (agendamentos.length === 0) {
+                usedFallback = true;
                 let from = 0;
                 const step = 1000;
                 let hasMore = true;
@@ -458,12 +461,27 @@ export default function FiscalProcessingPage() {
             // 3. Get unique store IDs involved
             const storeIds = Array.from(new Set((agendamentos || []).map(a => a.loja_id)));
 
-            // 4. Fetch Pending Adjustments
-            const { data: ajustes, error: ajErr } = await supabase
-                .from("ajustes_faturamento")
-                .select("*")
-                .in("cliente_id", storeIds)
-                .eq("status_aplicacao", false);
+            // 4. Fetch Adjustments
+            let ajustes: any[] = [];
+            let ajErr: any = null;
+
+            if (usedFallback) {
+                const { data, error } = await supabase
+                    .from("ajustes_faturamento")
+                    .select("*")
+                    .in("cliente_id", storeIds)
+                    .eq("lote_aplicado_id", loteId);
+                ajustes = data || [];
+                ajErr = error;
+            } else {
+                const { data, error } = await supabase
+                    .from("ajustes_faturamento")
+                    .select("*")
+                    .in("cliente_id", storeIds)
+                    .eq("status_aplicacao", false);
+                ajustes = data || [];
+                ajErr = error;
+            }
 
             if (ajErr) throw ajErr;
 
