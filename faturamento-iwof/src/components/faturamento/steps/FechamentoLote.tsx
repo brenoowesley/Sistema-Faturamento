@@ -445,6 +445,26 @@ export default function FechamentoLote({
             const validos = agendamentos.filter(a => !a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO") && a.clienteId);
             let valTotal = 0;
 
+            const validStoreIds = Array.from(new Set(validos.map(a => a.clienteId).filter(Boolean))) as string[];
+
+            const { data: ajustes, error: ajErr } = await supabase
+                .from("ajustes_faturamento")
+                .select("*")
+                .in("cliente_id", validStoreIds)
+                .eq("status_aplicacao", false);
+
+            if (ajErr) throw new Error("Erro buscar ajustes: " + ajErr.message);
+
+            const ajustesMap = new Map<string, { acrescimos: number, descontos: number }>();
+            ajustes?.forEach(aj => {
+                if (!ajustesMap.has(aj.cliente_id)) {
+                    ajustesMap.set(aj.cliente_id, { acrescimos: 0, descontos: 0 });
+                }
+                const storeAjuste = ajustesMap.get(aj.cliente_id)!;
+                if (aj.tipo === "ACRESCIMO") storeAjuste.acrescimos += Number(aj.valor);
+                if (aj.tipo === "DESCONTO") storeAjuste.descontos += Number(aj.valor);
+            });
+
             // MAP DOS AGENDAMENTOS (Chaves Corretas)
             const agsInserir = validos.map(a => {
                 const finalVal = a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof);
@@ -497,10 +517,21 @@ export default function FechamentoLote({
             // 3. INSERIR CONSOLIDADOS FISCAIS
             // Pipeline matemático estrito: Passo 1→2→3→4→5
             const consolidadosPayload = matchFiles.reports.flatMap(r => {
+                let finalAcrescimos = r.valorAcrescimos || 0;
+                let finalDescontos = r.valorDescontos || 0;
+
+                if (r.id && ajustesMap.has(r.id)) {
+                    const storeAjuste = ajustesMap.get(r.id)!;
+                    finalAcrescimos += storeAjuste.acrescimos;
+                    finalDescontos += storeAjuste.descontos;
+                    // Se houver split de Queiroz, apply only once per store ID
+                    ajustesMap.delete(r.id);
+                }
+
                 const totais = calcularTotaisFaturamento(
                     r.valorBruto,
-                    r.valorAcrescimos,
-                    r.valorDescontos,
+                    finalAcrescimos,
+                    finalDescontos,
                     r.descontoIR || 0,
                     r.statusNF === 'EMITIDA'
                 );
@@ -510,8 +541,8 @@ export default function FechamentoLote({
                     cliente_id: r.id,
                     data_competencia: r.data_competencia || null,
                     valor_bruto: totais.valorBruto,
-                    acrescimos: r.valorAcrescimos || 0,
-                    descontos: r.valorDescontos || 0,
+                    acrescimos: finalAcrescimos,
+                    descontos: finalDescontos,
                     valor_irrf: totais.irrf,
                     numero_nf: r.numeroNF || null,
                     cnpj_filial: r.cnpjFilial || null,
@@ -558,6 +589,15 @@ export default function FechamentoLote({
                 if (consolidadosErr) throw new Error("Erro ao salvar consolidados: " + consolidadosErr.message);
 
                 if (inserted) {
+                    const ajustesIdsParaAtualizar = ajustes?.map(a => a.id) || [];
+                    if (ajustesIdsParaAtualizar.length > 0) {
+                        const { error: updErr } = await supabase
+                            .from("ajustes_faturamento")
+                            .update({ status_aplicacao: true })
+                            .in("id", ajustesIdsParaAtualizar);
+                        if (updErr) console.error("Erro ao marcar ajustes como aplicados:", updErr);
+                    }
+
                     const idMap: Record<string, string> = {};
                     const validadosParaMap = agendamentos.filter(a => !a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO") && a.clienteId);
                     inserted.forEach(row => {
