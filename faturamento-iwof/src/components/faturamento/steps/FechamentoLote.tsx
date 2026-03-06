@@ -3,7 +3,7 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { ArrowLeft, CheckCircle2, ShieldCheck, FileText, UploadCloud, CloudLightning, Mail, AlertTriangle, Info, FileStack, X, FileArchive, Search, Send, FileCode2, Lock, Save } from "lucide-react";
 import { Agendamento, FinancialSummary } from "../types";
-import { fmtCurrency, normalizarNome } from "../utils";
+import { fmtCurrency, normalizarNome, calcularTotaisFaturamento } from "../utils";
 import JSZip from "jszip";
 import { createClient } from "@/lib/supabase/client";
 import * as pdfjsLib from "pdfjs-dist";
@@ -224,8 +224,8 @@ export default function FechamentoLote({
         razaoSocial: string;
         nomeContaAzul: string;
         cnpj: string | undefined;
-        totalFaturar: number;
-        valorBase: number;
+        valorBaseFaturavel: number;  // Passo 2: bruto + acrescimos - descontos
+        valorBruto: number;          // Passo 1: soma pura de horas
         valorAcrescimos: number;
         valorDescontos: number;
         data_competencia?: string;
@@ -236,6 +236,7 @@ export default function FechamentoLote({
         isXmlMatched?: boolean;
         xmlValorServicos?: number;
         pdfNfMatch?: any;
+        boletoUnificado: boolean;
     }
 
 
@@ -266,11 +267,12 @@ export default function FechamentoLote({
                     ciclo: (a as any).ciclo || "-", // Captura o ciclo para a hierarquia do Drive
                     numero_nf: null,
                     descontoIR: 0,
-                    valorBase: 0,
-                    totalFaturar: 0,
+                    valorBruto: 0,
+                    valorBaseFaturavel: 0,
                     valorAcrescimos: 0,
                     valorDescontos: 0,
-                    isXmlMatched: false
+                    isXmlMatched: false,
+                    boletoUnificado: a.boleto_unificado ?? false
                 });
             }
 
@@ -294,8 +296,10 @@ export default function FechamentoLote({
             const baseVal = a.originalValorIwof ?? a.valorIwof;
             const finalVal = a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof);
 
-            lojaEntry.valorBase += baseVal;
-            lojaEntry.totalFaturar += finalVal;
+            // Passo 1: acumula bruto puro de horas
+            lojaEntry.valorBruto += baseVal;
+            // Passo 2: acumula base faturável (bruto +/- ajustes)
+            lojaEntry.valorBaseFaturavel += finalVal;
 
             if (finalVal > baseVal) {
                 lojaEntry.valorAcrescimos += (finalVal - baseVal);
@@ -491,21 +495,58 @@ export default function FechamentoLote({
             }
 
             // 3. INSERIR CONSOLIDADOS FISCAIS
-            const consolidadosPayload = matchFiles.reports.map(r => ({
-                lote_id: currentLoteId,
-                cliente_id: r.id,
-                data_competencia: r.data_competencia || null,
-                valor_bruto: r.totalFaturar || 0,
-                acrescimos: r.valorAcrescimos || 0,
-                descontos: r.valorDescontos || 0,
-                valor_irrf: r.descontoIR || 0,
-                numero_nf: r.numeroNF || null,
-                valor_nf_emitida: r.statusNF === 'EMITIDA' ? r.totalFaturar : 0,
-                valor_nc_final: r.statusNF === 'PENDENTE' ? r.totalFaturar : 0,
-                valor_boleto_final: r.totalFaturar - (r.descontoIR || 0),
-                cnpj_filial: r.cnpjFilial || null,
-                valor_ir_xml: r.descontoIR || 0
-            }));
+            // Pipeline matemático estrito: Passo 1→2→3→4→5
+            const consolidadosPayload = matchFiles.reports.flatMap(r => {
+                const totais = calcularTotaisFaturamento(
+                    r.valorBruto,
+                    r.valorAcrescimos,
+                    r.valorDescontos,
+                    r.descontoIR || 0,
+                    r.statusNF === 'EMITIDA'
+                );
+
+                const basePayload = {
+                    lote_id: currentLoteId,
+                    cliente_id: r.id,
+                    data_competencia: r.data_competencia || null,
+                    valor_bruto: totais.valorBruto,
+                    acrescimos: r.valorAcrescimos || 0,
+                    descontos: r.valorDescontos || 0,
+                    valor_irrf: totais.irrf,
+                    numero_nf: r.numeroNF || null,
+                    cnpj_filial: r.cnpjFilial || null,
+                    valor_ir_xml: r.descontoIR || 0
+                };
+
+                if (r.boletoUnificado && totais.valorNF > 0 && totais.valorNC > 0) {
+                    return [
+                        {
+                            ...basePayload,
+                            tipo_documento: 'NF',
+                            valor_nf_emitida: totais.valorNF,
+                            valor_nc_final: 0,
+                            valor_boleto_final: totais.valorNF - totais.irrf,
+                            observacao_report: "Referência: NF"
+                        },
+                        {
+                            ...basePayload,
+                            tipo_documento: 'NC',
+                            valor_nf_emitida: 0,
+                            valor_nc_final: totais.valorNC,
+                            valor_boleto_final: totais.valorNC,
+                            observacao_report: "Referência: NC"
+                        }
+                    ];
+                }
+
+                return [{
+                    ...basePayload,
+                    tipo_documento: 'UNIFICADO',
+                    valor_nf_emitida: totais.valorNF,
+                    valor_nc_final: totais.valorNC,
+                    valor_boleto_final: totais.valorLiquido
+                }];
+            });
 
             if (consolidadosPayload.length > 0) {
                 await supabase.from('faturamento_consolidados').delete().eq('lote_id', currentLoteId);
@@ -836,6 +877,25 @@ export default function FechamentoLote({
 
     const totals = financialSummary.summaryArr.find(v => v.ciclo === "LÍQUIDO P/ LOTE");
 
+    // Painel de cascata: agrega o pipeline matemático de todos os reports do lote
+    const cascataTotais = matchFiles.reports.reduce(
+        (acc, r) => {
+            const t = calcularTotaisFaturamento(
+                r.valorBruto, r.valorAcrescimos, r.valorDescontos,
+                r.descontoIR || 0, r.statusNF === 'EMITIDA'
+            );
+            acc.bruto += t.valorBruto;
+            acc.ajustes += (r.valorAcrescimos - r.valorDescontos);
+            acc.base += t.valorBaseFaturavel;
+            acc.nf += t.valorNF;
+            acc.nc += t.valorNC;
+            acc.irrf += t.irrf;
+            acc.liquido += t.valorLiquido;
+            return acc;
+        },
+        { bruto: 0, ajustes: 0, base: 0, nf: 0, nc: 0, irrf: 0, liquido: 0 }
+    );
+
     const pendingNfReports = matchFiles.reports.filter(r => r.statusNF === 'PENDENTE');
     const pendingNfCount = pendingNfReports.length;
 
@@ -971,6 +1031,51 @@ export default function FechamentoLote({
                     Auditoria final. Atrele os boletos aos XML/PDFs das notas emitidas, faça a injeção conjunta do lote no Banco de Dados (Supabase) + Arquivos no Drive (GCP) e lance as cobranças.
                 </p>
             </div>
+
+            {/* Cascata Financeira do Lote */}
+            {matchFiles.reports.length > 0 && (
+                <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl p-5 mb-2">
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-[var(--fg-dim)] mb-4">Resumo Financeiro do Lote</h3>
+                    <div className="flex flex-col gap-1.5 font-mono text-sm">
+                        <div className="flex justify-between">
+                            <span className="text-[var(--fg-dim)]">&#x1F4B0; Valor Bruto (horas)</span>
+                            <span className="font-semibold">{fmtCurrency(cascataTotais.bruto)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span className="text-[var(--fg-dim)]">&#xA0;&#xA0;(+/&#x2212;) Ajustes</span>
+                            <span className={cascataTotais.ajustes >= 0 ? "text-[var(--success)] font-semibold" : "text-[var(--danger)] font-semibold"}>
+                                {cascataTotais.ajustes >= 0 ? "+" : ""}{fmtCurrency(cascataTotais.ajustes)}
+                            </span>
+                        </div>
+                        <div className="flex justify-between border-t border-[var(--border)] pt-1.5 mt-0.5">
+                            <span className="font-bold text-[var(--fg)]">&#xA0;&#xA0;(=) Base Fatur&#xE1;vel</span>
+                            <span className="font-bold">{fmtCurrency(cascataTotais.base)}</span>
+                        </div>
+                        {cascataTotais.nf > 0 && (
+                            <div className="flex justify-between pl-4">
+                                <span className="text-[var(--fg-dim)]">&#xA0;&#xA0;&#x21B3; NF emitidas</span>
+                                <span className="text-[var(--success)]">{fmtCurrency(cascataTotais.nf)}</span>
+                            </div>
+                        )}
+                        {cascataTotais.nc > 0 && (
+                            <div className="flex justify-between pl-4">
+                                <span className="text-[var(--fg-dim)]">&#xA0;&#xA0;&#x21B3; NC a emitir</span>
+                                <span className="text-amber-400">{fmtCurrency(cascataTotais.nc)}</span>
+                            </div>
+                        )}
+                        {cascataTotais.irrf > 0 && (
+                            <div className="flex justify-between">
+                                <span className="text-[var(--fg-dim)]">&#xA0;&#xA0;(&#x2212;) IRRF retido</span>
+                                <span className="text-[var(--danger)]">{fmtCurrency(cascataTotais.irrf)}</span>
+                            </div>
+                        )}
+                        <div className="flex justify-between border-t border-[var(--border)] pt-1.5 mt-0.5">
+                            <span className="font-black text-[var(--fg)]">&#xA0;&#xA0;(=) L&#xED;quido a Pagar</span>
+                            <span className="font-black text-[var(--accent)] text-base">{fmtCurrency(cascataTotais.liquido)}</span>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <div className="grid lg:grid-cols-3 gap-6 relative items-start">
                 {/* AÇÕES SEQUENCIAIS */}
@@ -1207,11 +1312,11 @@ export default function FechamentoLote({
                                         </td>
                                         {/* Base */}
                                         <td className="py-3 px-3 text-right font-mono text-[11px] text-[var(--fg-dim)]">
-                                            {fmtCurrency(r.valorBase)}
+                                            {fmtCurrency(r.valorBruto)}
                                         </td>
                                         {/* Pós Ajustes */}
                                         <td className="py-3 px-3 text-right font-mono text-[12px] font-bold text-[var(--fg)]">
-                                            {fmtCurrency(r.totalFaturar)}
+                                            {fmtCurrency(r.valorBaseFaturavel)}
                                         </td>
                                         {/* Descontos */}
                                         <td className="py-3 px-3 text-right font-mono text-[11px] text-red-400">
@@ -1229,7 +1334,7 @@ export default function FechamentoLote({
                                         <td className="py-3 px-3 text-right font-mono text-[11px]">
                                             {r.statusNF === 'PENDENTE' ? (
                                                 <span className="text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
-                                                    {fmtCurrency(r.totalFaturar)}
+                                                    {fmtCurrency(r.valorBaseFaturavel)}
                                                 </span>
                                             ) : <span className="text-[var(--fg-dim)]/30">—</span>}
                                         </td>
@@ -1238,7 +1343,7 @@ export default function FechamentoLote({
                                             {r.statusNF === 'EMITIDA' ? (
                                                 <div className="flex flex-col items-end gap-0.5">
                                                     <span className="text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20">
-                                                        {fmtCurrency(r.xmlValorServicos && r.xmlValorServicos > 0 ? r.xmlValorServicos : r.totalFaturar)}
+                                                        {fmtCurrency(r.xmlValorServicos && r.xmlValorServicos > 0 ? r.xmlValorServicos : r.valorBaseFaturavel)}
                                                     </span>
                                                     {r.isXmlMatched && (
                                                         <span className="text-[9px] text-blue-300/60 font-bold">via XML</span>
@@ -1261,9 +1366,27 @@ export default function FechamentoLote({
                                         </td>
                                         {/* Boleto Final = pós ajustes − IRRF */}
                                         <td className="py-3 px-3 text-right">
-                                            <span className="font-mono text-[12px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-md border border-emerald-500/20">
-                                                {fmtCurrency(r.totalFaturar - (r.descontoIR || 0))}
-                                            </span>
+                                            {(() => {
+                                                const totais = calcularTotaisFaturamento(r.valorBruto, r.valorAcrescimos, r.valorDescontos, r.descontoIR || 0, r.statusNF === 'EMITIDA');
+                                                if (r.boletoUnificado && totais.valorNF > 0 && totais.valorNC > 0) {
+                                                    return (
+                                                        <div className="flex flex-col items-end gap-1">
+                                                            <span className="font-mono text-[11px] font-bold text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20 whitespace-nowrap">
+                                                                {fmtCurrency(totais.valorNF - totais.irrf)} <span className="text-[9px] opacity-70">(NF)</span>
+                                                            </span>
+                                                            <span className="font-mono text-[11px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 whitespace-nowrap">
+                                                                {fmtCurrency(totais.valorNC)} <span className="text-[9px] opacity-70">(NC)</span>
+                                                            </span>
+                                                            <span className="text-[9px] bg-[var(--accent)]/10 text-[var(--accent)] px-1 py-0.5 rounded-sm font-bold border border-[var(--accent)]/20 mt-0.5" title="Cobrança Desmembrada">Desmembrada</span>
+                                                        </div>
+                                                    );
+                                                }
+                                                return (
+                                                    <span className="font-mono text-[12px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-md border border-emerald-500/20">
+                                                        {fmtCurrency(totais.valorLiquido)}
+                                                    </span>
+                                                );
+                                            })()}
                                         </td>
                                     </tr>
                                 ))}
@@ -1337,7 +1460,7 @@ export default function FechamentoLote({
                                             >
                                                 <option value="">Vincular a uma loja...</option>
                                                 {matchFiles.reports.map(r => (
-                                                    <option key={r.id + r.nome} value={r.consolidadoId}>{r.nome} ({fmtCurrency(r.totalFaturar)})</option>
+                                                    <option key={r.id + r.nome} value={r.consolidadoId}>{r.nome} ({fmtCurrency(r.valorBaseFaturavel)})</option>
                                                 ))}
                                             </select>
                                         </div>

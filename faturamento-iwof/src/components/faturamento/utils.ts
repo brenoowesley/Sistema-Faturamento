@@ -81,3 +81,29 @@ export const normalizarNome = (nome?: string): string => {
         .replace(/\s+/g, " ")
         .trim();
 };
+
+// ─── Pipeline Matemático de Faturamento ────────────────────────────────────
+// Ordem estrita de operações para todos os cálculos de NF/NC/boleto.
+
+export interface TotaisFaturamento {
+    valorBruto: number;         // Passo 1: soma pura de horas (sem ajustes)
+    valorBaseFaturavel: number; // Passo 2: bruto + acrescimos - descontos
+    valorNF: number;            // Passo 3a: parcela emitida em NF
+    valorNC: number;            // Passo 3b: parcela em Nota de Crédito
+    irrf: number;               // Passo 4: retenção (não altera notas, afeta boleto)
+    valorLiquido: number;       // Passo 5: baseFaturavel - irrf (valor do boleto)
+}
+
+export function calcularTotaisFaturamento(
+    valorBruto: number,
+    acrescimos: number,
+    descontos: number,
+    irrf: number,
+    isNFEmitida: boolean
+): TotaisFaturamento {
+    const valorBaseFaturavel = valorBruto + acrescimos - descontos;
+    const valorNF = isNFEmitida ? valorBaseFaturavel : 0;
+    const valorNC = !isNFEmitida ? valorBaseFaturavel : 0;
+    const valorLiquido = valorBaseFaturavel - irrf;
+    return { valorBruto, valorBaseFaturavel, valorNF, valorNC, irrf, valorLiquido };
+}

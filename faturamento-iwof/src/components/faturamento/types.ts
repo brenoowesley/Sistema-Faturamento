@@ -19,6 +19,7 @@ export interface ClienteDB {
     ciclo_faturamento_id: string | null;
     ciclos_faturamento?: { nome: string } | null;
     status: boolean;
+    boleto_unificado?: boolean;
 }
 
 export type ValidationStatus = "OK" | "CANCELAR" | "CORREÇÃO" | "FORA_PERIODO" | "DUPLICATA" | "EXCLUIDO" | "CICLO_INCORRETO" | "AUDITORIA_FINANCEIRA";
@@ -54,6 +55,7 @@ export interface Agendamento {
     numero_nf?: string | null;
     data_competencia?: string;
     dataCompetencia?: string;     // assigned period (YYYY-MM-DD or YYYY-MM)
+    boleto_unificado?: boolean;
     rawRow: Record<string, string>;
 
     // Interactive fields

@@ -178,7 +178,7 @@ export default function WizardFaturamento() {
         while (hasMore) {
             const { data: chunk, error } = await supabase
                 .from("clientes")
-                .select("id, razao_social, nome_fantasia, nome, nome_conta_azul, cnpj, cep, endereco, numero, bairro, cidade, estado, ciclo_faturamento_id, ciclos_faturamento(nome), status")
+                .select("id, razao_social, nome_fantasia, nome, nome_conta_azul, cnpj, cep, endereco, numero, bairro, cidade, estado, ciclo_faturamento_id, ciclos_faturamento(nome), status, boleto_unificado")
                 .eq("status", true)
                 .range(from, from + stepAmount - 1);
 
@@ -373,6 +373,7 @@ export default function WizardFaturamento() {
                 nome_conta_azul: matched?.nome_conta_azul ?? null,
                 ciclo: matched?.ciclos_faturamento?.nome ?? null,
                 numero_nf: (row as any).numero_nf || (row as any).numeroNF, // Preserva numero_nf se vier de faturamento_consolidados
+                boleto_unificado: matched?.boleto_unificado ?? false,
                 rawRow: row,
                 suggestedFracaoHora,
                 suggestedValorIwof,
