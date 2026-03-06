@@ -102,7 +102,7 @@ function validateItem(
     if (tipo === "CPF" && /[a-zA-Z]/.test(chave)) {
         return { status: "REVISAO", motivo_bloqueio: "Tipo PIX é CPF mas a chave contém letras." };
     }
-    if (tipo === "TELEFONE" && !/^\+?\d[\d\s\-\(\)]+$/.test(chave)) {
+    if (tipo === "TELEFONE" && !/^[\+\(]?[\d][\d\s\-\(\)]+$/.test(chave)) {
         return { status: "REVISAO", motivo_bloqueio: "Tipo PIX é TELEFONE mas o formato é inválido." };
     }
     if (tipo === "CNPJ" && !/^\d/.test(chave.replace(/[\.\-\/]/g, ""))) {
