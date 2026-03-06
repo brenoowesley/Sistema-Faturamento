@@ -18,6 +18,7 @@ import {
     ArrowDownCircle,
     ChevronDown,
     ChevronUp,
+    Filter,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -32,6 +33,7 @@ interface SaqueItem {
     data_solicitacao: string;
     cpf_conta: string;
     cpf_favorecido: string;
+    nome_usuario: string;
     valor_solicitado: number;
     valor_real: number;
     chave_pix: string;
@@ -89,45 +91,37 @@ function normalizePixType(raw: string): string {
 }
 
 /**
- * Actively corrects tipo_pix based on the format of chave_pix.
- * Overrides conflicting types; resolves CPF/TELEFONE ambiguity via cpf_favorecido.
+ * Detects the correct PIX type from the key format.
+ * For 11-digit ambiguity (CPF vs TELEFONE), trusts original type if valid;
+ * otherwise compares digits against cpf_favorecido.
  */
 function correctPixType(chave: string, tipoOriginal: string, cpfFavorecido: string): string {
     const c = chave.trim();
     if (!c) return tipoOriginal || "";
 
-    // ── Definitive overrides ─────────────────────────────────────────────────
-    // EMAIL: key contains @ and a dot
-    if (c.includes("@") && c.includes(".")) return "EMAIL";
+    // EMAIL: contains @ and a dot after @
+    if (c.includes("@") && /\.\w+/.test(c.split("@")[1] ?? "")) return "EMAIL";
 
-    // UUID / CHAVE_ALEATORIA: standard UUID pattern OR long mixed-char string
+    // UUID / CHAVE_ALEATORIA
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(c))
         return "CHAVE_ALEATORIA";
-    // Also catch non-hyphenated UUIDs or long alphanumeric random keys
+    // Long mixed alphanumeric (not a phone / CPF)
     if (/[a-zA-Z]/.test(c) && c.replace(/\-/g, "").length >= 25)
         return "CHAVE_ALEATORIA";
 
-    // Numeric-only analysis (strip common formatting chars)
+    // Numeric-only analysis
     const digits = c.replace(/[\s\(\)\-\.]/g, "");
     if (/^\d+$/.test(digits)) {
-        // 14 digits → always CNPJ
         if (digits.length === 14) return "CNPJ";
-
-        // 10 digits → always TELEFONE (DDD + 8 digits)
         if (digits.length === 10) return "TELEFONE";
-
-        // 11 digits → ambiguous: CPF or TELEFONE (DDD + 9 digits)
         if (digits.length === 11) {
             const top = tipoOriginal.toUpperCase();
-            // Trust the original type if it's already one of the two valid options
             if (top === "CPF" || top === "TELEFONE") return top;
-            // Otherwise infer: compare clean digits against cpf_favorecido
             const cleanCpf = sanitizeCpf(cpfFavorecido);
             return cleanCpf === digits ? "CPF" : "TELEFONE";
         }
     }
 
-    // Fallback: keep original if valid, else CHAVE_ALEATORIA
     return tipoOriginal || "CHAVE_ALEATORIA";
 }
 
@@ -145,7 +139,7 @@ function validateItem(cpf_conta: string, cpf_favorecido: string, chave_pix: stri
         return { status: "REVISAO", motivo_bloqueio: "Tipo PIX é CPF mas a chave contém letras." };
     if (tipo === "TELEFONE" && !/^[\+\(]?[\d][\d\s\-\(\)]+$/.test(chave))
         return { status: "REVISAO", motivo_bloqueio: "Tipo PIX é TELEFONE mas o formato é inválido." };
-    if (tipo === "CNPJ" && !/^\d/.test(chave.replace(/[\.\-\/]/g, "")))
+    if (tipo === "CNPJ" && !/^\d/.test(chave.replace(/[\.\/\-]/g, "")))
         return { status: "REVISAO", motivo_bloqueio: "Tipo PIX é CNPJ mas a chave não parece um CNPJ." };
     return { status: "APROVADO" };
 }
@@ -156,9 +150,9 @@ function parseRows(rawRows: Record<string, unknown>[]): SaqueItem[] {
         .map((r) => {
             const cpf_conta = sanitizeStr(String(r["CPF Solicitante"] ?? ""));
             const cpf_favorecido = sanitizeStr(String(r["CPF Favorecido"] ?? ""));
+            const nome_usuario = sanitizeStr(String(r["Nome"] ?? r["Nome do Usuário"] ?? r["Nome do Usuario"] ?? r["Usuario"] ?? r["Usuário"] ?? ""));
             const chave_pix = sanitizeStr(String(r["Chave PIX"] ?? ""));
             const tipo_pix_raw = normalizePixType(String(r["Tipo de Chave PIX"] ?? ""));
-            // Actively correct/override tipo_pix based on chave_pix format
             const tipo_pix = correctPixType(chave_pix, tipo_pix_raw, cpf_favorecido);
             const valor_solicitado = parseFloat(String(r["Valor Solicitado"] ?? "0").replace(",", ".")) || 0;
             const valor_real = parseFloat(String(r["Valor Real"] ?? "0").replace(",", ".")) || 0;
@@ -172,6 +166,7 @@ function parseRows(rawRows: Record<string, unknown>[]): SaqueItem[] {
                 data_solicitacao,
                 cpf_conta,
                 cpf_favorecido,
+                nome_usuario,
                 valor_solicitado,
                 valor_real,
                 chave_pix,
@@ -211,16 +206,13 @@ function groupByTipo(items: SaqueItem[]): LoteLocal[] {
 function buildTransfeeraXlsx(items: SaqueItem[], filename: string) {
     const approved = items.filter((i) => i.status === "APROVADO");
     const aoa: (string | number)[][] = [
-        // Row 1 — warning text in A1 only, 7 empty cells after
         ["Mantenha sempre o cabeçalho original da planilha e esta linha, mantendo os titulos e a ordem dos campos", "", "", "", "", "", "", ""],
-        // Row 2 — real column headers
         ["Tipo de chave", "Chave PIX", "CPF ou CNPJ (opcional)", "Valor", "Email (opcional)", "ID integração (opcional)", "Descrição Pix (opcional)", "Data de agendamento (opcional)"],
-        // Row 3+ — data
         ...approved.map((i) => [
             normalizePixType(i.tipo_pix),
             sanitizeStr(i.chave_pix),
             sanitizeStr(i.cpf_favorecido),
-            i.valor_real,          // Number, not string
+            i.valor_real,
             "",
             "",
             "REPASSE IWOF",
@@ -242,9 +234,9 @@ function buildTransfeeraXlsx(items: SaqueItem[], filename: string) {
 
 function buildExcluidosCsv(items: SaqueItem[]): string {
     const excluded = items.filter((i) => i.status === "BLOQUEADO" || i.status === "REVISAO");
-    const header = `CPF Solicitante,CPF Favorecido,Chave PIX,Tipo PIX,Valor Solicitado,Valor Real,Status,Motivo do Bloqueio`;
+    const header = `CPF Solicitante,CPF Favorecido,Nome,Chave PIX,Tipo PIX,Valor Solicitado,Valor Real,Status,Motivo do Bloqueio`;
     const rows = excluded.map((i) =>
-        `${i.cpf_conta},${i.cpf_favorecido},${i.chave_pix},${i.tipo_pix},${i.valor_solicitado},${i.valor_real},${i.status},"${i.motivo_bloqueio ?? ""}"`
+        `${i.cpf_conta},${i.cpf_favorecido},"${i.nome_usuario}",${i.chave_pix},${i.tipo_pix},${i.valor_solicitado},${i.valor_real},${i.status},"${i.motivo_bloqueio ?? ""}"`
     );
     return [header, ...rows].join("\n");
 }
@@ -260,6 +252,20 @@ function triggerDownload(content: string, filename: string) {
 }
 
 const PIX_TYPE_OPTIONS: PixType[] = ["EMAIL", "CPF", "CNPJ", "CHAVE_ALEATORIA", "TELEFONE"];
+
+// ─── Filter input style ────────────────────────────────────────────────────────
+
+const filterInputStyle: React.CSSProperties = {
+    width: "100%",
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid var(--border-light)",
+    borderRadius: "var(--radius-sm)",
+    padding: "4px 8px",
+    fontSize: 11,
+    color: "var(--fg-muted)",
+    marginTop: 4,
+    outline: "none",
+};
 
 // ─── Financial Card ────────────────────────────────────────────────────────────
 
@@ -317,6 +323,274 @@ function ForcarAprovacaoModal({ item, onConfirm, onClose }: { item: SaqueItem; o
     );
 }
 
+// ─── Tables ────────────────────────────────────────────────────────────────────
+
+function matches(value: string, filter: string): boolean {
+    if (!filter) return true;
+    return value.toLowerCase().includes(filter.toLowerCase());
+}
+
+function AprovadosTable({ items, onUpdateTipoPix }: {
+    items: SaqueItem[];
+    onUpdateTipoPix: (id: string, tipo: string) => void;
+}) {
+    const [f, setF] = useState({ data: "", nome: "", cpf: "", tipoPix: "", chavePix: "", vlrSol: "", vlrReal: "" });
+
+    const filtered = items.filter((i) =>
+        matches(fmtDate(parseDate(i.data_solicitacao)), f.data) &&
+        matches(i.nome_usuario, f.nome) &&
+        matches(i.cpf_favorecido, f.cpf) &&
+        matches(i.tipo_pix, f.tipoPix) &&
+        matches(i.chave_pix, f.chavePix) &&
+        matches(i.valor_solicitado.toFixed(2), f.vlrSol) &&
+        matches(i.valor_real.toFixed(2), f.vlrReal)
+    );
+
+    if (!items.length) return <p className="table-empty">Nenhum item aprovado ainda.</p>;
+
+    const hasFilters = Object.values(f).some(Boolean);
+
+    return (
+        <table className="data-table">
+            <thead>
+                <tr>
+                    <th>
+                        Data
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.data} onChange={(e) => setF((p) => ({ ...p, data: e.target.value }))} />
+                    </th>
+                    <th>
+                        Nome
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.nome} onChange={(e) => setF((p) => ({ ...p, nome: e.target.value }))} />
+                    </th>
+                    <th>
+                        CPF Favorecido
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.cpf} onChange={(e) => setF((p) => ({ ...p, cpf: e.target.value }))} />
+                    </th>
+                    <th>
+                        Tipo PIX
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.tipoPix} onChange={(e) => setF((p) => ({ ...p, tipoPix: e.target.value }))} />
+                    </th>
+                    <th>
+                        Chave PIX
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.chavePix} onChange={(e) => setF((p) => ({ ...p, chavePix: e.target.value }))} />
+                    </th>
+                    <th>
+                        Vlr. Solicitado
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.vlrSol} onChange={(e) => setF((p) => ({ ...p, vlrSol: e.target.value }))} />
+                    </th>
+                    <th>
+                        Vlr. Real
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.vlrReal} onChange={(e) => setF((p) => ({ ...p, vlrReal: e.target.value }))} />
+                    </th>
+                    <th>Receita</th>
+                </tr>
+            </thead>
+            <tbody>
+                {filtered.map((i) => (
+                    <tr key={i.id}>
+                        <td className="table-mono">{fmtDate(parseDate(i.data_solicitacao))}</td>
+                        <td style={{ fontSize: 12, color: "var(--fg-dim)" }}>{i.nome_usuario || "—"}</td>
+                        <td className="table-mono">{i.cpf_favorecido}</td>
+                        <td>
+                            <select
+                                value={i.tipo_pix}
+                                onChange={(e) => onUpdateTipoPix(i.id, e.target.value)}
+                                style={{
+                                    background: "rgba(33,118,255,0.08)",
+                                    color: "var(--accent)",
+                                    border: "1px solid rgba(33,118,255,0.25)",
+                                    borderRadius: 20,
+                                    padding: "3px 10px",
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                    cursor: "pointer",
+                                }}
+                            >
+                                {PIX_TYPE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                        </td>
+                        <td className="table-mono" style={{ fontSize: 12 }}>{i.chave_pix}</td>
+                        <td style={{ color: "var(--fg-muted)" }}>R$ {i.valor_solicitado.toFixed(2)}</td>
+                        <td style={{ fontWeight: 600, color: "var(--accent)" }}>R$ {i.valor_real.toFixed(2)}</td>
+                        <td style={{ fontWeight: 600, color: "var(--success)" }}>R$ {(i.valor_solicitado - i.valor_real).toFixed(2)}</td>
+                    </tr>
+                ))}
+                {filtered.length === 0 && hasFilters && (
+                    <tr><td colSpan={8} style={{ textAlign: "center", padding: 20, color: "var(--fg-dim)", fontSize: 13 }}>
+                        <Filter size={14} style={{ marginRight: 6, opacity: 0.5 }} />
+                        Nenhum resultado para os filtros aplicados.
+                    </td></tr>
+                )}
+            </tbody>
+        </table>
+    );
+}
+
+function RevisaoTable({ items, onUpdateChave, onUpdateTipo, onSave }: {
+    items: SaqueItem[];
+    onUpdateChave: (id: string, novaChave: string, cpfFavorecido: string, tipoAtual: string) => void;
+    onUpdateTipo: (id: string, novoTipo: string) => void;
+    onSave: (id: string) => void;
+}) {
+    const [f, setF] = useState({ cpf: "", nome: "", tipoPix: "", chavePix: "", vlrReal: "" });
+
+    const filtered = items.filter((i) =>
+        matches(i.cpf_favorecido, f.cpf) &&
+        matches(i.nome_usuario, f.nome) &&
+        matches(i.tipo_pix_edit ?? i.tipo_pix, f.tipoPix) &&
+        matches(i.chave_pix_edit ?? i.chave_pix, f.chavePix) &&
+        matches(i.valor_real.toFixed(2), f.vlrReal)
+    );
+
+    if (!items.length) return <p className="table-empty">Nenhum item para revisar. 🎉</p>;
+
+    const hasFilters = Object.values(f).some(Boolean);
+
+    return (
+        <table className="data-table">
+            <thead>
+                <tr>
+                    <th>
+                        CPF Favorecido
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.cpf} onChange={(e) => setF((p) => ({ ...p, cpf: e.target.value }))} />
+                    </th>
+                    <th>
+                        Nome
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.nome} onChange={(e) => setF((p) => ({ ...p, nome: e.target.value }))} />
+                    </th>
+                    <th>
+                        Tipo PIX
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.tipoPix} onChange={(e) => setF((p) => ({ ...p, tipoPix: e.target.value }))} />
+                    </th>
+                    <th>
+                        Chave PIX
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.chavePix} onChange={(e) => setF((p) => ({ ...p, chavePix: e.target.value }))} />
+                    </th>
+                    <th>
+                        Vlr. Real
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.vlrReal} onChange={(e) => setF((p) => ({ ...p, vlrReal: e.target.value }))} />
+                    </th>
+                    <th>Pendência</th>
+                    <th>Ação</th>
+                </tr>
+            </thead>
+            <tbody>
+                {filtered.map((i) => (
+                    <tr key={i.id}>
+                        <td className="table-mono">{i.cpf_favorecido}</td>
+                        <td style={{ fontSize: 12, color: "var(--fg-dim)" }}>{i.nome_usuario || "—"}</td>
+                        <td>
+                            <select
+                                value={i.tipo_pix_edit ?? i.tipo_pix}
+                                onChange={(e) => onUpdateTipo(i.id, e.target.value)}
+                                style={{ background: "var(--bg)", color: "var(--fg)", border: "1px solid var(--border-light)", borderRadius: "var(--radius-sm)", padding: "6px 10px", fontSize: 13 }}
+                            >
+                                {PIX_TYPE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                        </td>
+                        <td>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <input
+                                    value={i.chave_pix_edit ?? i.chave_pix}
+                                    onChange={(e) => onUpdateChave(i.id, e.target.value, i.cpf_favorecido, i.tipo_pix_edit ?? i.tipo_pix)}
+                                    style={{ background: "var(--bg)", color: "var(--fg)", border: "1px solid var(--border-light)", borderRadius: "var(--radius-sm)", padding: "6px 10px", fontSize: 13, width: 220 }}
+                                />
+                            </div>
+                        </td>
+                        <td style={{ fontWeight: 600, color: "var(--warning)" }}>R$ {i.valor_real.toFixed(2)}</td>
+                        <td><span style={{ fontSize: 12, color: "var(--warning)" }}>{i.motivo_bloqueio}</span></td>
+                        <td>
+                            <button className="btn btn-ghost" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => onSave(i.id)}>
+                                <Save size={13} /> Salvar
+                            </button>
+                        </td>
+                    </tr>
+                ))}
+                {filtered.length === 0 && hasFilters && (
+                    <tr><td colSpan={7} style={{ textAlign: "center", padding: 20, color: "var(--fg-dim)", fontSize: 13 }}>
+                        <Filter size={14} style={{ marginRight: 6, opacity: 0.5 }} />
+                        Nenhum resultado para os filtros aplicados.
+                    </td></tr>
+                )}
+            </tbody>
+        </table>
+    );
+}
+
+function BloqueadosTable({ items, onForceApprove }: { items: SaqueItem[]; onForceApprove: (i: SaqueItem) => void }) {
+    const [f, setF] = useState({ cpfConta: "", cpf: "", nome: "", chavePix: "", vlrReal: "" });
+
+    const filtered = items.filter((i) =>
+        matches(i.cpf_conta, f.cpfConta) &&
+        matches(i.cpf_favorecido, f.cpf) &&
+        matches(i.nome_usuario, f.nome) &&
+        matches(i.chave_pix, f.chavePix) &&
+        matches(i.valor_real.toFixed(2), f.vlrReal)
+    );
+
+    if (!items.length) return <p className="table-empty">Nenhum item bloqueado. ✓</p>;
+
+    const hasFilters = Object.values(f).some(Boolean);
+
+    return (
+        <table className="data-table">
+            <thead>
+                <tr>
+                    <th>
+                        CPF Solicitante
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.cpfConta} onChange={(e) => setF((p) => ({ ...p, cpfConta: e.target.value }))} />
+                    </th>
+                    <th>
+                        CPF Favorecido
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.cpf} onChange={(e) => setF((p) => ({ ...p, cpf: e.target.value }))} />
+                    </th>
+                    <th>
+                        Nome
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.nome} onChange={(e) => setF((p) => ({ ...p, nome: e.target.value }))} />
+                    </th>
+                    <th>
+                        Chave PIX
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.chavePix} onChange={(e) => setF((p) => ({ ...p, chavePix: e.target.value }))} />
+                    </th>
+                    <th>
+                        Vlr. Real
+                        <input style={filterInputStyle} placeholder="filtrar…" value={f.vlrReal} onChange={(e) => setF((p) => ({ ...p, vlrReal: e.target.value }))} />
+                    </th>
+                    <th>Motivo</th>
+                    <th>Ação</th>
+                </tr>
+            </thead>
+            <tbody>
+                {filtered.map((i) => (
+                    <tr key={i.id}>
+                        <td className="table-mono">{i.cpf_conta}</td>
+                        <td className="table-mono">{i.cpf_favorecido}</td>
+                        <td style={{ fontSize: 12, color: "var(--fg-dim)" }}>{i.nome_usuario || "—"}</td>
+                        <td className="table-mono" style={{ fontSize: 12 }}>{i.chave_pix || "—"}</td>
+                        <td style={{ fontWeight: 600, color: "var(--danger)" }}>R$ {i.valor_real.toFixed(2)}</td>
+                        <td><span style={{ fontSize: 12, color: "var(--danger)" }}>{i.motivo_bloqueio}</span></td>
+                        <td>
+                            <button
+                                className="btn"
+                                style={{ padding: "6px 12px", fontSize: 12, background: "rgba(248,113,113,0.12)", color: "var(--danger)", border: "1px solid rgba(248,113,113,0.3)" }}
+                                onClick={() => onForceApprove(i)}
+                            >
+                                <AlertOctagon size={13} /> Forçar Aprovação
+                            </button>
+                        </td>
+                    </tr>
+                ))}
+                {filtered.length === 0 && hasFilters && (
+                    <tr><td colSpan={7} style={{ textAlign: "center", padding: 20, color: "var(--fg-dim)", fontSize: 13 }}>
+                        <Filter size={14} style={{ marginRight: 6, opacity: 0.5 }} />
+                        Nenhum resultado para os filtros aplicados.
+                    </td></tr>
+                )}
+            </tbody>
+        </table>
+    );
+}
+
 // ─── Lote Panel ────────────────────────────────────────────────────────────────
 
 function LotePanel({
@@ -339,11 +613,24 @@ function LotePanel({
     const totalReal = approved.reduce((s, i) => s + i.valor_real, 0);
     const receita = totalSolicitado - totalReal;
 
-    function updateItem(id: string, field: "chave_pix_edit" | "tipo_pix_edit", value: string) {
-        update((l) => ({ ...l, items: l.items.map((i) => i.id === id ? { ...i, [field]: value } : i) }));
+    /** Update chave_pix_edit and auto-correct tipo_pix_edit based on the new key */
+    function handleUpdateChave(id: string, novaChave: string, cpfFavorecido: string, tipoAtual: string) {
+        const autoCorrectedTipo = correctPixType(novaChave, tipoAtual, cpfFavorecido);
+        update((l) => ({
+            ...l,
+            items: l.items.map((i) =>
+                i.id === id
+                    ? { ...i, chave_pix_edit: novaChave, tipo_pix_edit: autoCorrectedTipo }
+                    : i
+            ),
+        }));
     }
 
-    /** Directly overwrite tipo_pix on an APROVADO item without revalidating (no status change). */
+    function handleUpdateTipo(id: string, novoTipo: string) {
+        update((l) => ({ ...l, items: l.items.map((i) => i.id === id ? { ...i, tipo_pix_edit: novoTipo } : i) }));
+    }
+
+    /** Directly overwrite tipo_pix on an APROVADO item without revalidating */
     function updateAprovadoTipo(id: string, tipo: string) {
         update((l) => ({ ...l, items: l.items.map((i) => i.id === id ? { ...i, tipo_pix: tipo, tipo_pix_edit: tipo } : i) }));
     }
@@ -521,7 +808,14 @@ function LotePanel({
                         </div>
                         <div style={{ overflowX: "auto" }}>
                             {lote.activeTab === "APROVADO" && <AprovadosTable items={approved} onUpdateTipoPix={updateAprovadoTipo} />}
-                            {lote.activeTab === "REVISAO" && <RevisaoTable items={revisao} onUpdateField={updateItem} onSave={saveRevisaoItem} />}
+                            {lote.activeTab === "REVISAO" && (
+                                <RevisaoTable
+                                    items={revisao}
+                                    onUpdateChave={handleUpdateChave}
+                                    onUpdateTipo={handleUpdateTipo}
+                                    onSave={saveRevisaoItem}
+                                />
+                            )}
                             {lote.activeTab === "BLOQUEADO" && <BloqueadosTable items={bloqueados} onForceApprove={setForceApproveItem} />}
                         </div>
                     </div>
@@ -532,129 +826,6 @@ function LotePanel({
                 <ForcarAprovacaoModal item={forceApproveItem} onConfirm={confirmForceApprove} onClose={() => setForceApproveItem(null)} />
             )}
         </>
-    );
-}
-
-// ─── Tables ────────────────────────────────────────────────────────────────────
-
-function AprovadosTable({ items, onUpdateTipoPix }: {
-    items: SaqueItem[];
-    onUpdateTipoPix: (id: string, tipo: string) => void;
-}) {
-    if (!items.length) return <p className="table-empty">Nenhum item aprovado ainda.</p>;
-    return (
-        <table className="data-table">
-            <thead><tr>
-                <th>Data</th><th>CPF Favorecido</th><th>Tipo PIX</th><th>Chave PIX</th>
-                <th>Vlr. Solicitado</th><th>Vlr. Real</th><th>Receita</th>
-            </tr></thead>
-            <tbody>
-                {items.map((i) => (
-                    <tr key={i.id}>
-                        <td className="table-mono">{fmtDate(parseDate(i.data_solicitacao))}</td>
-                        <td className="table-mono">{i.cpf_favorecido}</td>
-                        <td>
-                            <select
-                                value={i.tipo_pix}
-                                onChange={(e) => onUpdateTipoPix(i.id, e.target.value)}
-                                style={{
-                                    background: "rgba(33,118,255,0.08)",
-                                    color: "var(--accent)",
-                                    border: "1px solid rgba(33,118,255,0.25)",
-                                    borderRadius: 20,
-                                    padding: "3px 10px",
-                                    fontSize: 12,
-                                    fontWeight: 600,
-                                    cursor: "pointer",
-                                }}
-                            >
-                                {PIX_TYPE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                            </select>
-                        </td>
-                        <td className="table-mono" style={{ fontSize: 12 }}>{i.chave_pix}</td>
-                        <td style={{ color: "var(--fg-muted)" }}>R$ {i.valor_solicitado.toFixed(2)}</td>
-                        <td style={{ fontWeight: 600, color: "var(--accent)" }}>R$ {i.valor_real.toFixed(2)}</td>
-                        <td style={{ fontWeight: 600, color: "var(--success)" }}>R$ {(i.valor_solicitado - i.valor_real).toFixed(2)}</td>
-                    </tr>
-                ))}
-            </tbody>
-        </table>
-    );
-}
-
-function RevisaoTable({ items, onUpdateField, onSave }: {
-    items: SaqueItem[];
-    onUpdateField: (id: string, field: "chave_pix_edit" | "tipo_pix_edit", value: string) => void;
-    onSave: (id: string) => void;
-}) {
-    if (!items.length) return <p className="table-empty">Nenhum item para revisar. 🎉</p>;
-    return (
-        <table className="data-table">
-            <thead><tr>
-                <th>CPF Favorecido</th><th>Tipo PIX</th><th>Chave PIX</th><th>Vlr. Real</th><th>Pendência</th><th>Ação</th>
-            </tr></thead>
-            <tbody>
-                {items.map((i) => (
-                    <tr key={i.id}>
-                        <td className="table-mono">{i.cpf_favorecido}</td>
-                        <td>
-                            <select
-                                value={i.tipo_pix_edit ?? i.tipo_pix}
-                                onChange={(e) => onUpdateField(i.id, "tipo_pix_edit", e.target.value)}
-                                style={{ background: "var(--bg)", color: "var(--fg)", border: "1px solid var(--border-light)", borderRadius: "var(--radius-sm)", padding: "6px 10px", fontSize: 13 }}
-                            >
-                                {PIX_TYPE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                            </select>
-                        </td>
-                        <td>
-                            <input
-                                value={i.chave_pix_edit ?? i.chave_pix}
-                                onChange={(e) => onUpdateField(i.id, "chave_pix_edit", e.target.value)}
-                                style={{ background: "var(--bg)", color: "var(--fg)", border: "1px solid var(--border-light)", borderRadius: "var(--radius-sm)", padding: "6px 10px", fontSize: 13, width: 220 }}
-                            />
-                        </td>
-                        <td style={{ fontWeight: 600, color: "var(--warning)" }}>R$ {i.valor_real.toFixed(2)}</td>
-                        <td><span style={{ fontSize: 12, color: "var(--warning)" }}>{i.motivo_bloqueio}</span></td>
-                        <td>
-                            <button className="btn btn-ghost" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => onSave(i.id)}>
-                                <Save size={13} /> Salvar
-                            </button>
-                        </td>
-                    </tr>
-                ))}
-            </tbody>
-        </table>
-    );
-}
-
-function BloqueadosTable({ items, onForceApprove }: { items: SaqueItem[]; onForceApprove: (i: SaqueItem) => void }) {
-    if (!items.length) return <p className="table-empty">Nenhum item bloqueado. ✓</p>;
-    return (
-        <table className="data-table">
-            <thead><tr>
-                <th>CPF Solicitante</th><th>CPF Favorecido</th><th>Chave PIX</th><th>Vlr. Real</th><th>Motivo</th><th>Ação</th>
-            </tr></thead>
-            <tbody>
-                {items.map((i) => (
-                    <tr key={i.id}>
-                        <td className="table-mono">{i.cpf_conta}</td>
-                        <td className="table-mono">{i.cpf_favorecido}</td>
-                        <td className="table-mono" style={{ fontSize: 12 }}>{i.chave_pix || "—"}</td>
-                        <td style={{ fontWeight: 600, color: "var(--danger)" }}>R$ {i.valor_real.toFixed(2)}</td>
-                        <td><span style={{ fontSize: 12, color: "var(--danger)" }}>{i.motivo_bloqueio}</span></td>
-                        <td>
-                            <button
-                                className="btn"
-                                style={{ padding: "6px 12px", fontSize: 12, background: "rgba(248,113,113,0.12)", color: "var(--danger)", border: "1px solid rgba(248,113,113,0.3)" }}
-                                onClick={() => onForceApprove(i)}
-                            >
-                                <AlertOctagon size={13} /> Forçar Aprovação
-                            </button>
-                        </td>
-                    </tr>
-                ))}
-            </tbody>
-        </table>
     );
 }
 
@@ -718,7 +889,7 @@ export default function GestaoSaques() {
                         {isDragActive ? "Solte o arquivo aqui…" : "Arraste ou clique para importar a planilha"}
                     </p>
                     <p style={{ fontSize: 13, color: "var(--fg-muted)" }}>
-                        CSV / XLSX — colunas: "Tipo", "Solicitado em", "CPF Solicitante", "CPF Favorecido", "Valor Solicitado", "Valor Real", "Chave PIX", "Tipo de Chave PIX"
+                        CSV / XLSX — colunas: &quot;Tipo&quot;, &quot;Solicitado em&quot;, &quot;CPF Solicitante&quot;, &quot;CPF Favorecido&quot;, &quot;Nome&quot;, &quot;Valor Solicitado&quot;, &quot;Valor Real&quot;, &quot;Chave PIX&quot;, &quot;Tipo de Chave PIX&quot;
                     </p>
                 </div>
             </div>
