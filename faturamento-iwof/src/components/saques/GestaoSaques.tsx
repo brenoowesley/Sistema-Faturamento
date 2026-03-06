@@ -206,8 +206,11 @@ function groupByTipo(items: SaqueItem[]): LoteLocal[] {
 function buildTransfeeraXlsx(items: SaqueItem[], filename: string) {
     const approved = items.filter((i) => i.status === "APROVADO");
     const aoa: (string | number)[][] = [
-        ["Mantenha sempre o cabeçalho original da planilha e esta linha, mantendo os titulos e a ordem dos campos", "", "", "", "", "", "", ""],
-        ["Tipo de chave", "Chave PIX", "CPF ou CNPJ (opcional)", "Valor", "Email (opcional)", "ID integração (opcional)", "Descrição Pix (opcional)", "Data de agendamento (opcional)"],
+        // Row 1 — warning text merged A1:J1
+        ["Mantenha sempre o cabeçalho original da planilha e esta linha, mantendo os titulos e a ordem dos campos", "", "", "", "", "", "", "", "", ""],
+        // Row 2 — real column headers (8 used by Transfeera)
+        ["Tipo de chave", "Chave PIX", "CPF ou CNPJ (opcional)", "Valor", "Email (opcional)", "ID integração (opcional)", "Descrição Pix (opcional)", "Data de agendamento (opcional)", "", ""],
+        // Row 3+ — data
         ...approved.map((i) => [
             normalizePixType(i.tipo_pix),
             sanitizeStr(i.chave_pix),
@@ -217,9 +220,22 @@ function buildTransfeeraXlsx(items: SaqueItem[], filename: string) {
             "",
             "REPASSE IWOF",
             "",
+            "",
+            "",
         ] as (string | number)[]),
     ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+    // Merge A1:J1 (row 0, col 0 → row 0, col 9)
+    ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 9 } }];
+
+    // Center-align the merged cell
+    if (!ws["A1"]) ws["A1"] = { t: "s", v: aoa[0][0] };
+    ws["A1"].s = {
+        alignment: { horizontal: "center", vertical: "center", wrapText: true },
+        font: { bold: true },
+    };
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Pagamentos");
     const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
