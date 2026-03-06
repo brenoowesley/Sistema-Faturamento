@@ -150,7 +150,7 @@ function parseRows(rawRows: Record<string, unknown>[]): SaqueItem[] {
         .map((r) => {
             const cpf_conta = sanitizeStr(String(r["CPF Solicitante"] ?? ""));
             const cpf_favorecido = sanitizeStr(String(r["CPF Favorecido"] ?? ""));
-            const nome_usuario = sanitizeStr(String(r["Nome"] ?? r["Nome do Usuário"] ?? r["Nome do Usuario"] ?? r["Usuario"] ?? r["Usuário"] ?? ""));
+            const nome_usuario = sanitizeStr(String(r["Trabalhador"] ?? r["Nome"] ?? r["Nome do Usuário"] ?? r["Nome do Usuario"] ?? r["Usuario"] ?? r["Usuário"] ?? ""));
             const chave_pix = sanitizeStr(String(r["Chave PIX"] ?? ""));
             const tipo_pix_raw = normalizePixType(String(r["Tipo de Chave PIX"] ?? ""));
             const tipo_pix = correctPixType(chave_pix, tipo_pix_raw, cpf_favorecido);
