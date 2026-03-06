@@ -79,6 +79,7 @@ export default function FechamentoLote({
     const nfsInputRef = useRef<HTMLInputElement>(null);
     const [manualMappings, setManualMappings] = useState<Record<string, { consolidadoId: string; type: 'nfse' | 'boleto' }>>({});
     const [parsedDocumentData, setParsedDocumentData] = useState<Record<string, { cnpj: string; irrf: number; numero_nf_real: string; valorServicos: number; name: string }>>({});
+    const [pendingAdjustments, setPendingAdjustments] = useState<any[]>([]);
 
     useEffect(() => {
         const parseDocuments = async () => {
@@ -216,6 +217,26 @@ export default function FechamentoLote({
         fetchExisting();
     }, [loteId, saveResult, agendamentos]);
 
+    useEffect(() => {
+        const fetchAjustes = async () => {
+            const validos = agendamentos.filter(a => !a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO") && a.clienteId);
+            const validStoreIds = Array.from(new Set(validos.map(a => a.clienteId).filter(Boolean))) as string[];
+            if (validStoreIds.length === 0) return;
+
+            const { data, error } = await supabase
+                .from("ajustes_faturamento")
+                .select("*")
+                .in("cliente_id", validStoreIds)
+                .eq("status_aplicacao", false);
+
+            if (!error && data) {
+                setPendingAdjustments(data);
+            }
+        };
+
+        fetchAjustes();
+    }, [agendamentos]);
+
 
     interface StoreData {
         consolidadoId: string;
@@ -305,6 +326,25 @@ export default function FechamentoLote({
                 lojaEntry.valorAcrescimos += (finalVal - baseVal);
             } else if (finalVal < baseVal) {
                 lojaEntry.valorDescontos += (baseVal - finalVal);
+            }
+        }
+
+        // --- PHASE 2.5: Inject DB Pending Adjustments ---
+        const injectedAjustes = new Set<string>();
+        for (const aj of pendingAdjustments) {
+            if (injectedAjustes.has(aj.id)) continue;
+
+            const entryKey = Array.from(lojasUnicas.keys()).find(k => k.startsWith(aj.cliente_id));
+            if (entryKey) {
+                const lojaEntry = lojasUnicas.get(entryKey)!;
+                if (aj.tipo === "ACRESCIMO") {
+                    lojaEntry.valorAcrescimos += Number(aj.valor);
+                    lojaEntry.valorBaseFaturavel += Number(aj.valor);
+                } else if (aj.tipo === "DESCONTO") {
+                    lojaEntry.valorDescontos += Number(aj.valor);
+                    lojaEntry.valorBaseFaturavel -= Number(aj.valor);
+                }
+                injectedAjustes.add(aj.id);
             }
         }
 
@@ -431,7 +471,7 @@ export default function FechamentoLote({
         });
 
         return { reports: finalReports, orphanNfses, orphanBoletos };
-    }, [agendamentos, nfseFiles, pdfNfsFiles, parsedDocumentData, boletoFiles, actionState.ncsSuccess, manualMappings]);
+    }, [agendamentos, nfseFiles, pdfNfsFiles, parsedDocumentData, boletoFiles, actionState.ncsSuccess, manualMappings, pendingAdjustments]);
 
     const handleConsolidarLote = async () => {
         try {
