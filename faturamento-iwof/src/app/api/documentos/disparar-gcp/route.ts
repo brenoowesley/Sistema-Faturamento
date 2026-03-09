@@ -274,8 +274,19 @@ export async function POST(req: NextRequest) {
                 valor: formatarParaGCP(Number(item.valor || 0))
             }));
 
+            const mapAjustesManuais = (arr: any[], tipoAjuste: string) => arr.map(item => ({
+                descricao: item.motivo || "Ajuste de faturamento",
+                valor: Number(item.valor || 0),
+                tipo: tipoAjuste
+            }));
+
             const lista_acrescimos = mapAjustes(listaAcrescimosOriginal);
             const lista_descontos = mapAjustes(listaDescontosOriginal);
+
+            const ajustes_manuais = [
+                ...mapAjustesManuais(listaAcrescimosOriginal, "acrescimo"),
+                ...mapAjustesManuais(listaDescontosOriginal, "desconto")
+            ];
 
             const totalAcrescimo = listaAcrescimosOriginal.reduce((acc: number, curr: any) => acc + Number(curr.valor || 0), 0);
             const totalDesconto = listaDescontosOriginal.reduce((acc: number, curr: any) => acc + Number(curr.valor || 0), 0);
@@ -342,6 +353,7 @@ export async function POST(req: NextRequest) {
                             },
                             lista_acrescimos: lista_acrescimos,
                             lista_descontos: lista_descontos,
+                            ajustes_manuais: ajustes_manuais,
                             faturamento_headers: ["Nome", "Vaga", "Início", "Término", "Valor IWOF", "Fração de hora computada"],
                             itens_faturados_rows: buildMatriz(agsDaLoja)
                         });
@@ -365,6 +377,11 @@ export async function POST(req: NextRequest) {
 
                             const filialListaAcrescimos = filialAcrescimosOrig.length > 0 ? mapAjustes(filialAcrescimosOrig) : [];
                             const filialListaDescontos = filialDescontosOrig.length > 0 ? mapAjustes(filialDescontosOrig) : [];
+
+                            const filialAjustesManuais = [
+                                ...mapAjustesManuais(filialAcrescimosOrig, "acrescimo"),
+                                ...mapAjustesManuais(filialDescontosOrig, "desconto")
+                            ];
 
                             const filialTotalAcrescimo = filialAcrescimosOrig.reduce((acc: number, curr: any) => acc + Number(curr.valor || 0), 0);
                             const filialTotalDesconto = filialDescontosOrig.reduce((acc: number, curr: any) => acc + Number(curr.valor || 0), 0);
@@ -390,6 +407,7 @@ export async function POST(req: NextRequest) {
                                 },
                                 lista_acrescimos: filialListaAcrescimos,
                                 lista_descontos: filialListaDescontos,
+                                ajustes_manuais: filialAjustesManuais,
                                 faturamento_headers: ["Nome", "Vaga", "Início", "Término", "Valor IWOF", "Fração de hora computada"],
                                 itens_faturados_rows: buildMatriz(agsFilial)
                             });
@@ -417,6 +435,7 @@ export async function POST(req: NextRequest) {
                         },
                         lista_acrescimos: lista_acrescimos,
                         lista_descontos: lista_descontos,
+                        ajustes_manuais: ajustes_manuais,
                         faturamento_headers: ["Nome", "Vaga", "Início", "Término", "Valor IWOF", "Fração de hora computada"],
                         itens_faturados_rows: buildMatriz(agsDaLoja)
                     });

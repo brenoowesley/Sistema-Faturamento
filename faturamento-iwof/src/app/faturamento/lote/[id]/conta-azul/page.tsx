@@ -165,20 +165,25 @@ export default function ContaAzulStagingPage() {
                     estado: siglaEstado
                 };
 
-                if (!c.boleto_unificado && r.valor_nf_emitida > 0 && (r.valor_boleto_final - r.valor_nf_emitida) > 0) {
+                const boletoUnificado = c.boleto_unificado ?? true;
+                const valorIRRF = Number(r.valor_ir_xml || 0);
+
+                if (!boletoUnificado) {
                     // Split into NF and NC
                     // 1. NF Line
                     newMappedRows.push({
                         ...baseRow,
-                        id: `${r.id}_NF`,
-                        valor: r.valor_nf_emitida,
+                        id: `${r.id}-NF`,
+                        valor: Number((r.valor_nf_emitida - valorIRRF).toFixed(2)),
+                        descricao: baseRow.descricao + " - Referência: NF",
                         observacoes: `[NF] NF - ${r.numero_nf || "PENDENTE"} | Ref: ${c.nome_fantasia || c.razao_social}`,
                     });
                     // 2. NC Line (Remainder)
                     newMappedRows.push({
                         ...baseRow,
-                        id: `${r.id}_NC`,
-                        valor: Number((r.valor_boleto_final - r.valor_nf_emitida).toFixed(2)),
+                        id: `${r.id}-NC`,
+                        valor: Number(r.valor_nc_final || 0),
+                        descricao: baseRow.descricao + " - Referência: NC",
                         observacoes: `[NC] Nota de Crédito | Ref: ${c.nome_fantasia || c.razao_social}`,
                     });
                 } else {
