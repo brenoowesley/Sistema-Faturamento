@@ -502,6 +502,14 @@ export async function POST(req: NextRequest) {
                 lojas: payloadHC,
                 driveFolderId: rootFolderId
             };
+
+            console.log("\n[ANALISE DE PAYLOAD GCP - HC] Verificando injeção de Ajustes Manuais:");
+            if (payloadHC.length > 0 && payloadHC[0].ajustes_manuais) {
+                console.log(JSON.stringify(payloadHC[0].ajustes_manuais, null, 2));
+            } else {
+                console.log("AVISO: A chave 'ajustes_manuais' está ausente ou vazia no primeiro item do Payload HC.");
+            }
+
             gcpFetchTasks.push(() => fetch(pubHCUrl, { method: "POST", headers, body: JSON.stringify(masterHCPayload) }));
             console.log(`[GCP HC] Disparando 1 pacote global com ${payloadHC.length} lojas.`);
         }
@@ -516,6 +524,14 @@ export async function POST(req: NextRequest) {
                 lojas: payloadNC,
                 driveFolderId: rootFolderId
             };
+
+            console.log("\n[ANALISE DE PAYLOAD GCP - NC] Verificando injeção de Ajustes Manuais:");
+            if (payloadNC.length > 0 && payloadNC[0].ajustes_manuais) {
+                console.log(JSON.stringify(payloadNC[0].ajustes_manuais, null, 2));
+            } else {
+                console.log("AVISO: A chave 'ajustes_manuais' está ausente ou vazia no primeiro item do Payload NC.");
+            }
+
             gcpFetchTasks.push(() => fetch(pubNCUrl, { method: "POST", headers, body: JSON.stringify(masterNCPayload) }));
             console.log(`[GCP NC] Disparando 1 pacote global com ${payloadNC.length} lojas.`);
         }

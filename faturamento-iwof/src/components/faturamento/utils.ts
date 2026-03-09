@@ -102,8 +102,12 @@ export function calcularTotaisFaturamento(
     isNFEmitida: boolean
 ): TotaisFaturamento {
     const valorBaseFaturavel = valorBruto + acrescimos - descontos;
-    const valorNF = isNFEmitida ? valorBaseFaturavel : 0;
-    const valorNC = !isNFEmitida ? valorBaseFaturavel : 0;
+
+    // A NF e a NC possuem valores pré-definidos para emissão (11.5% e 88.5%) compondo 100%.
+    // Removida a "gangorra" que jogava 100% do valor para um lado ou para o outro.
+    const valorNF = valorBaseFaturavel * 0.115;
+    const valorNC = valorBaseFaturavel * 0.885;
     const valorLiquido = valorBaseFaturavel - irrf;
+
     return { valorBruto, valorBaseFaturavel, valorNF, valorNC, irrf, valorLiquido };
 }
