@@ -234,7 +234,7 @@ export async function POST(request: Request) {
                 });
 
                 const driveId = driveRes.data.id;
-                results.push({ name: file.name, driveId });
+                results.push({ name: file.name, driveId: driveId || "" });
 
                 // 3. Feedback Loop p/ Supabase
                 if (meta.consolidadoId && driveId) {
