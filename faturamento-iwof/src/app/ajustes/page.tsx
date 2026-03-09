@@ -435,6 +435,30 @@ export default function AjustesPage() {
         }
     };
 
+    const handleRevertToPending = async () => {
+        if (selectedIds.size === 0) return;
+        if (!confirm(`Deseja realmente voltar os ${selectedIds.size} itens selecionados para pendente?`)) return;
+
+        setIsSaving(true);
+        try {
+            const { error } = await supabase
+                .from("ajustes_faturamento")
+                .update({ status_aplicacao: false, data_aplicacao: null, lote_aplicado_id: null })
+                .in("id", Array.from(selectedIds));
+
+            if (error) throw error;
+
+            alert(`${selectedIds.size} itens voltaram para pendentes com sucesso!`);
+            setSelectedIds(new Set());
+            fetchAjustes();
+        } catch (err: any) {
+            console.error("Error reverting items:", err);
+            alert("Erro ao reverter itens: " + err.message);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     const toggleSelection = (id: string) => {
         const next = new Set(selectedIds);
         if (next.has(id)) next.delete(id);
@@ -616,19 +640,19 @@ export default function AjustesPage() {
                 <div className="bg-[var(--bg-card)] rounded-2xl border border-[var(--border)] overflow-hidden shadow-lg">
                     <div className="flex border-b border-[var(--border)] bg-[var(--bg-card-hover)]">
                         <button
-                            onClick={() => setActiveTab("descontos")}
+                            onClick={() => { setActiveTab("descontos"); setSelectedIds(new Set()); }}
                             className={`px-8 py-4 text-sm font-bold uppercase tracking-widest transition-all ${activeTab === 'descontos' ? 'text-[var(--primary)] border-b-2 border-[var(--primary)] bg-[var(--bg-card)]' : 'text-[var(--fg-dim)] hover:text-white'}`}
                         >
                             Descontos Pendentes
                         </button>
                         <button
-                            onClick={() => setActiveTab("acrescimos")}
+                            onClick={() => { setActiveTab("acrescimos"); setSelectedIds(new Set()); }}
                             className={`px-8 py-4 text-sm font-bold uppercase tracking-widest transition-all ${activeTab === 'acrescimos' ? 'text-[var(--primary)] border-b-2 border-[var(--primary)] bg-[var(--bg-card)]' : 'text-[var(--fg-dim)] hover:text-white'}`}
                         >
                             Acréscimos Pendentes
                         </button>
                         <button
-                            onClick={() => setActiveTab("historico")}
+                            onClick={() => { setActiveTab("historico"); setSelectedIds(new Set()); }}
                             className={`px-8 py-4 text-sm font-bold uppercase tracking-widest transition-all ${activeTab === 'historico' ? 'text-[var(--primary)] border-b-2 border-[var(--primary)] bg-[var(--bg-card)]' : 'text-[var(--fg-dim)] hover:text-white'}`}
                         >
                             Histórico (Aplicados)
@@ -832,49 +856,79 @@ export default function AjustesPage() {
                                 )}
 
                                 {activeTab === "historico" && (
-                                    <div className="table-container">
-                                        <table className="w-full">
-                                            <thead>
-                                                <tr>
-                                                    <th>Empresa</th>
-                                                    <th>Tipo</th>
-                                                    <th>Profissional</th>
-                                                    <th>Data Aplicação</th>
-                                                    <th>Valor</th>
-                                                    <th>Lote</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {historico.map(a => (
-                                                    <tr key={a.id}>
-                                                        <td className="table-primary">
-                                                            <div className="flex flex-col">
-                                                                <span className="text-white font-bold">{a.clientes?.nome_conta_azul}</span>
-                                                                <span className="text-[10px] text-[var(--fg-dim)] lowercase opacity-80 leading-tight">
-                                                                    {a.clientes?.razao_social} • {a.clientes?.cnpj}
-                                                                </span>
-                                                            </div>
-                                                        </td>
-                                                        <td>
-                                                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${a.tipo === 'DESCONTO' ? 'bg-amber-900/40 text-amber-500' : 'bg-primary/20 text-primary'}`}>
-                                                                {a.tipo}
-                                                            </span>
-                                                        </td>
-                                                        <td className="text-sm">{a.nome_profissional}</td>
-                                                        <td className="table-mono">{fmtDate(a.data_aplicacao!)}</td>
-                                                        <td className={`table-mono font-bold ${a.tipo === 'DESCONTO' ? 'text-amber-500' : 'text-[var(--primary)]'}`}>
-                                                            {fmtCurrency(a.valor)}
-                                                        </td>
-                                                        <td className="text-xs text-[var(--fg-dim)] truncate max-w-[100px]">{a.lote_aplicado_id || '-'}</td>
-                                                    </tr>
-                                                ))}
-                                                {historico.length === 0 && (
+                                    <div className="space-y-4">
+                                        <div className="flex justify-end min-h-[40px]">
+                                            {selectedIds.size > 0 && (
+                                                <button
+                                                    onClick={handleRevertToPending}
+                                                    className="btn btn-warning bg-amber-500 hover:bg-amber-600 text-amber-950 flex items-center justify-center gap-2 h-10 rounded-lg transition-all font-bold px-6"
+                                                    disabled={isSaving}
+                                                >
+                                                    {isSaving ? <span className="loading loading-spinner loading-xs"></span> : <History size={16} />}
+                                                    Voltar {selectedIds.size} para Pendentes
+                                                </button>
+                                            )}
+                                        </div>
+                                        <div className="table-container">
+                                            <table className="w-full">
+                                                <thead>
                                                     <tr>
-                                                        <td colSpan={6} className="text-center py-10 text-[var(--fg-dim)]">Nenhum registro no histórico.</td>
+                                                        <th className="w-10">
+                                                            <input
+                                                                type="checkbox"
+                                                                className="checkbox checkbox-xs"
+                                                                checked={selectedIds.size === historico.length && historico.length > 0}
+                                                                onChange={() => toggleAll(historico.map(a => a.id))}
+                                                            />
+                                                        </th>
+                                                        <th>Empresa</th>
+                                                        <th>Tipo</th>
+                                                        <th>Profissional</th>
+                                                        <th>Data Aplicação</th>
+                                                        <th>Valor</th>
+                                                        <th>Lote</th>
                                                     </tr>
-                                                )}
-                                            </tbody>
-                                        </table>
+                                                </thead>
+                                                <tbody>
+                                                    {historico.map(a => (
+                                                        <tr key={a.id} className="hover:bg-[var(--bg-card-hover)] transition-colors cursor-pointer group" onClick={() => { setSelectedAjuste(a); setShowModalDetalhes(true); }}>
+                                                            <td onClick={(e) => e.stopPropagation()}>
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="checkbox checkbox-xs"
+                                                                    checked={selectedIds.has(a.id)}
+                                                                    onChange={() => toggleSelection(a.id)}
+                                                                />
+                                                            </td>
+                                                            <td className="table-primary">
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-white font-bold">{a.clientes?.nome_conta_azul}</span>
+                                                                    <span className="text-[10px] text-[var(--fg-dim)] lowercase opacity-80 leading-tight">
+                                                                        {a.clientes?.razao_social} • {a.clientes?.cnpj}
+                                                                    </span>
+                                                                </div>
+                                                            </td>
+                                                            <td>
+                                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${a.tipo === 'DESCONTO' ? 'bg-amber-900/40 text-amber-500' : 'bg-primary/20 text-[var(--primary)]'}`}>
+                                                                    {a.tipo}
+                                                                </span>
+                                                            </td>
+                                                            <td className="text-sm">{a.nome_profissional}</td>
+                                                            <td className="table-mono">{fmtDate(a.data_aplicacao!)}</td>
+                                                            <td className={`table-mono font-bold ${a.tipo === 'DESCONTO' ? 'text-amber-500' : 'text-[var(--primary)]'}`}>
+                                                                {fmtCurrency(a.valor)}
+                                                            </td>
+                                                            <td className="text-xs text-[var(--fg-dim)] truncate max-w-[100px]">{a.lote_aplicado_id || '-'}</td>
+                                                        </tr>
+                                                    ))}
+                                                    {historico.length === 0 && (
+                                                        <tr>
+                                                            <td colSpan={7} className="text-center py-10 text-[var(--fg-dim)]">Nenhum registro no histórico.</td>
+                                                        </tr>
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     </div>
                                 )}
                             </>
