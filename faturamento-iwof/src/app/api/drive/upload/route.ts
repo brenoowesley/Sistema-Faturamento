@@ -138,7 +138,7 @@ export async function POST(request: Request) {
         console.log(`[Drive API] Processando lote de ${files.length} arquivos.`);
 
         const { Readable } = require('stream');
-        const results = [];
+        const results: { name: string, driveId: string }[] = [];
 
         // Ano/Mês: calculados uma única vez para o lote inteiro
         const now = new Date();
@@ -147,106 +147,117 @@ export async function POST(request: Request) {
 
         // Cache de IDs de pastas para evitar chamadas duplicadas na mesma requisição
         const folderCache: Record<string, string> = {};
+        const folderPromises: Record<string, Promise<string>> = {}; // Mutex p/ evitar duplicação paralela
 
         // mesFolderId: se vier no metadata (chunks 2+), salta resolução de Ano e Mês
         // Se não vier (chunk 1), resolve e retorna para o frontend reutilizar
         let resolvedMesFolderId: string | null = (metadataArray[0]?.mesFolderId) || null;
 
-        for (const meta of metadataArray) {
-            const file = files.find(f => f.name === meta.filename);
-            if (!file) {
-                console.warn(`Arquivo ${meta.filename} não encontrado no FormData.`);
-                continue;
-            }
+        if (!resolvedMesFolderId) {
+            const anoFolderId = await findOrCreateFolder(uploadAno, rootFolderId);
+            resolvedMesFolderId = await findOrCreateFolder(uploadMes, anoFolderId);
+        }
 
-            // --- Lógica de Pareamento Dinâmico ---
-            let empresaParaPasta = (meta.nome_empresa_extraido || meta.nome_conta_azul || "Indefinido").trim();
+        // Helper genérico para dividir array em lotes menores
+        const chunkArray = <T,>(arr: T[], size: number): T[][] => {
+            return Array.from({ length: Math.ceil(arr.length / size) }, (v, i) =>
+                arr.slice(i * size, i * size + size)
+            );
+        };
 
-            if (meta.docType === 'nf' && meta.numeroNF) {
-                try {
-                    const { data: consData, error: consErr } = await supabaseAdmin
-                        .from('faturamento_consolidados')
-                        .select('nome_empresa')
-                        .eq('numero_nf', meta.numeroNF)
-                        .maybeSingle();
+        // Lote de Concorrência (quantos PDFs farão upload simultâneo p/ o Drive)
+        const CONCURRENT_LIMIT = 5;
+        const metadataChunks = chunkArray(metadataArray, CONCURRENT_LIMIT);
 
-                    if (!consErr && consData?.nome_empresa) {
-                        empresaParaPasta = consData.nome_empresa.trim();
-                        console.log(`[Drive Pairing] NF ${meta.numeroNF} vinculada à empresa: ${empresaParaPasta}`);
+        for (const metaChunk of metadataChunks) {
+            const chunkPromises = metaChunk.map(async (meta: any) => {
+                const file = files.find(f => f.name === meta.filename);
+                if (!file) {
+                    console.warn(`Arquivo ${meta.filename} não encontrado no FormData.`);
+                    return;
+                }
+
+                // --- Lógica de Pareamento Dinâmico ---
+                let empresaParaPasta = (meta.nome_empresa_extraido || meta.nome_conta_azul || "Indefinido").trim();
+
+                if (meta.docType === 'nf' && meta.numeroNF) {
+                    try {
+                        const { data: consData, error: consErr } = await supabaseAdmin
+                            .from('faturamento_consolidados')
+                            .select('nome_empresa')
+                            .eq('numero_nf', meta.numeroNF)
+                            .maybeSingle();
+
+                        if (!consErr && consData?.nome_empresa) {
+                            empresaParaPasta = consData.nome_empresa.trim();
+                            console.log(`[Drive Pairing] NF ${meta.numeroNF} vinculada à empresa: ${empresaParaPasta}`);
+                        }
+                    } catch (e) {
+                        console.error(`[Drive Pairing Error] Falha ao buscar empresa para NF ${meta.numeroNF}:`, e);
                     }
-                } catch (e) {
-                    console.error(`[Drive Pairing Error] Falha ao buscar empresa para NF ${meta.numeroNF}:`, e);
                 }
-            }
 
-            const nomePastaFinal = String(meta.nomePasta || meta.ciclo || "Geral").trim();
-
-            let targetFolderId: string;
-
-            if (resolvedMesFolderId) {
-                // Chunks 2+: Ano e Mês já resolvidos — só precisa de empresa → nomePasta (2 chamadas)
+                const nomePastaFinal = String(meta.nomePasta || meta.ciclo || "Geral").trim();
+                let targetFolderId: string;
                 const cacheKey = `${resolvedMesFolderId}/${empresaParaPasta}/${nomePastaFinal}`;
+
+                // Sistema de Cache + Mutex para evitar Race Conditions de 2 arquivos paralelos criarem a pasta ao mesmo tempo
                 if (folderCache[cacheKey]) {
                     targetFolderId = folderCache[cacheKey];
+                } else if (cacheKey in folderPromises) {
+                    targetFolderId = (await folderPromises[cacheKey])!;
+                    folderCache[cacheKey] = targetFolderId;
                 } else {
-                    targetFolderId = await findOrCreatePath(resolvedMesFolderId, [empresaParaPasta, nomePastaFinal]);
+                    folderPromises[cacheKey] = findOrCreatePath(resolvedMesFolderId as string, [empresaParaPasta, nomePastaFinal]);
+                    targetFolderId = await folderPromises[cacheKey];
                     folderCache[cacheKey] = targetFolderId;
                 }
-            } else {
-                // Chunk 1: resolve caminho completo e captura mesFolderId no caminho
-                const anoFolderId = await findOrCreateFolder(uploadAno, rootFolderId);
-                resolvedMesFolderId = await findOrCreateFolder(uploadMes, anoFolderId);
 
-                const cacheKey = `${resolvedMesFolderId}/${empresaParaPasta}/${nomePastaFinal}`;
-                if (folderCache[cacheKey]) {
-                    targetFolderId = folderCache[cacheKey];
-                } else {
-                    targetFolderId = await findOrCreatePath(resolvedMesFolderId, [empresaParaPasta, nomePastaFinal]);
-                    folderCache[cacheKey] = targetFolderId;
+                console.log(`[Drive Path] ${meta.filename} → ${uploadAno}/${uploadMes}/${empresaParaPasta}/${nomePastaFinal} → ${targetFolderId}`);
+
+                // 2. Upload para o Drive
+                const buffer = Buffer.from(await file.arrayBuffer());
+                const fileMetadata = {
+                    name: file.name,
+                    parents: [targetFolderId]
+                };
+                const media = {
+                    mimeType: file.type || 'application/pdf',
+                    body: Readable.from(buffer)
+                };
+
+                const driveRes = await drive.files.create({
+                    requestBody: fileMetadata,
+                    media: media,
+                    fields: 'id',
+                    supportsAllDrives: true
+                });
+
+                const driveId = driveRes.data.id;
+                results.push({ name: file.name, driveId });
+
+                // 3. Feedback Loop p/ Supabase
+                if (meta.consolidadoId && driveId) {
+                    const updateData: any = {};
+                    if (meta.docType === 'nf') {
+                        updateData.drive_id_nf = driveId;
+                        updateData.status_drive_nf = 'SINCRONIZADO';
+                    } else if (meta.docType === 'hc' || meta.docType === 'boleto') {
+                        updateData.drive_id_hc = driveId;
+                        updateData.status_drive_hc = 'SINCRONIZADO';
+                    }
+
+                    const { error: upErr } = await supabaseAdmin
+                        .from('faturamento_consolidados')
+                        .update(updateData)
+                        .eq('id', meta.consolidadoId);
+
+                    if (upErr) console.error(`[Supabase Error] ${meta.consolidadoId}:`, upErr);
                 }
-            }
-
-            console.log(`[Drive Path] ${meta.filename} → ${uploadAno}/${uploadMes}/${empresaParaPasta}/${nomePastaFinal} → ${targetFolderId}`);
-
-            // 2. Upload para o Drive
-            const buffer = Buffer.from(await file.arrayBuffer());
-            const fileMetadata = {
-                name: file.name,
-                parents: [targetFolderId]
-            };
-            const media = {
-                mimeType: file.type || 'application/pdf',
-                body: Readable.from(buffer)
-            };
-
-            const driveRes = await drive.files.create({
-                requestBody: fileMetadata,
-                media: media,
-                fields: 'id',
-                supportsAllDrives: true
             });
 
-            const driveId = driveRes.data.id;
-            results.push({ name: file.name, driveId });
-
-            // 3. Feedback Loop p/ Supabase
-            if (meta.consolidadoId && driveId) {
-                const updateData: any = {};
-                if (meta.docType === 'nf') {
-                    updateData.drive_id_nf = driveId;
-                    updateData.status_drive_nf = 'SINCRONIZADO';
-                } else if (meta.docType === 'hc' || meta.docType === 'boleto') {
-                    updateData.drive_id_hc = driveId;
-                    updateData.status_drive_hc = 'SINCRONIZADO';
-                }
-
-                const { error: upErr } = await supabaseAdmin
-                    .from('faturamento_consolidados')
-                    .update(updateData)
-                    .eq('id', meta.consolidadoId);
-
-                if (upErr) console.error(`[Supabase Error] ${meta.consolidadoId}:`, upErr);
-            }
+            // Executa os 5 uploads desse lote concorrente antes do próximo
+            await Promise.all(chunkPromises);
         }
 
         // Retorna mesFolderId para o frontend reutilizar nos chunks seguintes
