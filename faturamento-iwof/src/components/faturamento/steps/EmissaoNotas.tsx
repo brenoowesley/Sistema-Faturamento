@@ -282,8 +282,8 @@ export default function EmissaoNotas({
             "application/pdf": [".pdf"]
         },
         maxFiles: 500,
-        noClick: false, // Ensure clicking works
-        noKeyboard: false
+        noClick: nfseFiles.length > 0, // Disable click if already uploaded
+        noKeyboard: nfseFiles.length > 0
     });
 
     return (
@@ -443,10 +443,6 @@ export default function EmissaoNotas({
                         ${isDragActive ? "border-[var(--accent)] bg-[rgba(33,118,255,0.1)] scale-[1.02]" : "border-[var(--border)] hover:border-[var(--fg-dim)]"}
                         ${nfseFiles.length > 0 ? "border-[var(--success)]/50 from-[var(--bg-sidebar)] to-[rgba(34,197,94,0.05)] cursor-default" : ""}
                     `}
-                    onClick={(e) => {
-                        // Prevent opening dialog if we already have files, let them click "Remover" instead
-                        if (nfseFiles.length > 0) e.preventDefault();
-                    }}
                 >
                     <input {...getInputProps()} disabled={nfseFiles.length > 0 || isExtracting} />
 
@@ -490,7 +486,7 @@ export default function EmissaoNotas({
 
                             <p className="text-sm font-semibold text-[var(--fg)] mb-1">Arraste o ZIP, XMLs ou PDFs aqui</p>
                             <p className="text-xs text-[var(--fg-dim)] mb-4">ou</p>
-                            <button type="button" className="btn btn-ghost border border-[var(--border)] text-[var(--fg-dim)] hover:border-[var(--fg)] hover:text-[var(--fg)] transition-colors pointer-events-none">
+                            <button type="button" className="btn btn-ghost border border-[var(--border)] text-[var(--fg-dim)] hover:border-[var(--fg)] hover:text-[var(--fg)] transition-colors">
                                 Procurar nas Pastas
                             </button>
                         </div>

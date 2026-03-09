@@ -589,10 +589,23 @@ export default function FechamentoLote({
                     valor_ir_xml: r.descontoIR || 0
                 };
 
-                if (r.boletoUnificado && totais.valorNF > 0 && totais.valorNC > 0) {
+                const payloadItemBase = {
+                    lote_id: currentLoteId,
+                    cliente_id: r.id,
+                    data_competencia: r.data_competencia || null,
+                    valor_bruto: totais.valorBruto,
+                    acrescimos: finalAcrescimos,
+                    descontos: finalDescontos,
+                    valor_irrf: totais.irrf,
+                    numero_nf: r.numeroNF || null,
+                    cnpj_filial: r.cnpjFilial || null,
+                    valor_ir_xml: r.descontoIR || 0
+                };
+
+                if (!r.boletoUnificado && totais.valorNF > 0 && totais.valorNC > 0) {
                     return [
                         {
-                            ...basePayload,
+                            ...payloadItemBase,
                             tipo_documento: 'NF',
                             valor_nf_emitida: totais.valorNF,
                             valor_nc_final: 0,
@@ -600,7 +613,7 @@ export default function FechamentoLote({
                             observacao_report: "Referência: NF"
                         },
                         {
-                            ...basePayload,
+                            ...payloadItemBase,
                             tipo_documento: 'NC',
                             valor_nf_emitida: 0,
                             valor_nc_final: totais.valorNC,
@@ -611,7 +624,7 @@ export default function FechamentoLote({
                 }
 
                 return [{
-                    ...basePayload,
+                    ...payloadItemBase,
                     tipo_documento: 'UNIFICADO',
                     valor_nf_emitida: totais.valorNF,
                     valor_nc_final: totais.valorNC,
@@ -633,7 +646,11 @@ export default function FechamentoLote({
                     if (ajustesIdsParaAtualizar.length > 0) {
                         const { error: updErr } = await supabase
                             .from("ajustes_faturamento")
-                            .update({ status_aplicacao: true })
+                            .update({
+                                status_aplicacao: true,
+                                data_aplicacao: new Date().toISOString(),
+                                lote_aplicado_id: currentLoteId
+                            })
                             .in("id", ajustesIdsParaAtualizar);
                         if (updErr) console.error("Erro ao marcar ajustes como aplicados:", updErr);
                     }

@@ -191,10 +191,16 @@ export async function POST(req: NextRequest) {
 
         // Cache para reduzir DB hits da Leta
         const filiaisLetaMap = new Map<string, any[]>();
+        const processedClientsGcp = new Set<string>();
 
         // Loop pelos registros consolidados (que já agrupam filiais na matriz se for Leta para a NC)
         for (const cons of consolidados) {
             const cliente = cons.clientes as any;
+
+            // Prevent duplicate HC/NC payload generation if the DB has split rows (NF and NC type) 
+            if (processedClientsGcp.has(cliente.id)) continue;
+            processedClientsGcp.add(cliente.id);
+
             const ciclo = cliente.ciclos_faturamento?.nome || "GERAL";
             const isNordestao = ciclo === "NORDESTÃO";
             const isLeta = ciclo === "LETA";
@@ -210,6 +216,9 @@ export async function POST(req: NextRequest) {
             const valorNF = valorBase * 0.115;
             const valorIRRF = Number(cons.valor_ir_xml || 0);
             const valorLiquido = valorBase - valorIRRF;
+
+            const boletoUnificado = cliente.boleto_unificado ?? true;
+            const finalLiquidoBoletoGCP = boletoUnificado === false ? (valorNF - valorIRRF) : valorLiquido;
 
             // ==========================================
             // CÁLCULO DE PERÍODO ESPECÍFICO (QUEIROZ SPLIT)
@@ -244,11 +253,12 @@ export async function POST(req: NextRequest) {
                 descontos: formatarParaGCP(numDescontos),
                 valor_nf_emitida: formatarParaGCP(valorNF),
                 irrf_presumido: formatarParaGCP(valorIRRF),
-                valor_liquido_boleto: formatarParaGCP(valorLiquido),
+                valor_liquido_boleto: formatarParaGCP(finalLiquidoBoletoGCP),
                 valor_nc_final: formatarParaGCP(valorNC),
                 data_competencia: cons.data_competencia || lote.data_competencia,
                 periodo_custom: periodoCustom, // Injeta o período preciso para o PDF
-                observacoes_descritivo: cons.observacao_report || ""
+                observacoes_descritivo: cons.observacao_report || "",
+                boleto_unificado: boletoUnificado
             };
             // ==========================================
             // LISTAS DE ACRÉSCIMOS E DESCONTOS
@@ -327,7 +337,8 @@ export async function POST(req: NextRequest) {
                                 "VALOR_LIQUIDO": financeiroPayload.valor_liquido_boleto,
                                 "NF": financeiroPayload.valor_nf_emitida,
                                 "NC": financeiroPayload.valor_nc_final,
-                                "PERIODO": financeiroPayload.periodo_custom
+                                "PERIODO": financeiroPayload.periodo_custom,
+                                "boleto_unificado": financeiroPayload.boleto_unificado
                             },
                             lista_acrescimos: lista_acrescimos,
                             lista_descontos: lista_descontos,
@@ -366,7 +377,7 @@ export async function POST(req: NextRequest) {
                                 info_loja: {
                                     "LOJA": filial.nome_conta_azul || filial.razao_social,
                                     "CNPJ": filial.cnpj,
-                                    "Nº NF": "A Gerar",
+                                    "Nº NF": numNotaFiscal,
                                     "VALOR_BRUTO": formatarParaGCP(brutoFilial),
                                     "ACRESCIMO": formatarParaGCP(filialTotalAcrescimo),
                                     "DESCONTO": formatarParaGCP(filialTotalDesconto),
@@ -374,7 +385,8 @@ export async function POST(req: NextRequest) {
                                     "VALOR_LIQUIDO": formatarParaGCP(baseFilialVirtual),
                                     "NF": formatarParaGCP(baseFilialVirtual * 0.115),
                                     "NC": formatarParaGCP(baseFilialVirtual * 0.885),
-                                    "PERIODO": `${formatDataSegura(lote.data_inicio_ciclo)} à ${formatDataSegura(lote.data_fim_ciclo)}`
+                                    "PERIODO": `${formatDataSegura(lote.data_inicio_ciclo)} à ${formatDataSegura(lote.data_fim_ciclo)}`,
+                                    "boleto_unificado": financeiroPayload.boleto_unificado
                                 },
                                 lista_acrescimos: filialListaAcrescimos,
                                 lista_descontos: filialListaDescontos,
@@ -400,7 +412,8 @@ export async function POST(req: NextRequest) {
                             "VALOR_LIQUIDO": financeiroPayload.valor_liquido_boleto,
                             "NF": financeiroPayload.valor_nf_emitida,
                             "NC": financeiroPayload.valor_nc_final,
-                            "PERIODO": financeiroPayload.periodo_custom
+                            "PERIODO": financeiroPayload.periodo_custom,
+                            "boleto_unificado": financeiroPayload.boleto_unificado
                         },
                         lista_acrescimos: lista_acrescimos,
                         lista_descontos: lista_descontos,

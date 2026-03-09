@@ -819,10 +819,7 @@ export default function FiscalProcessingPage() {
                 // 1. Salvar ou Atualizar registro da Mãe (ou Loja Avulsa)
                 const { error: errorMother } = await supabase
                     .from("faturamento_consolidados")
-                    .upsert({
-                        lote_id: loteId,
-                        cliente_id: item.loja.id,
-                        cnpj_filial: null, // Assegura a compatibilidade com a key
+                    .update({
                         valor_bruto: item.loja.valorBruto,
                         acrescimos: item.loja.acrescimos,
                         descontos: item.loja.descontos,
@@ -832,9 +829,9 @@ export default function FiscalProcessingPage() {
                         valor_boleto_final: item.boletoFinal,
                         numero_nf: item.xml ? String(item.xml.numeroNF) : null,
                         observacao_report: (item.loja as any).ciclo === "NORDESTÃO" ? `Desconto IRRF: ${fmtCurrency(item.irrfCalculado)}` : null
-                    }, {
-                        onConflict: "lote_id, cliente_id, cnpj_filial"
-                    });
+                    })
+                    .eq("lote_id", loteId)
+                    .eq("cliente_id", item.loja.id);
 
                 if (errorMother) throw errorMother;
 
