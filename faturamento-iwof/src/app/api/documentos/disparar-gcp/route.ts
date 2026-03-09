@@ -175,7 +175,8 @@ export async function POST(req: NextRequest) {
         const formatDateStr = (dateStr: string) => {
             if (!dateStr) return "-";
             const d = new Date(dateStr);
-            return d.toLocaleDateString("pt-BR") + " " + d.toLocaleTimeString("pt-BR", { hour: '2-digit', minute: '2-digit' });
+            // Formato estrito DD/MM/YYYY solicitado pelo template Jinja
+            return d.toLocaleDateString("pt-BR");
         };
         const buildMatriz = (ags: any[]) => {
             return ags.sort((a: any, b: any) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime())
@@ -268,8 +269,8 @@ export async function POST(req: NextRequest) {
             const listaDescontosOriginal = lojaAjustes.filter((a: any) => a.tipo === "DESCONTO");
 
             const mapAjustes = (arr: any[]) => arr.map(item => ({
-                profissional: item.nome_profissional || "N/A",
-                motivo: item.motivo || "Sem justificação",
+                profissional: item.nome_profissional || "Geral",
+                motivo: item.motivo || "Ajuste manual",
                 data: formatDateStr(item.data_ocorrencia || item.created_at),
                 valor: formatarParaGCP(Number(item.valor || 0))
             }));

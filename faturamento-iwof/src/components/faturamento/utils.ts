@@ -99,15 +99,23 @@ export function calcularTotaisFaturamento(
     acrescimos: number,
     descontos: number,
     irrf: number,
-    isNFEmitida: boolean
+    isNFEmitida: boolean,
+    boletoUnificado: boolean = true
 ): TotaisFaturamento {
     const valorBaseFaturavel = valorBruto + acrescimos - descontos;
+    let valorNF = 0;
+    let valorNC = 0;
 
-    // A NF e a NC possuem valores pré-definidos para emissão (11.5% e 88.5%) compondo 100%.
-    // Removida a "gangorra" que jogava 100% do valor para um lado ou para o outro.
-    const valorNF = valorBaseFaturavel * 0.115;
-    const valorNC = valorBaseFaturavel * 0.885;
+    if (!boletoUnificado) {
+        // Fracionamento matemático: Ambas as notas assumem suas fatias independentemente.
+        valorNF = valorBaseFaturavel * 0.115;
+        valorNC = valorBaseFaturavel * 0.885;
+    } else {
+        // Gangorra: Integração baseada na emissão de documento unificado
+        valorNF = isNFEmitida ? valorBaseFaturavel : 0;
+        valorNC = !isNFEmitida ? valorBaseFaturavel : 0;
+    }
+
     const valorLiquido = valorBaseFaturavel - irrf;
-
     return { valorBruto, valorBaseFaturavel, valorNF, valorNC, irrf, valorLiquido };
 }

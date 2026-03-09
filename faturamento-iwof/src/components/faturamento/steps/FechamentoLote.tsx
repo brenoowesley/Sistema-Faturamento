@@ -573,7 +573,8 @@ export default function FechamentoLote({
                     finalAcrescimos,
                     finalDescontos,
                     r.descontoIR || 0,
-                    r.statusNF === 'EMITIDA'
+                    r.statusNF === 'EMITIDA',
+                    r.boletoUnificado ?? true
                 );
 
                 const basePayload = {
@@ -586,50 +587,14 @@ export default function FechamentoLote({
                     valor_irrf: totais.irrf,
                     numero_nf: r.numeroNF || null,
                     cnpj_filial: r.cnpjFilial || null,
-                    valor_ir_xml: r.descontoIR || 0
-                };
-
-                const payloadItemBase = {
-                    lote_id: currentLoteId,
-                    cliente_id: r.id,
-                    data_competencia: r.data_competencia || null,
-                    valor_bruto: totais.valorBruto,
-                    acrescimos: finalAcrescimos,
-                    descontos: finalDescontos,
-                    valor_irrf: totais.irrf,
-                    numero_nf: r.numeroNF || null,
-                    cnpj_filial: r.cnpjFilial || null,
-                    valor_ir_xml: r.descontoIR || 0
-                };
-
-                if (!r.boletoUnificado && totais.valorNF > 0 && totais.valorNC > 0) {
-                    return [
-                        {
-                            ...payloadItemBase,
-                            tipo_documento: 'NF',
-                            valor_nf_emitida: totais.valorNF,
-                            valor_nc_final: 0,
-                            valor_boleto_final: totais.valorNF - totais.irrf,
-                            observacao_report: "Referência: NF"
-                        },
-                        {
-                            ...payloadItemBase,
-                            tipo_documento: 'NC',
-                            valor_nf_emitida: 0,
-                            valor_nc_final: totais.valorNC,
-                            valor_boleto_final: totais.valorNC,
-                            observacao_report: "Referência: NC"
-                        }
-                    ];
-                }
-
-                return [{
-                    ...payloadItemBase,
-                    tipo_documento: 'UNIFICADO',
+                    valor_ir_xml: r.descontoIR || 0,
+                    tipo_documento: r.boletoUnificado === false ? 'MISTO' : 'UNIFICADO',
                     valor_nf_emitida: totais.valorNF,
                     valor_nc_final: totais.valorNC,
                     valor_boleto_final: totais.valorLiquido
-                }];
+                };
+
+                return [basePayload];
             });
 
             if (consolidadosPayload.length > 0) {
@@ -979,7 +944,8 @@ export default function FechamentoLote({
         (acc, r) => {
             const t = calcularTotaisFaturamento(
                 r.valorBruto, r.valorAcrescimos, r.valorDescontos,
-                r.descontoIR || 0, r.statusNF === 'EMITIDA'
+                r.descontoIR || 0, r.statusNF === 'EMITIDA',
+                r.boletoUnificado ?? true
             );
             acc.bruto += t.valorBruto;
             acc.ajustes += (r.valorAcrescimos - r.valorDescontos);
@@ -1464,8 +1430,8 @@ export default function FechamentoLote({
                                         {/* Boleto Final = pós ajustes − IRRF */}
                                         <td className="py-3 px-3 text-right">
                                             {(() => {
-                                                const totais = calcularTotaisFaturamento(r.valorBruto, r.valorAcrescimos, r.valorDescontos, r.descontoIR || 0, r.statusNF === 'EMITIDA');
-                                                if (r.boletoUnificado && totais.valorNF > 0 && totais.valorNC > 0) {
+                                                const totais = calcularTotaisFaturamento(r.valorBruto, r.valorAcrescimos, r.valorDescontos, r.descontoIR || 0, r.statusNF === 'EMITIDA', r.boletoUnificado ?? true);
+                                                if (!r.boletoUnificado && totais.valorNF > 0 && totais.valorNC > 0) {
                                                     return (
                                                         <div className="flex flex-col items-end gap-1">
                                                             <span className="font-mono text-[11px] font-bold text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20 whitespace-nowrap">

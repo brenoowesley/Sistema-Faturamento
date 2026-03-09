@@ -29,6 +29,7 @@ import {
     Printer
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { calcularTotaisFaturamento } from "@/components/faturamento/utils";
 
 /* ================================================================
    TYPES
@@ -816,6 +817,15 @@ export default function FiscalProcessingPage() {
             for (const item of conciliacao) {
                 const isSemNF = lojasSemNF.includes(item.loja.id);
 
+                const totaisAteAgora = calcularTotaisFaturamento(
+                    item.loja.valorBruto,
+                    item.loja.acrescimos,
+                    item.loja.descontos,
+                    item.irrfCalculado,
+                    Boolean(item.xml),
+                    (item.loja as any).boleto_unificado ?? true
+                );
+
                 // 1. Salvar ou Atualizar registro da Mãe (ou Loja Avulsa)
                 const { error: errorMother } = await supabase
                     .from("faturamento_consolidados")
@@ -824,9 +834,9 @@ export default function FiscalProcessingPage() {
                         acrescimos: item.loja.acrescimos,
                         descontos: item.loja.descontos,
                         valor_ir_xml: item.irrfCalculado,
-                        valor_nf_emitida: isSemNF ? 0 : ((item.loja.valorBruto + item.loja.acrescimos) - item.loja.descontos) * 0.115,
-                        valor_nc_final: item.ncFinal,
-                        valor_boleto_final: item.boletoFinal,
+                        valor_nf_emitida: isSemNF ? 0 : totaisAteAgora.valorNF,
+                        valor_nc_final: totaisAteAgora.valorNC,
+                        valor_boleto_final: totaisAteAgora.valorLiquido,
                         numero_nf: item.xml ? String(item.xml.numeroNF) : null,
                         observacao_report: (item.loja as any).ciclo === "NORDESTÃO" ? `Desconto IRRF: ${fmtCurrency(item.irrfCalculado)}` : null
                     })
