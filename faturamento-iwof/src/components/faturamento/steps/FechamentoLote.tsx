@@ -561,9 +561,7 @@ export default function FechamentoLote({
                 let finalDescontos = r.valorDescontos || 0;
 
                 if (r.id && ajustesMap.has(r.id)) {
-                    const storeAjuste = ajustesMap.get(r.id)!;
-                    finalAcrescimos += storeAjuste.acrescimos;
-                    finalDescontos += storeAjuste.descontos;
+                    // Os valores já foram computados no matchFiles (PHASE 2.5)
                     // Se houver split de Queiroz, apply only once per store ID
                     ajustesMap.delete(r.id);
                 }
