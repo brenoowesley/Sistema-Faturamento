@@ -18,6 +18,7 @@ import {
     Sun,
     Moon,
     Wallet,
+    Activity,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
@@ -28,7 +29,8 @@ const navItems = [
     { label: "Triagem de NFs", href: "/triagem", icon: Receipt },
     { label: "Notas de Crédito", href: "/notas-credito", icon: ReceiptText },
     { label: "Lanç. Parciais", href: "/lancamentos-parciais", icon: ClipboardList },
-    { label: "Gestão de Saques", href: "/saques", icon: Wallet },
+    { label: "Gestão de Saques", href: "/saques", icon: Wallet, exact: true },
+    { label: "Rastreio Transfeera", href: "/saques/acompanhamento", icon: Activity },
     { label: "Como Usar", href: "/como-usar", icon: HelpCircle },
     { label: "Ajustes", href: "/ajustes", icon: SlidersHorizontal },
 ];
@@ -94,8 +96,9 @@ export default function Sidebar() {
                 <nav className="sidebar-nav">
                     <span className="sidebar-section-label">Menu Principal</span>
                     {navItems.map((item) => {
-                        const isActive =
-                            item.href === "/"
+                        const isActive = item.exact
+                            ? pathname === item.href
+                            : item.href === "/"
                                 ? pathname === "/"
                                 : pathname.startsWith(item.href);
 
