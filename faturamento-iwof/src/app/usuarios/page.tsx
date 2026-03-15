@@ -22,7 +22,7 @@ interface UsuarioPerfil {
     id: string;
     email: string;
     nome: string | null;
-    cargo: "ADMIN" | "USER";
+    cargo: "ADMIN" | "USER" | "CX";
     created_at: string;
 }
 
@@ -42,7 +42,7 @@ export default function UsuariosPage() {
     const [newUserName, setNewUserName] = useState("");
     const [newUserEmail, setNewUserEmail] = useState("");
     const [newUserPassword, setNewUserPassword] = useState("");
-    const [newUserRole, setNewUserRole] = useState<"ADMIN" | "USER">("USER");
+    const [newUserRole, setNewUserRole] = useState<"ADMIN" | "USER" | "CX">("USER");
 
     const fetchUsuarios = useCallback(async () => {
         setLoading(true);
@@ -141,7 +141,12 @@ export default function UsuariosPage() {
     };
 
     const handleToggleRole = async (user: UsuarioPerfil) => {
-        const newRole = user.cargo === "ADMIN" ? "USER" : "ADMIN";
+        // Toggle sequence: USER -> CX -> ADMIN -> USER
+        let newRole: "ADMIN" | "USER" | "CX" = "USER";
+        if (user.cargo === "USER") newRole = "CX";
+        else if (user.cargo === "CX") newRole = "ADMIN";
+        else newRole = "USER";
+
         if (!confirm(`Deseja alterar o cargo de ${user.email} para ${newRole}?`)) return;
 
         try {
@@ -261,7 +266,12 @@ export default function UsuariosPage() {
                                             </div>
                                         </td>
                                         <td className="p-4">
-                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black tracking-widest ${user.cargo === "ADMIN" ? "bg-amber-500/10 text-amber-500" : "bg-indigo-500/10 text-indigo-500"
+                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black tracking-widest ${
+                                                user.cargo === "ADMIN" 
+                                                    ? "bg-amber-500/10 text-amber-500" 
+                                                    : user.cargo === "CX"
+                                                        ? "bg-emerald-500/10 text-emerald-500"
+                                                        : "bg-indigo-500/10 text-indigo-500"
                                                 }`}>
                                                 {user.cargo}
                                             </span>
@@ -351,6 +361,7 @@ export default function UsuariosPage() {
                                 className="w-full bg-white/5 border border-[var(--border)] p-3 rounded-xl text-sm text-white"
                             >
                                 <option value="USER">Usuário Comum (USER)</option>
+                                <option value="CX">Customer Experience (CX)</option>
                                 <option value="ADMIN">Administrador (ADMIN)</option>
                             </select>
                         </div>

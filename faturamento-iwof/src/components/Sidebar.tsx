@@ -95,7 +95,14 @@ export default function Sidebar() {
                 {/* Navigation */}
                 <nav className="sidebar-nav">
                     <span className="sidebar-section-label">Menu Principal</span>
-                    {navItems.map((item) => {
+                    {navItems
+                        .filter(item => {
+                            if (cargo === "CX") {
+                                return item.label === "Rastreio Transfeera";
+                            }
+                            return true;
+                        })
+                        .map((item) => {
                         const isActive = item.exact
                             ? pathname === item.href
                             : item.href === "/"
