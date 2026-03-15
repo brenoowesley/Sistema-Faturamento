@@ -58,7 +58,7 @@ interface LoteLocal {
 
 function sanitizeCpf(v: string) { return (v ?? "").trim().replace(/[\.\-]/g, ""); }
 function sanitizeStr(v: string) { return (v ?? "").trim(); }
-function localId() { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
+function localId() { return crypto.randomUUID(); }
 
 function parseDate(raw: string | number | Date): Date | null {
     if (!raw) return null;
@@ -217,7 +217,7 @@ function buildTransfeeraXlsx(items: SaqueItem[], filename: string) {
             sanitizeStr(i.cpf_favorecido),
             i.valor_real,
             "",
-            "",
+            i.id,
             "REPASSE IWOF",
             "",
             "",
