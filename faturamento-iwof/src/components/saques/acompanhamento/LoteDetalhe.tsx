@@ -36,6 +36,7 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
     const [itens, setItens] = useState<SaqueItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState(highlight || "");
+    const [statusFilter, setStatusFilter] = useState("TODOS");
 
     useEffect(() => {
         if (highlight) {
@@ -68,14 +69,25 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
     }
 
     const filteredItens = useMemo(() => {
-        if (!searchTerm) return itens;
-        const lowerSearch = searchTerm.toLowerCase();
-        return itens.filter(i => 
-            (i.nome_usuario?.toLowerCase().includes(lowerSearch)) ||
-            (i.cpf_favorecido?.includes(searchTerm)) ||
-            (i.cpf_conta?.includes(searchTerm))
-        );
-    }, [itens, searchTerm]);
+        let result = itens;
+
+        if (statusFilter === "EXPORTADOS") {
+            result = result.filter(i => i.status_item === "APROVADO");
+        } else if (statusFilter === "REMOVIDOS") {
+            result = result.filter(i => i.status_item !== "APROVADO");
+        }
+
+        if (searchTerm) {
+            const lowerSearch = searchTerm.toLowerCase();
+            result = result.filter(i => 
+                (i.nome_usuario?.toLowerCase().includes(lowerSearch)) ||
+                (i.cpf_favorecido?.includes(searchTerm)) ||
+                (i.cpf_conta?.includes(searchTerm))
+            );
+        }
+
+        return result;
+    }, [itens, searchTerm, statusFilter]);
 
     if (loading) {
         return <div className="p-12 text-center text-fg-muted font-mono">Carregando detalhes do lote...</div>;
@@ -114,16 +126,27 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
 
             {/* Toolbar */}
             <div className="card bg-bg-card p-4 rounded-lg flex flex-col sm:flex-row justify-between items-center gap-4">
-                <div className="relative w-full sm:w-96">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted" size={16} />
-                    <input
-                        type="text"
-                        placeholder="Procurar utilizador ou CPF neste lote..."
-                        className="input pl-10 w-full"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        autoFocus={!!highlight}
-                    />
+                <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto flex-1">
+                    <div className="relative w-full sm:w-80">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted" size={16} />
+                        <input
+                            type="text"
+                            placeholder="Procurar utilizador ou CPF neste lote..."
+                            className="input pl-10 w-full"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            autoFocus={!!highlight}
+                        />
+                    </div>
+                    <select 
+                        className="input w-full sm:w-48"
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
+                    >
+                        <option value="TODOS">Todos os Registros</option>
+                        <option value="EXPORTADOS">Apenas Exportados</option>
+                        <option value="REMOVIDOS">Removidos / Bloqueados</option>
+                    </select>
                 </div>
                 <div className="text-sm text-fg-muted whitespace-nowrap">
                     Exibindo {filteredItens.length} de {itens.length} registros
@@ -172,10 +195,16 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
                                         </td>
                                         <td className="font-bold text-fg">R$ {item.valor?.toFixed(2)}</td>
                                         <td>
-                                            <span className="badge inline-flex items-center gap-1 border border-border bg-bg text-fg-muted">
-                                                <CheckCircle2 size={12} className="opacity-50" />
-                                                A Aguardar Sincronização
-                                            </span>
+                                            {item.status_item === 'APROVADO' ? (
+                                                <span className="badge inline-flex items-center gap-1 border border-border bg-bg text-fg-muted">
+                                                    <CheckCircle2 size={12} className="opacity-50" />
+                                                    A Aguardar Sincronização
+                                                </span>
+                                            ) : (
+                                                <span className="badge badge-danger text-xs px-2 py-0.5" title="Não enviado para transfeera">
+                                                    Removido da Exportação
+                                                </span>
+                                            )}
                                         </td>
                                         <td className="text-center">
                                             <button className="btn btn-ghost mx-auto p-2 opacity-40 cursor-not-allowed" disabled title="Em breve">
