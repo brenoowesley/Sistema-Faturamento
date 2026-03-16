@@ -64,6 +64,8 @@ interface Agendamento {
     vaga: string;
     inicio: Date | null;
     termino: Date | null;
+    inicioStr?: string;
+    terminoStr?: string;
     refAgendamento: string;
     agendadoEm: Date | null;
     iniciadoEm: Date | null;
@@ -139,7 +141,7 @@ function parseDate(val: unknown): Date | null {
         // Fractional part = time of day
         const frac = num - Math.floor(num);
         const totalSeconds = Math.round(frac * 86400);
-        epoch.setUTCHours(Math.floor(totalSeconds / 3600));
+        epoch.setUTCHours(Math.floor(totalSeconds / 3600) + 3);
         epoch.setUTCMinutes(Math.floor((totalSeconds % 3600) / 60));
         epoch.setUTCSeconds(totalSeconds % 60);
         return epoch;
@@ -148,16 +150,15 @@ function parseDate(val: unknown): Date | null {
     const dtMatch = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
     if (dtMatch) {
         const [, day, month, year, hour, min, sec] = dtMatch;
-        return new Date(
-            parseInt(year), parseInt(month) - 1, parseInt(day),
-            parseInt(hour), parseInt(min), sec ? parseInt(sec) : 0
-        );
+        const pad = (n: unknown) => String(n).padStart(2, '0');
+        return new Date(`${year}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(min)}:${pad(sec || 0)}-03:00`);
     }
     // DD/MM/YYYY (date only)
     const dateOnly = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
     if (dateOnly) {
         const [, day, month, year] = dateOnly;
-        return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+        const pad = (n: unknown) => String(n).padStart(2, '0');
+        return new Date(`${year}-${pad(month)}-${pad(day)}T00:00:00-03:00`);
     }
     // Generic ISO / other formats
     const d = new Date(s);
@@ -434,6 +435,8 @@ export default function NovoFaturamento() {
                 const concluidoEm = colConcluidoEm ? parseDate(row[colConcluidoEm]) : null;
                 const inicio = iniciadoEm ?? (colInicio ? parseDate(row[colInicio]) : null);
                 const termino = concluidoEm ?? (colTermino ? parseDate(row[colTermino]) : null);
+                const inicioStr = (colIniciadoEm && row[colIniciadoEm]) || (colInicio && row[colInicio]) || "";
+                const terminoStr = (colConcluidoEm && row[colConcluidoEm]) || (colTermino && row[colTermino]) || "";
                 const refAgendamento = colRef ? String(row[colRef] ?? "").trim() : "";
                 const agendadoEm = colAgendadoEm ? parseDate(row[colAgendadoEm]) : null;
                 const valorIwof = colValorIwof ? parseNumber(row[colValorIwof]) : 0;
@@ -596,6 +599,8 @@ export default function NovoFaturamento() {
                     vaga,
                     inicio,
                     termino,
+                    inicioStr,
+                    terminoStr,
                     refAgendamento,
                     agendadoEm,
                     iniciadoEm,
@@ -2066,7 +2071,7 @@ export default function NovoFaturamento() {
                                                             <td className="table-primary">{a.loja}</td>
                                                             <td className="text-sm text-[var(--fg-muted)]">{a.nome}</td>
                                                             <td className="table-mono" style={{ color: "#f59e0b" }}>
-                                                                {fmtDate(a.inicio)} {fmtTime(a.inicio)}
+                                                                {a.inicioStr || fmtDate(a.inicio)}
                                                             </td>
                                                             <td className="text-xs text-[var(--fg-dim)]">
                                                                 {periodoInicio} → {periodoFim}
@@ -2634,8 +2639,8 @@ export default function NovoFaturamento() {
                                                         </div>
                                                     </td>
                                                     <td className="text-sm text-[var(--fg-muted)]">{a.nome}</td>
-                                                    <td className="text-sm text-[var(--fg-muted)] whitespace-nowrap">{fmtDate(a.inicio)} {fmtTime(a.inicio)}</td>
-                                                    <td className="text-sm text-[var(--fg-muted)] whitespace-nowrap">{fmtDate(a.termino)} {fmtTime(a.termino)}</td>
+                                                    <td className="text-sm text-[var(--fg-muted)] whitespace-nowrap">{a.inicioStr || fmtDate(a.inicio)}</td>
+                                                    <td className="text-sm text-[var(--fg-muted)] whitespace-nowrap">{a.terminoStr || fmtDate(a.termino)}</td>
                                                     <td className="table-mono">{a.fracaoHora.toFixed(2)}</td>
                                                     <td className="table-mono font-semibold" style={{ color: "#22c55e" }}>
                                                         {fmtCurrency(a.valorIwof)}
@@ -2695,7 +2700,7 @@ export default function NovoFaturamento() {
                                                             <span className="table-primary text-amber-500">{a.loja}</span>
                                                         </td>
                                                         <td className="text-sm text-[var(--fg-muted)]">{a.nome}</td>
-                                                        <td className="text-sm text-[var(--fg-muted)] whitespace-nowrap">{fmtDate(a.inicio)} {fmtTime(a.inicio)}</td>
+                                                        <td className="text-sm text-[var(--fg-muted)] whitespace-nowrap">{a.inicioStr || fmtDate(a.inicio)}</td>
                                                         <td className="table-mono text-[var(--fg-muted)]">{fmtCurrency(a.valorIwof)}</td>
                                                         <td className="text-xs text-amber-500">Nome Conta Azul divergente/ausente no banco</td>
                                                         <td>

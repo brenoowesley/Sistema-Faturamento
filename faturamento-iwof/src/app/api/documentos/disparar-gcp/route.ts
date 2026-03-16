@@ -172,17 +172,21 @@ export async function POST(req: NextRequest) {
         const formatarParaGCP = (valor: number) => {
             return Number(valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         };
-        const formatDateStr = (dateStr: string) => {
-            if (!dateStr) return "-";
-            const d = new Date(dateStr);
-            // Formato DD/MM/YYYY HH:mm para precisão no faturamento
-            return d.toLocaleString("pt-BR", {
-                day: "2-digit",
-                month: "2-digit",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit"
-            });
+        const formatDateStr = (dateVal: any) => {
+            if (!dateVal) return "-";
+            const d = new Date(dateVal);
+            if (isNaN(d.getTime())) return "-";
+            
+            // Garantir que o fuso horário de Brasília seja respeitado
+            return new Intl.DateTimeFormat('pt-BR', {
+                timeZone: 'America/Sao_Paulo',
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            }).format(d).replace(',', '');
         };
         const buildMatriz = (ags: any[]) => {
             return ags.sort((a: any, b: any) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime())
