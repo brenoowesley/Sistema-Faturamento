@@ -434,6 +434,8 @@ export default function NovoFaturamento() {
                 const concluidoEm = colConcluidoEm ? parseDate(row[colConcluidoEm]) : null;
                 const inicio = iniciadoEm ?? (colInicio ? parseDate(row[colInicio]) : null);
                 const termino = concluidoEm ?? (colTermino ? parseDate(row[colTermino]) : null);
+                const refAgendamento = colRef ? String(row[colRef] ?? "").trim() : "";
+                const agendadoEm = colAgendadoEm ? parseDate(row[colAgendadoEm]) : null;
                 const valorIwof = colValorIwof ? parseNumber(row[colValorIwof]) : 0;
                 const fracaoHora = colFracao ? parseNumber(row[colFracao]) : 0;
                 const statusAgendamento = colStatusAgt ? String(row[colStatusAgt] ?? "").trim() : "";
