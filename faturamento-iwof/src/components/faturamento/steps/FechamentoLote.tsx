@@ -153,26 +153,38 @@ export default function FechamentoLote({
                             numeroNF = nfMatch ? nfMatch[1] : "";
                         }
 
-                        // 3. IRRF: Ancora na seção "TRIBUTAÇÃO FEDERAL" e extrai o valor logo após "IRRF"
-                        const tributacaoBlock = fullText.match(/TRIBUTA[ÇC][AÃ]O FEDERAL[\s\S]{0,500}?(?:VALOR\s+TOTAL|$)/i)?.[0] || fullText;
-                        const irrfMatch = tributacaoBlock.match(/\bIRRF\b[\s\S]{0,60}?(?:R\$)?\s*([\d.,]+)/i);
-                        let irrfExtraido = 0;
-                        if (irrfMatch && irrfMatch[1]) {
-                            const limpo = irrfMatch[1].replace(/\./g, '').replace(',', '.');
-                            if (!isNaN(parseFloat(limpo))) {
-                                irrfExtraido = parseFloat(limpo);
+                        // 3. EXTRAÇÃO DE IMPOSTOS (Regex robusto ancorado no R$)
+                        const extractTaxValue = (text: string, taxName: string): number => {
+                            const regex = new RegExp(`\\b${taxName}\\b[\\s\\S]{0,60}?R\\$\\s*([\\d.,]+)`, "i");
+                            const match = text.match(regex);
+                            if (match && match[1]) {
+                                // Formatação brasileira: "1.234,56" -> "1234.56"
+                                const limpo = match[1].replace(/\./g, "").replace(",", ".");
+                                const val = parseFloat(limpo);
+                                return isNaN(val) ? 0 : val;
                             }
-                        }
+                            return 0;
+                        };
+
+                        const irrfExtraido = extractTaxValue(tributacaoBlock, "IRRF");
+                        const pisExtraido = extractTaxValue(tributacaoBlock, "PIS");
+                        const cofinsExtraido = extractTaxValue(tributacaoBlock, "COFINS");
+                        const csllExtraido = extractTaxValue(tributacaoBlock, "CSLL");
+                        const issExtraido = extractTaxValue(tributacaoBlock, "ISS");
 
                         if (numeroNF) {
                             newParsedMap[numeroNF] = {
                                 cnpj: cnpjClean,
                                 irrf: irrfExtraido,
+                                pis: pisExtraido,
+                                cofins: cofinsExtraido,
+                                csll: csllExtraido,
+                                iss: issExtraido,
                                 numero_nf_real: numeroNF,
                                 valorServicos: 0,
                                 name: f.name
                             };
-                            console.log(`[PDF Fallback] ${f.name} -> NF: ${numeroNF}, CNPJ: ${cnpjExtraido}, IRRF: ${irrfExtraido}`);
+                            console.log(`[PDF Fallback] ${f.name} -> NF: ${numeroNF}, IRRF: ${irrfExtraido}, PIS: ${pisExtraido}`);
                         }
                     } catch (err) {
                         console.error("Erro ao processar PDF:", f.name, err);
