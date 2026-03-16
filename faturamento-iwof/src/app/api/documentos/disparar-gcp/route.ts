@@ -175,8 +175,14 @@ export async function POST(req: NextRequest) {
         const formatDateStr = (dateStr: string) => {
             if (!dateStr) return "-";
             const d = new Date(dateStr);
-            // Formato estrito DD/MM/YYYY solicitado pelo template Jinja
-            return d.toLocaleDateString("pt-BR");
+            // Formato DD/MM/YYYY HH:mm para precisão no faturamento
+            return d.toLocaleString("pt-BR", {
+                day: "2-digit",
+                month: "2-digit",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit"
+            });
         };
         const buildMatriz = (ags: any[]) => {
             return ags.sort((a: any, b: any) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime())

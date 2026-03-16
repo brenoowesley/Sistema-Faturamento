@@ -430,12 +430,10 @@ export default function NovoFaturamento() {
                 const estado = colEstado ? String(row[colEstado] ?? "").toUpperCase().trim() : "";
                 const loja = colLoja ? String(row[colLoja] ?? "").toUpperCase().trim() : "";
                 const vaga = colVaga ? String(row[colVaga] ?? "").trim() : "";
-                const inicio = colInicio ? parseDate(row[colInicio]) : null;
-                const termino = colTermino ? parseDate(row[colTermino]) : null;
-                const refAgendamento = colRef ? String(row[colRef] ?? "").trim() : "";
-                const agendadoEm = colAgendadoEm ? parseDate(row[colAgendadoEm]) : null;
                 const iniciadoEm = colIniciadoEm ? parseDate(row[colIniciadoEm]) : null;
                 const concluidoEm = colConcluidoEm ? parseDate(row[colConcluidoEm]) : null;
+                const inicio = iniciadoEm ?? (colInicio ? parseDate(row[colInicio]) : null);
+                const termino = concluidoEm ?? (colTermino ? parseDate(row[colTermino]) : null);
                 const valorIwof = colValorIwof ? parseNumber(row[colValorIwof]) : 0;
                 const fracaoHora = colFracao ? parseNumber(row[colFracao]) : 0;
                 const statusAgendamento = colStatusAgt ? String(row[colStatusAgt] ?? "").trim() : "";
@@ -1117,8 +1115,8 @@ export default function NovoFaturamento() {
                 nome_profissional: a.nome || "Individual",
                 loja_id: a.clienteId,
                 cnpj_loja: a.cnpj || null,
-                data_inicio: a.inicio?.toISOString() ?? periodoInicio,
-                data_fim: a.termino?.toISOString() ?? periodoFim,
+                data_inicio: a.inicio?.toISOString() ?? (periodoInicio ? `${periodoInicio}T00:00:00.000Z` : null),
+                data_fim: a.termino?.toISOString() ?? (periodoFim ? `${periodoFim}T23:59:59.999Z` : null),
                 valor_iwof: Number(parseFloat(String(a.manualValue ?? a.suggestedValorIwof ?? a.valorIwof)).toFixed(2)),
                 fracao_hora: a.fracaoHora,
                 status_validacao: finalStatus,
@@ -2066,7 +2064,7 @@ export default function NovoFaturamento() {
                                                             <td className="table-primary">{a.loja}</td>
                                                             <td className="text-sm text-[var(--fg-muted)]">{a.nome}</td>
                                                             <td className="table-mono" style={{ color: "#f59e0b" }}>
-                                                                {fmtDate(a.inicio)}
+                                                                {fmtDate(a.inicio)} {fmtTime(a.inicio)}
                                                             </td>
                                                             <td className="text-xs text-[var(--fg-dim)]">
                                                                 {periodoInicio} → {periodoFim}
@@ -2615,8 +2613,8 @@ export default function NovoFaturamento() {
                                             <tr>
                                                 <th>Loja</th>
                                                 <th>Usuário</th>
-                                                <th>Início</th>
-                                                <th>Término</th>
+                                                <th className="min-w-[150px]">Início</th>
+                                                <th className="min-w-[150px]">Término</th>
                                                 <th>F.H.C</th>
                                                 <th>Valor IWOF</th>
                                                 <th>Ciclo</th>
@@ -2634,8 +2632,8 @@ export default function NovoFaturamento() {
                                                         </div>
                                                     </td>
                                                     <td className="text-sm text-[var(--fg-muted)]">{a.nome}</td>
-                                                    <td className="text-sm text-[var(--fg-muted)]">{fmtDate(a.inicio)}</td>
-                                                    <td className="text-sm text-[var(--fg-muted)]">{fmtDate(a.termino)}</td>
+                                                    <td className="text-sm text-[var(--fg-muted)] whitespace-nowrap">{fmtDate(a.inicio)} {fmtTime(a.inicio)}</td>
+                                                    <td className="text-sm text-[var(--fg-muted)] whitespace-nowrap">{fmtDate(a.termino)} {fmtTime(a.termino)}</td>
                                                     <td className="table-mono">{a.fracaoHora.toFixed(2)}</td>
                                                     <td className="table-mono font-semibold" style={{ color: "#22c55e" }}>
                                                         {fmtCurrency(a.valorIwof)}
@@ -2695,7 +2693,7 @@ export default function NovoFaturamento() {
                                                             <span className="table-primary text-amber-500">{a.loja}</span>
                                                         </td>
                                                         <td className="text-sm text-[var(--fg-muted)]">{a.nome}</td>
-                                                        <td className="text-sm text-[var(--fg-muted)]">{fmtDate(a.inicio)}</td>
+                                                        <td className="text-sm text-[var(--fg-muted)] whitespace-nowrap">{fmtDate(a.inicio)} {fmtTime(a.inicio)}</td>
                                                         <td className="table-mono text-[var(--fg-muted)]">{fmtCurrency(a.valorIwof)}</td>
                                                         <td className="text-xs text-amber-500">Nome Conta Azul divergente/ausente no banco</td>
                                                         <td>
