@@ -154,6 +154,8 @@ export default function FechamentoLote({
                         }
 
                         // 3. EXTRAÇÃO DE IMPOSTOS (Regex robusto ancorado no R$)
+                        const tributacaoBlock = fullText.match(/TRIBUTA[ÇC][AÃ]O FEDERAL[\s\S]{0,500}?(?:VALOR\s+TOTAL|$)/i)?.[0] || fullText;
+
                         const extractTaxValue = (text: string, taxName: string): number => {
                             const regex = new RegExp(`\\b${taxName}\\b[\\s\\S]{0,60}?R\\$\\s*([\\d.,]+)`, "i");
                             const match = text.match(regex);
