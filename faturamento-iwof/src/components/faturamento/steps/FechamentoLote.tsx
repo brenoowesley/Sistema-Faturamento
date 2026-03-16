@@ -157,12 +157,13 @@ export default function FechamentoLote({
                         const tributacaoBlock = fullText.match(/TRIBUTA[ÇC][AÃ]O FEDERAL[\s\S]{0,500}?(?:VALOR\s+TOTAL|$)/i)?.[0] || fullText;
 
                         const extractTaxValue = (text: string, taxName: string): number => {
-                            const regex = new RegExp(`\\b${taxName}\\b[\\s\\S]{0,60}?R\\$\\s*([\\d.,]+)`, "i");
+                            // Regex não-ganancioso que busca o R$ após o nome do imposto
+                            const regex = new RegExp(`${taxName}.*?R\\$\\s*([\\d,.]+)`, "i");
                             const match = text.match(regex);
                             if (match && match[1]) {
-                                // Formatação brasileira: "1.234,56" -> "1234.56"
-                                const limpo = match[1].replace(/\./g, "").replace(",", ".");
-                                const val = parseFloat(limpo);
+                                // Limpeza de caracteres brasileiros: remove pontos de milhar e troca vírgula por ponto
+                                const valorLimpo = match[1].replace(/\./g, "").replace(",", ".");
+                                const val = parseFloat(valorLimpo);
                                 return isNaN(val) ? 0 : val;
                             }
                             return 0;
