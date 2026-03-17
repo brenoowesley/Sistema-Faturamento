@@ -99,10 +99,10 @@ export async function POST(req: NextRequest) {
             // Chunked fetching for better API citizenship
             for (const id of ids) {
                  try {
-                    // Strategy 1: Search by id_integracao (Official V2)
-                    let qs = new URLSearchParams({ id_integracao: id }).toString();
-                    console.log(`[Transfeera] Procurando ID ${id} via Strategy 1: /transferencias?${qs}`);
-                    let res = await fetch(`${baseUrl}/transferencias?${qs}`, {
+                    // Strategy 1: Search by id_integracao (Official Portuguese V2)
+                    let qsPT = new URLSearchParams({ id_integracao: id }).toString();
+                    console.log(`[Transfeera] Procurando ID ${id} - Strategy 1 (PT): /transferencias?${qsPT}`);
+                    let resPT = await fetch(`${baseUrl}/transferencias?${qsPT}`, {
                         headers: { 
                             "Authorization": `Bearer ${token}`,
                             "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
@@ -111,31 +111,40 @@ export async function POST(req: NextRequest) {
                     
                     let match = null;
 
-                    if (res.ok) {
-                        const payload = await res.json();
+                    if (resPT.ok) {
+                        const payload = await resPT.json();
                         const transfers = Array.isArray(payload) ? payload : payload.data || [];
-                        console.log(`[Transfeera] Strategy 1 retornou ${transfers.length} itens.`);
-                        if (transfers.length > 0) {
-                            console.log(`[Transfeera] Amostra do primeiro ID retornado: "${transfers[0].id_integracao}" vs esperado: "${id}"`);
-                        }
                         match = transfers.find((t: any) => t.id_integracao === id);
-                    } else {
-                        console.warn(`[Transfeera] Strategy 1 falhou com status ${res.status}`);
                     }
 
-                    // Strategy 2: Fallback to /transfer/{id} (Legacy or User Suggested)
+                    // Strategy 2: Search by integration_id (Official English V2)
                     if (!match) {
-                        console.log(`[Transfeera] Tentando Strategy 2 para ID ${id}: /transfer/${id}`);
+                        let qsEN = new URLSearchParams({ integration_id: id }).toString();
+                        console.log(`[Transfeera] Procurando ID ${id} - Strategy 2 (EN): /transfers?${qsEN}`);
+                        const resEN = await fetch(`${baseUrl}/transfers?${qsEN}`, {
+                            headers: { 
+                                "Authorization": `Bearer ${token}`,
+                                "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
+                            }
+                        });
+                        if (resEN.ok) {
+                            const payload = await resEN.json();
+                            const transfers = Array.isArray(payload) ? payload : payload.data || [];
+                            match = transfers.find((t: any) => (t.integration_id === id || t.id_integracao === id));
+                        }
+                    }
+
+                    // Strategy 3: Fallback to /transfer/{id} (Legacy / Direct)
+                    if (!match) {
+                        console.log(`[Transfeera] Procurando ID ${id} - Strategy 3 (Direct): /transfer/${id}`);
                         const fallbackRes = await fetch(`${baseUrl}/transfer/${id}`, {
                             headers: { 
                                 "Authorization": `Bearer ${token}`,
                                 "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
                             }
                         });
-                        console.log(`[Transfeera] Strategy 2 status: ${fallbackRes.status}`);
                         if (fallbackRes.ok) {
                             match = await fallbackRes.json();
-                            console.log(`[Transfeera] Strategy 2 SUCESSO. Match encontrado.`);
                         }
                     }
 
@@ -143,7 +152,7 @@ export async function POST(req: NextRequest) {
                         console.log(`[Transfeera] ID ${id} encontrado com status: ${match.status}`);
                         results[id] = match.status;
                     } else {
-                        console.log(`[Transfeera] ID ${id} não encontrado em nenhuma estratégia.`);
+                        console.log(`[Transfeera] ID ${id} não encontrado em NENHUMA estratégia.`);
                         results[id] = "NAO_SUBMETIDO";
                     }
 
@@ -184,38 +193,67 @@ export async function GET(req: NextRequest) {
             const baseUrl = getTransfeeraBaseUrl();
 
             // First we must find the official Transfeera internal ID based on our id_integracao
-            const qs = new URLSearchParams({ id_integracao: idIntegracao }).toString();
-            const listRes = await fetch(`${baseUrl}/transferencias?${qs}`, {
+            // Try Strategy 1 (PT)
+            const qsPT = new URLSearchParams({ id_integracao: idIntegracao }).toString();
+            let listRes = await fetch(`${baseUrl}/transferencias?${qsPT}`, {
                 headers: { 
                     "Authorization": `Bearer ${token}`,
                     "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
                 }
             });
 
-            if (!listRes.ok) {
-                return NextResponse.json({ error: "Erro ao buscar transferência na Transfeera" }, { status: 502 });
+            let match = null;
+            if (listRes.ok) {
+                const payload = await listRes.json();
+                const transfers = Array.isArray(payload) ? payload : payload.data || [];
+                match = transfers.find((t: any) => t.id_integracao === idIntegracao);
             }
 
-            const payload = await listRes.json();
-            const transfers = Array.isArray(payload) ? payload : payload.data || [];
-            const match = transfers.find((t: any) => t.id_integracao === idIntegracao);
+            // Try Strategy 2 (EN)
+            if (!match) {
+                const qsEN = new URLSearchParams({ integration_id: idIntegracao }).toString();
+                const listResEN = await fetch(`${baseUrl}/transfers?${qsEN}`, {
+                    headers: { 
+                        "Authorization": `Bearer ${token}`,
+                        "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
+                    }
+                });
+                if (listResEN.ok) {
+                    const payload = await listResEN.json();
+                    const transfers = Array.isArray(payload) ? payload : payload.data || [];
+                    match = transfers.find((t: any) => (t.integration_id === idIntegracao || t.id_integracao === idIntegracao));
+                }
+            }
 
             if (!match || !match.id) {
-                return NextResponse.json({ error: "Transferência não encontrada no gateway" }, { status: 404 });
+                return NextResponse.json({ error: "Transferência não encontrada no gateway após múltiplas tentativas" }, { status: 404 });
             }
 
             // Now get the receipt using Transfeera's internal transfer ID
             const transfeeraId = match.id;
-            const receiptRes = await fetch(`${baseUrl}/transferencias/${transfeeraId}/comprovante`, {
+            
+            // Try Receipt Strategy 1 (PT)
+            let receiptRes = await fetch(`${baseUrl}/transferencias/${transfeeraId}/comprovante`, {
                 headers: { 
                     "Authorization": `Bearer ${token}`,
                     "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
                 }
             });
 
+            // Try Receipt Strategy 2 (EN)
             if (!receiptRes.ok) {
-                return NextResponse.json({ error: "Comprovativo não disponível ou erro no provedor" }, { status: 502 });
+                receiptRes = await fetch(`${baseUrl}/transfers/${transfeeraId}/receipt`, {
+                    headers: { 
+                        "Authorization": `Bearer ${token}`,
+                        "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
+                    }
+                });
             }
+
+            if (!receiptRes.ok) {
+                return NextResponse.json({ error: "Comprovativo não disponível em nenhum endpoint do provedor" }, { status: 502 });
+            }
+
 
             // Provide the binary stream straight back to the client
             const receiptBlob = await receiptRes.blob();
