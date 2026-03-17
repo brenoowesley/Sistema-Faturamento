@@ -693,7 +693,7 @@ function LotePanel({
             if (loteErr) throw loteErr;
 
             const itens = lote.items.map((i) => ({
-                id: i.id, // CRITICAL: Use the same ID used for XLSX (i.id)
+                id: i.id, // CRÍTICO: Garante que o UUID gerado no parse do Excel seja o mesmo do Banco de Dados
                 lote_id: loteDb.id,
                 cpf_conta: i.cpf_conta,
                 cpf_favorecido: i.cpf_favorecido,
