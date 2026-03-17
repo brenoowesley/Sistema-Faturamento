@@ -29,6 +29,7 @@ async function getTransfeeraToken() {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
+                "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
             },
             body: JSON.stringify({
                 grant_type: "client_credentials",
@@ -100,8 +101,12 @@ export async function POST(req: NextRequest) {
                  try {
                     // Strategy 1: Search by id_integracao (Official V2)
                     let qs = new URLSearchParams({ id_integracao: id }).toString();
+                    console.log(`[Transfeera] Procurando ID ${id} via Strategy 1: /transferencias?${qs}`);
                     let res = await fetch(`${baseUrl}/transferencias?${qs}`, {
-                        headers: { "Authorization": `Bearer ${token}` }
+                        headers: { 
+                            "Authorization": `Bearer ${token}`,
+                            "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
+                        }
                     });
                     
                     let match = null;
@@ -109,28 +114,39 @@ export async function POST(req: NextRequest) {
                     if (res.ok) {
                         const payload = await res.json();
                         const transfers = Array.isArray(payload) ? payload : payload.data || [];
+                        console.log(`[Transfeera] Strategy 1 retornou ${transfers.length} itens.`);
+                        if (transfers.length > 0) {
+                            console.log(`[Transfeera] Amostra do primeiro ID retornado: "${transfers[0].id_integracao}" vs esperado: "${id}"`);
+                        }
                         match = transfers.find((t: any) => t.id_integracao === id);
+                    } else {
+                        console.warn(`[Transfeera] Strategy 1 falhou com status ${res.status}`);
                     }
 
                     // Strategy 2: Fallback to /transfer/{id} (Legacy or User Suggested)
                     if (!match) {
+                        console.log(`[Transfeera] Tentando Strategy 2 para ID ${id}: /transfer/${id}`);
                         const fallbackRes = await fetch(`${baseUrl}/transfer/${id}`, {
-                            headers: { "Authorization": `Bearer ${token}` }
+                            headers: { 
+                                "Authorization": `Bearer ${token}`,
+                                "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
+                            }
                         });
+                        console.log(`[Transfeera] Strategy 2 status: ${fallbackRes.status}`);
                         if (fallbackRes.ok) {
                             match = await fallbackRes.json();
+                            console.log(`[Transfeera] Strategy 2 SUCESSO. Match encontrado.`);
                         }
                     }
 
                     if (match) {
-                        results[id] = match.status; // ex: FINALIZADO, EM_PROCESSAMENTO, FALHA
-                    } else if (res.status !== 200 && res.status !== 404) {
-                        // If the primary request failed with something other than 404, report it
-                        console.warn(`[Transfeera API] Erro na consulta primária ID ${id}: ${res.status}`);
-                        results[id] = `ERRO_${res.status}` as any;
+                        console.log(`[Transfeera] ID ${id} encontrado com status: ${match.status}`);
+                        results[id] = match.status;
                     } else {
+                        console.log(`[Transfeera] ID ${id} não encontrado em nenhuma estratégia.`);
                         results[id] = "NAO_SUBMETIDO";
                     }
+
                  } catch (e) {
                      console.error(`[Transfeera API] Erro de rede/exceção para ID ${id}:`, e);
                      results[id] = "ERRO_REDE";
@@ -170,7 +186,10 @@ export async function GET(req: NextRequest) {
             // First we must find the official Transfeera internal ID based on our id_integracao
             const qs = new URLSearchParams({ id_integracao: idIntegracao }).toString();
             const listRes = await fetch(`${baseUrl}/transferencias?${qs}`, {
-                headers: { "Authorization": `Bearer ${token}` }
+                headers: { 
+                    "Authorization": `Bearer ${token}`,
+                    "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
+                }
             });
 
             if (!listRes.ok) {
@@ -188,7 +207,10 @@ export async function GET(req: NextRequest) {
             // Now get the receipt using Transfeera's internal transfer ID
             const transfeeraId = match.id;
             const receiptRes = await fetch(`${baseUrl}/transferencias/${transfeeraId}/comprovante`, {
-                headers: { "Authorization": `Bearer ${token}` }
+                headers: { 
+                    "Authorization": `Bearer ${token}`,
+                    "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
+                }
             });
 
             if (!receiptRes.ok) {
