@@ -20,8 +20,8 @@ async function getTransfeeraToken() {
         : "https://login-api.transfeera.com";
 
     if (!clientId || !clientSecret) {
-        console.error("Missing Transfeera credentials in environment variables.");
-        throw new Error("Transfeera Auth configuration is missing.");
+        console.error("Transfeera Error: Missing TRANSFEERA_CLIENT_ID or TRANSFEERA_CLIENT_SECRET");
+        throw new Error("Configuração de API ausente no servidor");
     }
 
     try {
@@ -168,7 +168,8 @@ export async function POST(req: NextRequest) {
 
     } catch (err: any) {
         console.error("Transfeera Proxy Error:", err);
-        return NextResponse.json({ error: err.message }, { status: 500 });
+        const status = err.message === "Configuração de API ausente no servidor" ? 400 : 500;
+        return NextResponse.json({ error: err.message }, { status });
     }
 }
 
@@ -283,6 +284,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
     } catch (error: any) {
         console.error("Transfeera Receipt Error:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const status = error.message === "Configuração de API ausente no servidor" ? 400 : 500;
+        return NextResponse.json({ error: error.message }, { status });
     }
 }
