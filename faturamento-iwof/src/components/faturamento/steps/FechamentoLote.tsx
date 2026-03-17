@@ -455,20 +455,29 @@ export default function FechamentoLote({
             }
 
             // Automatic Smatch Match (normalized name) with priority for nomeContaAzul
-            const normalizedStoreName = normalizarNome(report.nomeContaAzul);
-            const normalizedRazao = normalizarNome(report.razaoSocial);
+            const normalizedStoreName = report.nomeContaAzul.trim().toUpperCase();
+            const normalizedRazao = report.razaoSocial.trim().toUpperCase();
+
+            // Lógica de Regex Fuzzy: _ atua como coringa para caracteres especiais
+            const criarRegexDeArquivo = (nomeArquivo: string) => {
+                const caracteresPermitidos = "[ &ÇÁÀÂÃÉÊÍÓÔÕÚ']";
+                const pattern = nomeArquivo
+                    .toUpperCase()
+                    .replace(/\.PDF$/i, "") // Remove extensão
+                    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // Escape de caracteres de regex
+                    .replace(/_/g, caracteresPermitidos); // APENAS underlines viram coringa
+                return new RegExp(`^${pattern}$`, 'i');
+            };
 
             // SEQUENTIAL ALLOCATION (Senior Rule): find the first available boleto that matches the store
             const boletoMatch = boletoFiles.find(f => {
                 if (matchedBoletoNames.has(f.name)) return false;
                 if (!f.name.toLowerCase().endsWith(".pdf")) return false; // PDF only (Senior Rule)
 
-                // Normalization Rule: replace _, remove ', remove accents, lowercase
-                const normalizedFile = normalizarNome(f.name.replace(/\.pdf$/i, ""));
-
-                return normalizedFile === normalizedStoreName || normalizedFile === normalizedRazao ||
-                    normalizedFile.includes(normalizedStoreName) || normalizedStoreName.includes(normalizedFile);
+                const regex = criarRegexDeArquivo(f.name);
+                return regex.test(normalizedStoreName) || regex.test(normalizedRazao);
             });
+
 
             if (boletoMatch) {
                 matchedBoletoNames.add(boletoMatch.name);

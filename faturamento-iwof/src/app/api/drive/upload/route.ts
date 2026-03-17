@@ -51,17 +51,12 @@ const supabaseAdmin = createClient(
 
 async function findOrCreateFolder(folderName: string, parentFolderId: string): Promise<string> {
     try {
-        // Escape de aspas simples para a query da Drive API
+        // Camada 1: Busca Exata (Otimizada)
         const safeFolderName = folderName.replace(/'/g, "\\'");
+        const qExact = `name='${safeFolderName}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`;
 
-        const q = `name='${safeFolderName}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`;
-
-        // CORREÇÃO: Não usar driveId/corpora no files.list.
-        // O filtro '${parentFolderId}' in parents já escopa a busca ao local correto.
-        // Usar driveId+corpora com Service Account causava falso "não encontrado",
-        // forçando criação de pastas duplicadas no My Drive da service account.
-        const res = await drive.files.list({
-            q,
+        const resExact = await drive.files.list({
+            q: qExact,
             fields: 'files(id, name)',
             spaces: 'drive',
             pageSize: 1,
@@ -69,12 +64,42 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string): P
             includeItemsFromAllDrives: true,
         });
 
-        if (res.data.files && res.data.files.length > 0 && res.data.files[0].id) {
-            console.log(`[Drive Cache] Pasta encontrada: "${folderName}" → ${res.data.files[0].id}`);
-            return res.data.files[0].id;
+        if (resExact.data.files && resExact.data.files.length > 0 && resExact.data.files[0].id) {
+            console.log(`[Drive Exact Match] Pasta encontrada: "${folderName}" → ${resExact.data.files[0].id}`);
+            return resExact.data.files[0].id;
         }
 
-        // Pasta não existe: criar dentro do pai (que está no Shared Drive)
+        // Camada 2: Busca Inteligente (Fuzzy)
+        console.log(`[Drive Fuzzy] Busca exata falhou para "${folderName}". Listando diretório pai...`);
+        const resList = await drive.files.list({
+            q: `'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+            fields: 'files(id, name)',
+            spaces: 'drive',
+            supportsAllDrives: true,
+            includeItemsFromAllDrives: true,
+        });
+
+        if (resList.data.files && resList.data.files.length > 0) {
+            const requestedNameUpper = folderName.trim().toUpperCase();
+            
+            // Lógica de Regex: Se a pasta no Drive tiver _, tratamos como coringa para bater com a pasta solicitada
+            const foundFolder = resList.data.files.find(f => {
+                const driveFolderName = f.name || "";
+                const pattern = driveFolderName
+                    .toUpperCase()
+                    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // Escape regex
+                    .replace(/_/g, "[ &ÇÁÀÂÃÉÊÍÓÔÕÚ']"); // _ vira coringa
+                const regex = new RegExp(`^${pattern}$`, 'i');
+                return regex.test(requestedNameUpper);
+            });
+
+            if (foundFolder && foundFolder.id) {
+                console.log(`[Drive Fuzzy Match] Pasta correspondente encontrada: "${foundFolder.name}" para o pedido "${folderName}" → ${foundFolder.id}`);
+                return foundFolder.id;
+            }
+        }
+
+        // Camada 3: Criação
         const fileMetadata = {
             name: folderName,
             mimeType: 'application/vnd.google-apps.folder',
@@ -82,24 +107,19 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string): P
         };
         const createRes = await drive.files.create({
             requestBody: fileMetadata,
-            fields: 'id, driveId',  // driveId no retorno confirma que está no Shared Drive
+            fields: 'id, driveId',
             supportsAllDrives: true
         });
 
         const newId = createRes.data.id!;
-        const newDriveId = (createRes.data as any).driveId;
-        console.log(`[Drive Create] Pasta criada: "${folderName}" → ${newId} | driveId: ${newDriveId || 'MY_DRIVE (ATENCAO!)'}`);
-
-        if (newDriveId && newDriveId !== SHARED_DRIVE_ID) {
-            console.error(`[Drive ALERTA] Pasta criada fora do Shared Drive! Criado em: ${newDriveId}, esperado: ${SHARED_DRIVE_ID}`);
-        }
-
+        console.log(`[Drive Create] Pasta criada: "${folderName}" → ${newId}`);
         return newId;
     } catch (error) {
         console.error('[Drive Error] findOrCreateFolder:', folderName, 'pai:', parentFolderId, error);
         throw error;
     }
 }
+
 
 
 async function findOrCreatePath(rootFolderId: string, segments: string[]) {
