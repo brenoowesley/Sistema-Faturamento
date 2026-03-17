@@ -693,6 +693,7 @@ function LotePanel({
             if (loteErr) throw loteErr;
 
             const itens = lote.items.map((i) => ({
+                id: i.id, // CRITICAL: Use the same ID used for XLSX (i.id)
                 lote_id: loteDb.id,
                 cpf_conta: i.cpf_conta,
                 cpf_favorecido: i.cpf_favorecido,

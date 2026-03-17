@@ -268,7 +268,12 @@ function TransfeeraBadge({ status, isSyncing }: { status?: TransfeeraStatus, isS
         case "DEVOLVIDO":
         case "FALHA":
             return <span className="badge text-red-500 bg-red-500/10 border border-red-500/20 font-bold">Pagamento Falhou</span>;
+        case "ERRO_CONSULTA":
+            return <span className="badge text-orange-500 bg-orange-500/10 border border-orange-500/20 font-bold">Erro Transfeera</span>;
+        case "ERRO_REDE":
+            return <span className="badge text-orange-500 bg-orange-500/10 border border-orange-500/20 font-bold">Erro de Rede</span>;
         default:
             return <span className="badge border border-border bg-bg text-fg-dim">A Aguardar Sincronização</span>;
     }
 }
+

@@ -39,7 +39,8 @@ async function getTransfeeraToken() {
 
         if (!response.ok) {
             const errBody = await response.text();
-            throw new Error(`Transfeera Auth Error: ${response.status} - ${errBody}`);
+            console.error(`Transfeera Auth Error Details: Status ${response.status} - Body: ${errBody}`);
+            throw new Error(`Transfeera Auth Error: ${response.status}`);
         }
 
         const data = await response.json();
@@ -117,9 +118,12 @@ export async function POST(req: NextRequest) {
                             results[id] = "NAO_SUBMETIDO";
                         }
                      } else {
-                         results[id] = "ERRO_CONSULTA";
+                        const errBody = await res.text();
+                        console.warn(`[Transfeera API] Erro ao consultar ID ${id}. Status: ${res.status}. Body: ${errBody}`);
+                        results[id] = "ERRO_CONSULTA";
                      }
                  } catch (e) {
+                     console.error(`[Transfeera API] Erro de rede/exceção para ID ${id}:`, e);
                      results[id] = "ERRO_REDE";
                  }
             }
