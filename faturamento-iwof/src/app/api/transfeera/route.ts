@@ -114,7 +114,11 @@ export async function POST(req: NextRequest) {
                     if (resPT.ok) {
                         const payload = await resPT.json();
                         const transfers = Array.isArray(payload) ? payload : payload.data || [];
-                        match = transfers.find((t: any) => t.id_integracao === id);
+                        // Resilient match: dual key check and lowercase normalization
+                        match = transfers.find((t: any) => {
+                            const transfeeraId = (t.id_integracao || t.integration_id || "").toString().toLowerCase();
+                            return transfeeraId === id.toLowerCase();
+                        });
                     }
 
                     // Strategy 2: Search by integration_id (Official English V2)
@@ -130,21 +134,11 @@ export async function POST(req: NextRequest) {
                         if (resEN.ok) {
                             const payload = await resEN.json();
                             const transfers = Array.isArray(payload) ? payload : payload.data || [];
-                            match = transfers.find((t: any) => (t.integration_id === id || t.id_integracao === id));
-                        }
-                    }
-
-                    // Strategy 3: Fallback to /transfer/{id} (Legacy / Direct)
-                    if (!match) {
-                        console.log(`[Transfeera] Procurando ID ${id} - Strategy 3 (Direct): /transfer/${id}`);
-                        const fallbackRes = await fetch(`${baseUrl}/transfer/${id}`, {
-                            headers: { 
-                                "Authorization": `Bearer ${token}`,
-                                "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
-                            }
-                        });
-                        if (fallbackRes.ok) {
-                            match = await fallbackRes.json();
+                            // Resilient match: dual key check and lowercase normalization
+                            match = transfers.find((t: any) => {
+                                const transfeeraId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
+                                return transfeeraId === id.toLowerCase();
+                            });
                         }
                     }
 
@@ -206,7 +200,11 @@ export async function GET(req: NextRequest) {
             if (listRes.ok) {
                 const payload = await listRes.json();
                 const transfers = Array.isArray(payload) ? payload : payload.data || [];
-                match = transfers.find((t: any) => t.id_integracao === idIntegracao);
+                // Resilient match: dual key check and lowercase normalization
+                match = transfers.find((t: any) => {
+                    const transfeeraId = (t.id_integracao || t.integration_id || "").toString().toLowerCase();
+                    return transfeeraId === idIntegracao.toLowerCase();
+                });
             }
 
             // Try Strategy 2 (EN)
@@ -221,7 +219,11 @@ export async function GET(req: NextRequest) {
                 if (listResEN.ok) {
                     const payload = await listResEN.json();
                     const transfers = Array.isArray(payload) ? payload : payload.data || [];
-                    match = transfers.find((t: any) => (t.integration_id === idIntegracao || t.id_integracao === idIntegracao));
+                    // Resilient match: dual key check and lowercase normalization
+                    match = transfers.find((t: any) => {
+                        const transfeeraId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
+                        return transfeeraId === idIntegracao.toLowerCase();
+                    });
                 }
             }
 
