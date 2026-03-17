@@ -335,13 +335,14 @@ function TransfeeraBadge({ status, isSyncing }: { status?: TransfeeraStatus, isS
     if (!status || status === "NAO_SUBMETIDO") {
          return (
             <span className="badge inline-flex items-center gap-1 border border-border bg-bg text-fg-dim">
-                Não Submetido
+                Não Submetida
             </span>
         );
     }
 
     switch (status) {
         case "FINALIZADO":
+        case "EFETIVADO":
             return <span className="badge text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 font-bold whitespace-nowrap">
                 <CheckCircle2 size={12} /> Concluído
             </span>;
