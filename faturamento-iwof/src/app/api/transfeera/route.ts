@@ -98,34 +98,44 @@ export async function POST(req: NextRequest) {
             // Chunked fetching for better API citizenship
             for (const id of ids) {
                  try {
-                     const qs = new URLSearchParams({ id_integracao: id }).toString();
-                     const res = await fetch(`${baseUrl}/transferencias?${qs}`, {
-                         headers: {
-                             "Authorization": `Bearer ${token}`
-                         }
-                     });
-                     
-                     if (res.ok) {
+                    // Strategy 1: Search by id_integracao (Official V2)
+                    let qs = new URLSearchParams({ id_integracao: id }).toString();
+                    let res = await fetch(`${baseUrl}/transferencias?${qs}`, {
+                        headers: { "Authorization": `Bearer ${token}` }
+                    });
+                    
+                    let match = null;
+
+                    if (res.ok) {
                         const payload = await res.json();
-                        // Transfeera /transferencias returns an array or paginated response
-                        // Look for the specific transfer
                         const transfers = Array.isArray(payload) ? payload : payload.data || [];
-                        const match = transfers.find((t: any) => t.id_integracao === id);
-                        
-                        if (match) {
-                            results[id] = match.status; // ex: FINALIZADO, EM_PROCESSAMENTO, FALHA
-                        } else {
-                            results[id] = "NAO_SUBMETIDO";
+                        match = transfers.find((t: any) => t.id_integracao === id);
+                    }
+
+                    // Strategy 2: Fallback to /transfer/{id} (Legacy or User Suggested)
+                    if (!match) {
+                        const fallbackRes = await fetch(`${baseUrl}/transfer/${id}`, {
+                            headers: { "Authorization": `Bearer ${token}` }
+                        });
+                        if (fallbackRes.ok) {
+                            match = await fallbackRes.json();
                         }
-                     } else {
-                        const errBody = await res.text();
-                        console.warn(`[Transfeera API] Erro ao consultar ID ${id}. Status: ${res.status}. Body: ${errBody}`);
+                    }
+
+                    if (match) {
+                        results[id] = match.status; // ex: FINALIZADO, EM_PROCESSAMENTO, FALHA
+                    } else if (res.status !== 200 && res.status !== 404) {
+                        // If the primary request failed with something other than 404, report it
+                        console.warn(`[Transfeera API] Erro na consulta primária ID ${id}: ${res.status}`);
                         results[id] = `ERRO_${res.status}` as any;
-                     }
+                    } else {
+                        results[id] = "NAO_SUBMETIDO";
+                    }
                  } catch (e) {
                      console.error(`[Transfeera API] Erro de rede/exceção para ID ${id}:`, e);
                      results[id] = "ERRO_REDE";
                  }
+
             }
 
             return NextResponse.json({ statuses: results });
