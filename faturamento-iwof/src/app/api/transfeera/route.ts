@@ -113,11 +113,14 @@ export async function POST(req: NextRequest) {
 
                     if (resPT.ok) {
                         const payload = await resPT.json();
-                        const transfers = Array.isArray(payload) ? payload : payload.data || [];
-                        // Resilient match: dual key check and lowercase normalization
+                        const transfers = Array.isArray(payload) ? payload : (payload.data || []);
+                        
+                        // BUSCA RESILIENTE:
                         match = transfers.find((t: any) => {
-                            const transfeeraId = (t.id_integracao || t.integration_id || "").toString().toLowerCase();
-                            return transfeeraId === id.toLowerCase();
+                            // Pega o ID que veio da API (pode ser integration_id ou id_integracao)
+                            const apiId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
+                            // Compara com o ID local em minúsculas
+                            return apiId === id.toLowerCase();
                         });
                     }
 
@@ -133,20 +136,21 @@ export async function POST(req: NextRequest) {
                         });
                         if (resEN.ok) {
                             const payload = await resEN.json();
-                            const transfers = Array.isArray(payload) ? payload : payload.data || [];
-                            // Resilient match: dual key check and lowercase normalization
+                            const transfers = Array.isArray(payload) ? payload : (payload.data || []);
+                            
+                            // BUSCA RESILIENTE:
                             match = transfers.find((t: any) => {
-                                const transfeeraId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
-                                return transfeeraId === id.toLowerCase();
+                                const apiId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
+                                return apiId === id.toLowerCase();
                             });
                         }
                     }
 
                     if (match) {
-                        console.log(`[Transfeera] ID ${id} encontrado com status: ${match.status}`);
+                        console.log(`✅ Match encontrado: ${id} -> ${match.status}`);
                         results[id] = match.status;
                     } else {
-                        console.log(`[Transfeera] ID ${id} não encontrado em NENHUMA estratégia.`);
+                        console.log(`❌ Match falhou para ID: ${id}`);
                         results[id] = "NAO_SUBMETIDO";
                     }
 
@@ -199,11 +203,12 @@ export async function GET(req: NextRequest) {
             let match = null;
             if (listRes.ok) {
                 const payload = await listRes.json();
-                const transfers = Array.isArray(payload) ? payload : payload.data || [];
-                // Resilient match: dual key check and lowercase normalization
+                const transfers = Array.isArray(payload) ? payload : (payload.data || []);
+                
+                // BUSCA RESILIENTE:
                 match = transfers.find((t: any) => {
-                    const transfeeraId = (t.id_integracao || t.integration_id || "").toString().toLowerCase();
-                    return transfeeraId === idIntegracao.toLowerCase();
+                    const apiId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
+                    return apiId === idIntegracao.toLowerCase();
                 });
             }
 
@@ -218,13 +223,20 @@ export async function GET(req: NextRequest) {
                 });
                 if (listResEN.ok) {
                     const payload = await listResEN.json();
-                    const transfers = Array.isArray(payload) ? payload : payload.data || [];
-                    // Resilient match: dual key check and lowercase normalization
+                    const transfers = Array.isArray(payload) ? payload : (payload.data || []);
+                    
+                    // BUSCA RESILIENTE:
                     match = transfers.find((t: any) => {
-                        const transfeeraId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
-                        return transfeeraId === idIntegracao.toLowerCase();
+                        const apiId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
+                        return apiId === idIntegracao.toLowerCase();
                     });
                 }
+            }
+
+            if (match) {
+                console.log(`✅ Match (Receipt) encontrado: ${idIntegracao} -> ID Transfeera: ${match.id}`);
+            } else {
+                console.log(`❌ Match (Receipt) falhou para ID: ${idIntegracao}`);
             }
 
             if (!match || !match.id) {
