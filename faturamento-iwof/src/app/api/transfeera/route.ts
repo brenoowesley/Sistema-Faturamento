@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
                      } else {
                         const errBody = await res.text();
                         console.warn(`[Transfeera API] Erro ao consultar ID ${id}. Status: ${res.status}. Body: ${errBody}`);
-                        results[id] = "ERRO_CONSULTA";
+                        results[id] = `ERRO_${res.status}` as any;
                      }
                  } catch (e) {
                      console.error(`[Transfeera API] Erro de rede/exceção para ID ${id}:`, e);
