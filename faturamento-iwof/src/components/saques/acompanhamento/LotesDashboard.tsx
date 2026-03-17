@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Search, Filter, Calendar, FileText, ChevronRight, Download } from "lucide-react";
+import { Search, Filter, Calendar, FileText, ChevronRight, Loader2, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import Modal from "@/components/Modal";
+import { useTransfeeraSync, TransfeeraStatus } from "@/hooks/useTransfeeraSync";
 
 interface LoteSaque {
     id: string;
@@ -14,6 +16,16 @@ interface LoteSaque {
     total_real: number;
     status: string;
     created_at: string;
+}
+
+interface WorkerHistory {
+    id: string; // id_integracao
+    lote_id: string;
+    nome_usuario: string;
+    cpf_favorecido: string;
+    chave_pix: string;
+    valor: number;
+    created_at: string; // we'll fetch from lote
 }
 
 export default function LotesDashboard() {
@@ -27,7 +39,13 @@ export default function LotesDashboard() {
     const [dataInicio, setDataInicio] = useState("");
     const [dataFim, setDataFim] = useState("");
     const [tipoFiltro, setTipoFiltro] = useState("");
+    
+    // Global Search State
     const [globalSearch, setGlobalSearch] = useState("");
+    const [isSearching, setIsSearching] = useState(false);
+    const [searchResults, setSearchResults] = useState<WorkerHistory[]>([]);
+    const [showSearchModal, setShowSearchModal] = useState(false);
+    const { statuses, isSyncing, syncBatch, downloadReceipt } = useTransfeeraSync();
 
     useEffect(() => {
         fetchLotes();
@@ -51,18 +69,49 @@ export default function LotesDashboard() {
     async function handleGlobalSearch(e: React.FormEvent) {
         e.preventDefault();
         if (!globalSearch.trim()) return;
+        
+        setIsSearching(true);
         // Search across items for cpf or name
         const { data, error } = await supabase
             .from("itens_saque")
-            .select("lote_id, nome_usuario, cpf_favorecido, cpf_conta")
+            .select(`
+                id, 
+                lote_id, 
+                nome_usuario, 
+                cpf_favorecido, 
+                chave_pix, 
+                valor,
+                lotes_saques ( created_at )
+            `)
             .or(`nome_usuario.ilike.%${globalSearch}%,cpf_favorecido.ilike.%${globalSearch}%,cpf_conta.ilike.%${globalSearch}%`)
-            .limit(1);
+            .eq("status_item", "APROVADO")
+            .order("id", { ascending: false })
+            .limit(20);
 
         if (!error && data && data.length > 0) {
-            router.push(`/saques/acompanhamento/${data[0].lote_id}?highlight=${encodeURIComponent(globalSearch)}`);
+            const formatted: WorkerHistory[] = data.map((d: any) => ({
+                id: d.id,
+                lote_id: d.lote_id,
+                nome_usuario: d.nome_usuario,
+                cpf_favorecido: d.cpf_favorecido,
+                chave_pix: d.chave_pix,
+                valor: d.valor,
+                created_at: d.lotes_saques?.created_at || new Date().toISOString()
+            }));
+
+            // sort by created_at desc
+            formatted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+            setSearchResults(formatted);
+            setShowSearchModal(true);
+            
+            // Trigger Transfeera Sync
+            const ids = formatted.map(f => f.id);
+            syncBatch(ids);
         } else {
-            alert("Nenhum trabalhador encontrado com este termo.");
+            alert("Nenhum trabalhador (com saques exportados) encontrado com este termo.");
         }
+        setIsSearching(false);
     }
 
     const filtered = lotes.filter(l => {
@@ -100,7 +149,9 @@ export default function LotesDashboard() {
                                 onChange={(e) => setGlobalSearch(e.target.value)}
                             />
                         </div>
-                        <button type="submit" className="btn btn-primary" disabled={!globalSearch.trim()}>Buscar</button>
+                        <button type="submit" className="btn btn-primary" disabled={!globalSearch.trim() || isSearching}>
+                            {isSearching ? <Loader2 className="animate-spin" size={16} /> : "Buscar"}
+                        </button>
                     </form>
                 </div>
             </div>
@@ -191,6 +242,116 @@ export default function LotesDashboard() {
                     </tbody>
                 </table>
             </div>
+
+            {/* Modal de Resultados da Pesquisa Global */}
+            {showSearchModal && (
+                <Modal 
+                    isOpen={true} 
+                    onClose={() => setShowSearchModal(false)}
+                    title={`Histórico: ${globalSearch}`}
+                >
+                    <div className="space-y-4 max-w-4xl mx-auto w-full">
+                        <p className="text-sm text-fg-dim">
+                            Abaixo estão todos os saques exportados encontrados para este trabalhador.
+                        </p>
+                        
+                        <div className="overflow-x-auto border border-border rounded-lg bg-bg-card">
+                            <table className="w-full text-left text-sm">
+                                <thead>
+                                    <tr className="border-b border-border bg-black/20">
+                                        <th className="p-3 font-semibold text-fg-muted uppercase text-xs">Data/Lote</th>
+                                        <th className="p-3 font-semibold text-fg-muted uppercase text-xs">Colaborador</th>
+                                        <th className="p-3 font-semibold text-fg-muted uppercase text-xs">Valor</th>
+                                        <th className="p-3 font-semibold text-fg-muted uppercase text-xs">API Transfeera</th>
+                                        <th className="p-3 font-semibold text-fg-muted uppercase text-xs text-center">PDF</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {searchResults.map(item => (
+                                        <tr key={item.id} className="border-b border-border/50 hover:bg-bg-highlight/50">
+                                            <td className="p-3">
+                                                <div className="font-semibold text-fg text-xs">
+                                                    {new Date(item.created_at).toLocaleDateString('pt-BR')}
+                                                </div>
+                                                <Link href={`/saques/acompanhamento/${item.lote_id}?highlight=${globalSearch}`} className="text-[10px] text-accent hover:underline flex items-center gap-1 mt-1">
+                                                    Ir p/ Lote <ChevronRight size={10} />
+                                                </Link>
+                                            </td>
+                                            <td className="p-3">
+                                                <div className="font-medium text-fg">{item.nome_usuario}</div>
+                                                <div className="text-xs text-fg-dim font-mono">{item.cpf_favorecido}</div>
+                                            </td>
+                                            <td className="p-3 font-bold text-fg">
+                                                R$ {item.valor?.toFixed(2)}
+                                            </td>
+                                            <td className="p-3">
+                                                <TransfeeraBadge status={statuses[item.id]} isSyncing={isSyncing} />
+                                            </td>
+                                            <td className="p-3 text-center">
+                                                {statuses[item.id] === 'FINALIZADO' ? (
+                                                    <button 
+                                                        onClick={() => downloadReceipt(item.id)}
+                                                        className="btn btn-ghost mx-auto p-2 text-indigo-500 hover:bg-indigo-500/10 cursor-pointer transition-colors" 
+                                                        title="Baixar Comprovativo PDF"
+                                                    >
+                                                        <FileText size={16} />
+                                                    </button>
+                                                ) : (
+                                                    <button className="btn btn-ghost mx-auto p-2 opacity-40 cursor-not-allowed" disabled title="Não Disponível">
+                                                        <FileText size={16} />
+                                                    </button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {searchResults.length === 0 && (
+                                        <tr>
+                                            <td colSpan={5} className="p-8 text-center text-fg-dim">Recherche falhou ao encontrar resultados.</td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div className="flex justify-end pt-2">
+                            <button className="btn btn-ghost" onClick={() => setShowSearchModal(false)}>Fechar Histórico</button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
         </div>
     );
+}
+
+function TransfeeraBadge({ status, isSyncing }: { status?: TransfeeraStatus, isSyncing: boolean }) {
+    if (isSyncing && !status) {
+        return (
+            <span className="badge inline-flex items-center gap-1 border border-border bg-bg text-fg-muted">
+                <Loader2 size={12} className="animate-spin opacity-70" />
+                Sincronizando...
+            </span>
+        );
+    }
+
+    if (!status || status === "NAO_SUBMETIDO") {
+         return (
+            <span className="badge inline-flex items-center gap-1 border border-border bg-bg text-fg-dim">
+                Não Submetido
+            </span>
+        );
+    }
+
+    switch (status) {
+        case "FINALIZADO":
+            return <span className="badge text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 font-bold whitespace-nowrap">
+                <CheckCircle2 size={12} /> Concluído
+            </span>;
+        case "EM_PROCESSAMENTO":
+        case "AGENDADO":
+            return <span className="badge text-indigo-500 bg-indigo-500/10 border border-indigo-500/20 font-bold whitespace-nowrap">Em Regulação</span>;
+        case "DEVOLVIDO":
+        case "FALHA":
+            return <span className="badge text-red-500 bg-red-500/10 border border-red-500/20 font-bold whitespace-nowrap">Falhou</span>;
+        default:
+            return <span className="badge border border-border bg-bg text-fg-dim">Sem Status</span>;
+    }
 }

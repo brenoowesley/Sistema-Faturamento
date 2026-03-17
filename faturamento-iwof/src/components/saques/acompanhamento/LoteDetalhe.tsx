@@ -2,9 +2,10 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Search, ArrowLeft, Download, FileText, CheckCircle2 } from "lucide-react";
+import { Search, ArrowLeft, Download, FileText, CheckCircle2, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { useTransfeeraSync, TransfeeraStatus } from "@/hooks/useTransfeeraSync";
 
 interface SaqueItem {
     id: string;
@@ -38,12 +39,23 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
     const [searchTerm, setSearchTerm] = useState(highlight || "");
     const [statusFilter, setStatusFilter] = useState("TODOS");
 
+    const { statuses, isSyncing, syncBatch, downloadReceipt } = useTransfeeraSync();
+
     useEffect(() => {
         if (highlight) {
             setSearchTerm(highlight);
         }
         fetchData();
     }, [loteId, highlight]);
+
+    // Sincronizar com Transfeera após carregar itens
+    useEffect(() => {
+        if (!itens || itens.length === 0) return;
+        const ids = itens.filter(i => i.status_item === 'APROVADO').map(i => i.id);
+        if (ids.length > 0) {
+            syncBatch(ids);
+        }
+    }, [itens, syncBatch]);
 
     async function fetchData() {
         setLoading(true);
@@ -196,10 +208,7 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
                                         <td className="font-bold text-fg">R$ {item.valor?.toFixed(2)}</td>
                                         <td>
                                             {item.status_item === 'APROVADO' ? (
-                                                <span className="badge inline-flex items-center gap-1 border border-border bg-bg text-fg-muted">
-                                                    <CheckCircle2 size={12} className="opacity-50" />
-                                                    A Aguardar Sincronização
-                                                </span>
+                                                <TransfeeraBadge status={statuses[item.id]} isSyncing={isSyncing} />
                                             ) : (
                                                 <span className="badge badge-danger text-xs px-2 py-0.5" title="Não enviado para transfeera">
                                                     Removido da Exportação
@@ -207,9 +216,19 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
                                             )}
                                         </td>
                                         <td className="text-center">
-                                            <button className="btn btn-ghost mx-auto p-2 opacity-40 cursor-not-allowed" disabled title="Em breve">
-                                                <FileText size={16} />
-                                            </button>
+                                            {item.status_item === 'APROVADO' && statuses[item.id] === 'FINALIZADO' ? (
+                                                <button 
+                                                    onClick={() => downloadReceipt(item.id)}
+                                                    className="btn btn-ghost mx-auto p-2 text-indigo-500 hover:bg-indigo-500/10 cursor-pointer transition-colors" 
+                                                    title="Baixar Comprovativo PDF"
+                                                >
+                                                    <FileText size={16} />
+                                                </button>
+                                            ) : (
+                                                <button className="btn btn-ghost mx-auto p-2 opacity-40 cursor-not-allowed" disabled title="Indisponível">
+                                                    <FileText size={16} />
+                                                </button>
+                                            )}
                                         </td>
                                     </tr>
                                 );
@@ -220,4 +239,36 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
             </div>
         </div>
     );
+}
+
+function TransfeeraBadge({ status, isSyncing }: { status?: TransfeeraStatus, isSyncing: boolean }) {
+    if (isSyncing && !status) {
+        return (
+            <span className="badge inline-flex items-center gap-1 border border-border bg-bg text-fg-muted">
+                <Loader2 size={12} className="animate-spin opacity-70" />
+                A Sincronizar...
+            </span>
+        );
+    }
+
+    if (!status || status === "NAO_SUBMETIDO") {
+         return (
+            <span className="badge inline-flex items-center gap-1 border border-border bg-bg text-fg-dim">
+                Não Submetido
+            </span>
+        );
+    }
+
+    switch (status) {
+        case "FINALIZADO":
+            return <span className="badge text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 font-bold">Concluído</span>;
+        case "EM_PROCESSAMENTO":
+        case "AGENDADO":
+            return <span className="badge text-indigo-500 bg-indigo-500/10 border border-indigo-500/20 font-bold">Em Regulação</span>;
+        case "DEVOLVIDO":
+        case "FALHA":
+            return <span className="badge text-red-500 bg-red-500/10 border border-red-500/20 font-bold">Pagamento Falhou</span>;
+        default:
+            return <span className="badge border border-border bg-bg text-fg-dim">A Aguardar Sincronização</span>;
+    }
 }
