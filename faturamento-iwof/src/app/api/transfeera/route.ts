@@ -70,7 +70,8 @@ export async function POST(req: NextRequest) {
         const { data: { user } } = await supabase.auth.getUser();
 
         if (!user) {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+            console.warn("[Transfeera Proxy] Chamada bloqueada: Usuário não autenticado no Supabase.");
+            return NextResponse.json({ error: "Sessão inválida ou o utilizador não está autenticado no sistema (Supabase)." }, { status: 401 });
         }
 
         const body = await req.json();
@@ -168,8 +169,17 @@ export async function POST(req: NextRequest) {
 
     } catch (err: any) {
         console.error("Transfeera Proxy Error:", err);
-        const status = err.message === "Configuração de API ausente no servidor" ? 400 : 500;
-        return NextResponse.json({ error: err.message }, { status });
+        let status = 500;
+        let message = err.message || "Erro interno no servidor";
+
+        if (message === "Configuração de API ausente no servidor") {
+            status = 400;
+        } else if (message.startsWith("Transfeera Auth Error:")) {
+            status = parseInt(message.split(":")[1]) || 500;
+            message = `Falha na autenticação com a Transfeera (${status}). Verifique as credenciais do ambiente ${process.env.TRANSFEERA_ENV || 'produção'}.`;
+        }
+        
+        return NextResponse.json({ error: message }, { status });
     }
 }
 
@@ -284,7 +294,16 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
     } catch (error: any) {
         console.error("Transfeera Receipt Error:", error);
-        const status = error.message === "Configuração de API ausente no servidor" ? 400 : 500;
-        return NextResponse.json({ error: error.message }, { status });
+        let status = 500;
+        let message = error.message || "Erro ao buscar comprovativo";
+
+        if (message === "Configuração de API ausente no servidor") {
+            status = 400;
+        } else if (message.startsWith("Transfeera Auth Error:")) {
+            status = parseInt(message.split(":")[1]) || 500;
+            message = `Erro de Autenticação Transfeera: ${status}`;
+        }
+
+        return NextResponse.json({ error: message }, { status });
     }
 }
