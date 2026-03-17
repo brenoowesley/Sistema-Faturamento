@@ -8,7 +8,9 @@ export type TransfeeraStatus =
     | "FALHA" 
     | "NAO_SUBMETIDO" 
     | "ERRO_CONSULTA" 
-    | "ERRO_REDE";
+    | "ERRO_REDE"
+    | (string & {}); // Allow dynamic error strings like ERRO_401
+
 
 export function useTransfeeraSync() {
     const [statuses, setStatuses] = useState<Record<string, TransfeeraStatus>>({});

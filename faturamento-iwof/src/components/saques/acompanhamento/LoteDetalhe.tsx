@@ -273,15 +273,16 @@ function TransfeeraBadge({ status, isSyncing }: { status?: TransfeeraStatus, isS
         case "ERRO_REDE":
             return <span className="badge text-orange-500 bg-orange-500/10 border border-orange-500/20 font-bold">Erro de Rede</span>;
         default:
-            if (status?.startsWith("ERRO_")) {
+            if ((status as any)?.startsWith("ERRO_")) {
                 return (
                     <span className="badge text-orange-500 bg-orange-500/10 border border-orange-500/20 font-bold" title="Erro HTTP da API">
-                        Transfeera {status.replace("ERRO_", "")}
+                        Transfeera {(status as any).replace("ERRO_", "")}
                     </span>
                 );
             }
             return <span className="badge border border-border bg-bg text-fg-dim">A Aguardar Sincronização</span>;
     }
 }
+
 
 
