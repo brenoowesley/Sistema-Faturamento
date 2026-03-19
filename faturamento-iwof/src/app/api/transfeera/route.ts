@@ -237,9 +237,11 @@ export async function POST(req: NextRequest) {
 
             return NextResponse.json({
                 success: true,
+                batchId: batchBody.id,
+                transfers: batchBody.transfers || [],
+                // Mantemos o restante para retrocompatibilidade se necessário
                 batch_id: String(batchBody.id),
                 transferIdMap,
-                raw: batchBody,
             });
         }
 

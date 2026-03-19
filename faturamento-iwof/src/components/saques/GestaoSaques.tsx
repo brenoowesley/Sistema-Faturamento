@@ -802,39 +802,36 @@ function LotePanel({
             }
 
             // ── Passo 3: Salvar IDs da Transfeera no Supabase ──
-            const batchId: string = data.batch_id;
-            const transferIdMap: Record<string, string> = data.transferIdMap || {};
+            const batchId: string = data.batchId || data.batch_id;
+            const transfers: any[] = data.transfers || [];
 
-            // Atualizar lote com transfeera_batch_id
+            // 1. Atualizar lote com transfeera_batch_id
             await supabase
                 .from("lotes_saques")
                 .update({ transfeera_batch_id: batchId })
                 .eq("id", loteDbId);
 
-            console.log(`[GestaoSaques] 🔍 IDs recebidos da Transfeera:`, transferIdMap);
+            // 2. Atualizar cada item individualmente usando Promise.all para garantir persistência
+            if (transfers.length > 0) {
+                const updatePromises = transfers.map(async (t: any) => {
+                    const integId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
+                    if (!integId) return;
 
-            // Atualizar cada item com transfeera_transfer_id em massa (Bulk Update)
-            const upsertData = Object.entries(transferIdMap).map(([id, tid]) => ({
-                id: id.toLowerCase(), // Garantir que está no formato esperado pelo UUID
-                transfeera_transfer_id: tid
-            }));
+                    const { error } = await supabase
+                        .from("itens_saque")
+                        .update({ transfeera_transfer_id: t.id.toString() })
+                        .eq("id", integId);
+                    
+                    if (error) {
+                        console.error(`[GestaoSaques] ❌ Erro ao atualizar item ${integId}:`, error);
+                    }
+                });
 
-            console.log(`[GestaoSaques] 📝 Tentando Bulk Upsert em ${upsertData.length} itens...`);
-
-            if (upsertData.length > 0) {
-                const { data: upsertResult, error: upsertErr } = await supabase
-                    .from("itens_saque")
-                    .upsert(upsertData, { onConflict: "id" })
-                    .select(); // Adicionado select() para ver o que foi afetado
-                
-                if (upsertErr) {
-                    console.error("[GestaoSaques] ❌ Erro no bulk upsert:", upsertErr);
-                } else {
-                    console.log(`[GestaoSaques] ✅ Bulk Upsert concluído. Linhas afetadas: ${upsertResult?.length || 0}`);
-                }
+                await Promise.all(updatePromises);
+                console.log(`[GestaoSaques] ✅ Sincronização de ${transfers.length} itens no Supabase concluída.`);
             }
 
-            const mappedCount = Object.keys(transferIdMap).length;
+            const mappedCount = transfers.length;
             update((l) => ({
                 ...l,
                 sendingApi: false,
