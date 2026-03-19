@@ -11,14 +11,15 @@ export type TransfeeraStatus =
     | "ERRO_REDE"
     | (string & {}); // Allow dynamic error strings like ERRO_401
 
+export interface SyncItem {
+    id_interno: string;
+    transfeera_id?: string | null;
+}
+
 /**
  * Hook de sincronização com a API Transfeera.
  * 
- * Suporta dois modos de consulta:
- * 1. **Direto (rápido)**: Quando o item tem `transfeera_transfer_id`, usa `GET /transfer/{id}` diretamente.
- * 2. **Legado (varredura)**: Quando só tem o `integration_id` (UUID), varre todos os lotes paginados.
- * 
- * O chamador decide qual modo usar passando o `transfeeraIdMap` opcional para `syncBatch`.
+ * Agora utiliza exclusivamente o rastreio otimizado via ID de transferência.
  */
 export function useTransfeeraSync() {
     const [statuses, setStatuses] = useState<Record<string, TransfeeraStatus>>({});
@@ -27,107 +28,40 @@ export function useTransfeeraSync() {
     /**
      * Sincroniza o status de múltiplos itens com a Transfeera.
      * 
-     * @param integrationIds - Lista de IDs dos itens (UUIDs locais, usados como chave no state)
-     * @param transfeeraIdMap - Mapa opcional: `{ [integrationId]: transfeera_transfer_id }`.
-     *   - IDs com match no mapa usam a consulta direta (rápida).
-     *   - IDs sem match usam a varredura legado.
+     * @param items - Lista de objetos { id_interno, transfeera_id }
      */
-    const syncBatch = useCallback(async (
-        integrationIds: string[],
-        transfeeraIdMap?: Record<string, string>
-    ) => {
-        if (!integrationIds || integrationIds.length === 0) return;
+    const syncBatch = useCallback(async (items: SyncItem[]) => {
+        if (!items || items.length === 0) return;
+
+        // Filtrar apenas itens que possuem ID da Transfeera
+        const syncableItems = items.filter(item => !!item.transfeera_id);
+        
+        if (syncableItems.length === 0) {
+            console.log("[useTransfeeraSync] Nenhum item com transfeera_id para sincronizar.");
+            return;
+        }
 
         setIsSyncing(true);
         try {
-            // Separar IDs em dois grupos
-            const directIds: string[] = [];     // Têm transfeera_transfer_id
-            const legacyIds: string[] = [];     // Só têm integration_id (UUID)
-            const directToLocal: Record<string, string> = {}; // transfeera_id → local_id
+            const res = await fetch("/api/transfeera", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    action: "status_batch",
+                    items: syncableItems,
+                }),
+            });
 
-            for (const localId of integrationIds) {
-                const transfeeraId = transfeeraIdMap?.[localId];
-                if (transfeeraId) {
-                    directIds.push(transfeeraId);
-                    directToLocal[transfeeraId] = localId;
-                } else {
-                    legacyIds.push(localId);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.statuses) {
+                    setStatuses((prev) => ({ ...prev, ...data.statuses }));
                 }
+            } else {
+                console.error("Falha ao sincronizar status com Transfeera:", res.status);
             }
-
-            const mergedStatuses: Record<string, TransfeeraStatus> = {};
-
-            // ── Grupo 1: Consulta direta por transfeera_transfer_id (rápida) ──
-            if (directIds.length > 0) {
-                try {
-                    const res = await fetch("/api/transfeera", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            action: "status_by_transfeera_id",
-                            ids: directIds,
-                        }),
-                    });
-
-                    if (res.ok) {
-                        const data = await res.json();
-                        if (data.statuses) {
-                            // Mapear de volta: transfeera_id → local_id
-                            for (const [transfeeraId, status] of Object.entries(data.statuses)) {
-                                const localId = directToLocal[transfeeraId];
-                                if (localId) {
-                                    mergedStatuses[localId] = status as TransfeeraStatus;
-                                }
-                            }
-                        }
-                    } else {
-                        console.error("Falha ao consultar status direto Transfeera:", res.status);
-                        // Marcar todos como erro
-                        for (const tid of directIds) {
-                            const localId = directToLocal[tid];
-                            if (localId) mergedStatuses[localId] = "ERRO_CONSULTA";
-                        }
-                    }
-                } catch (err) {
-                    console.error("Erro de rede na consulta direta Transfeera:", err);
-                    for (const tid of directIds) {
-                        const localId = directToLocal[tid];
-                        if (localId) mergedStatuses[localId] = "ERRO_REDE";
-                    }
-                }
-            }
-
-            // ── Grupo 2: Consulta legado por integration_id (varredura) ──
-            if (legacyIds.length > 0) {
-                try {
-                    const res = await fetch("/api/transfeera", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            action: "status_batch",
-                            ids: legacyIds,
-                        }),
-                    });
-
-                    if (res.ok) {
-                        const data = await res.json();
-                        if (data.statuses) {
-                            for (const [id, status] of Object.entries(data.statuses)) {
-                                mergedStatuses[id] = status as TransfeeraStatus;
-                            }
-                        }
-                    } else {
-                        console.error("Falha ao sincronizar lote legado Transfeera:", res.status);
-                    }
-                } catch (err) {
-                    console.error("Erro de rede na sincronização legado Transfeera:", err);
-                }
-            }
-
-            // Atualizar o state com os resultados combinados
-            if (Object.keys(mergedStatuses).length > 0) {
-                setStatuses((prev) => ({ ...prev, ...mergedStatuses }));
-            }
+        } catch (err) {
+            console.error("Erro de rede ao sincronizar com Transfeera:", err);
         } finally {
             setIsSyncing(false);
         }

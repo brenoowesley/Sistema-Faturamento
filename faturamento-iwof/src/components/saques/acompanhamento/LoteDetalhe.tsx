@@ -53,18 +53,15 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
     useEffect(() => {
         if (!itens || itens.length === 0) return;
         const approvedItems = itens.filter(i => i.status_item === 'APROVADO');
-        const ids = approvedItems.map(i => i.id);
-        if (ids.length === 0) return;
+        if (approvedItems.length === 0) return;
 
-        // Construir mapa de IDs para consulta direta (quando disponível)
-        const transfeeraIdMap: Record<string, string> = {};
-        for (const item of approvedItems) {
-            if (item.transfeera_transfer_id) {
-                transfeeraIdMap[item.id] = item.transfeera_transfer_id;
-            }
-        }
+        // Mapear para o novo formato de sincronização
+        const syncItems = approvedItems.map(item => ({
+            id_interno: item.id,
+            transfeera_id: item.transfeera_transfer_id || null
+        }));
 
-        syncBatch(ids, Object.keys(transfeeraIdMap).length > 0 ? transfeeraIdMap : undefined);
+        syncBatch(syncItems);
     }, [itens, syncBatch]);
 
     async function fetchData() {

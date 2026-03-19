@@ -241,136 +241,58 @@ export async function POST(req: NextRequest) {
         }
 
         // ═══════════════════════════════════════════════════════════════════════
-        // ACTION: status_by_transfeera_id — Consulta direta por ID numérico
-        // ═══════════════════════════════════════════════════════════════════════
-        if (action === "status_by_transfeera_id") {
-            const ids: string[] = body.ids; // transfeera_transfer_id (numéricos como string)
-            if (!ids || ids.length === 0) {
-                return NextResponse.json({ statuses: {} });
-            }
-
-            console.log(`[Transfeera] ▶ status_by_transfeera_id: ${ids.length} ID(s) | Ambiente: ${env}`);
-
-            const results: Record<string, string> = {};
-
-            for (const transferId of ids) {
-                try {
-                    const res = await fetch(`${baseUrl}/transfer/${transferId}`, {
-                        headers: {
-                            "Authorization": `Bearer ${token}`,
-                            "User-Agent": UA_HEADER,
-                        },
-                    });
-
-                    if (res.ok) {
-                        const payload = await res.json();
-                        const rawStatus = payload.status || "";
-                        const normalized = normalizeTransfeeraStatus(rawStatus);
-                        console.log(`✅ transfer_id=${transferId} status="${rawStatus}" → "${normalized}"`);
-                        results[transferId] = normalized;
-                    } else {
-                        const errBody = await res.text();
-                        console.warn(`[Transfeera] GET /transfer/${transferId} FALHOU (${res.status}): ${errBody}`);
-                        results[transferId] = "ERRO_CONSULTA";
-                    }
-                } catch (e) {
-                    console.error(`[Transfeera] Erro de rede para transfer_id=${transferId}:`, e);
-                    results[transferId] = "ERRO_REDE";
-                }
-            }
-
-            return NextResponse.json({ statuses: results });
-        }
-
-        // ═══════════════════════════════════════════════════════════════════════
-        // ACTION: status_batch — Legado: varredura por integration_id (UUID)
+        // ACTION: status_batch — Rastreio Otimizado (Consulta direta por ID)
         // ═══════════════════════════════════════════════════════════════════════
         if (action === "status_batch") {
-            const ids: string[] = body.ids;
-            if (!ids || ids.length === 0) {
+            const items: Array<{ id_interno: string; transfeera_id: string }> = body.items;
+
+            if (!items || items.length === 0) {
                 return NextResponse.json({ statuses: {} });
             }
 
-            console.log(`[Transfeera] ▶ status_batch (legado): ${ids.length} ID(s) | Ambiente: ${env}`);
+            console.log(`[Transfeera] ▶ status_batch (otimizado): ${items.length} item(s) | Ambiente: ${env}`);
 
-            // Passo 1: Carregar lotes paginados
-            const allBatches: any[] = [];
-            let batchPage = 1;
-            let hasMoreBatches = true;
-
-            while (hasMoreBatches && batchPage <= 10) {
-                const batchRes = await fetch(`${baseUrl}/batch?per_page=50&page=${batchPage}`, {
-                    headers: {
-                        "Authorization": `Bearer ${token}`,
-                        "User-Agent": UA_HEADER,
-                    },
-                });
-
-                if (!batchRes.ok) {
-                    const errBody = await batchRes.text();
-                    console.warn(`[Transfeera] GET /batch page=${batchPage} FALHOU (${batchRes.status}): ${errBody}`);
-                    break;
-                }
-
-                const batchPayload = await batchRes.json();
-                const pageBatches: any[] = Array.isArray(batchPayload) ? batchPayload : (batchPayload.data || []);
-                console.log(`[Transfeera] GET /batch page=${batchPage} → ${pageBatches.length} lote(s)`);
-                allBatches.push(...pageBatches);
-
-                if (pageBatches.length < 50) {
-                    hasMoreBatches = false;
-                } else {
-                    batchPage++;
-                }
-            }
-
-            console.log(`[Transfeera] Total de lotes: ${allBatches.length}`);
-
-            if (allBatches.length === 0) {
-                console.warn(`[Transfeera] ⚠️ ZERO lotes no ambiente "${env}".`);
-                const emptyResults: Record<string, string> = {};
-                for (const id of ids) emptyResults[id] = "NAO_SUBMETIDO";
-                return NextResponse.json({ statuses: emptyResults });
-            }
-
-            // Passo 2: Construir mapa integration_id → transfer
-            const transferMap: Record<string, any> = {};
-
-            for (const batch of allBatches) {
-                const transferRes = await fetch(`${baseUrl}/batch/${batch.id}/transfer?per_page=100`, {
-                    headers: {
-                        "Authorization": `Bearer ${token}`,
-                        "User-Agent": UA_HEADER,
-                    },
-                });
-
-                if (!transferRes.ok) continue;
-
-                const tPayload = await transferRes.json();
-                const transfers: any[] = Array.isArray(tPayload) ? tPayload : (tPayload.data || []);
-
-                for (const t of transfers) {
-                    const integId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
-                    if (integId) transferMap[integId] = t;
-                }
-            }
-
-            console.log(`[Transfeera] Mapa construído: ${Object.keys(transferMap).length} transferência(s)`);
-
-            // Passo 3: Resolver IDs
             const results: Record<string, string> = {};
-            for (const id of ids) {
-                const found = transferMap[id.toLowerCase()];
-                if (found) {
-                    const rawStatus = found.status || found.status_transferencia || "";
-                    results[id] = normalizeTransfeeraStatus(rawStatus);
-                } else {
-                    results[id] = "NAO_SUBMETIDO";
-                }
+            
+            // Processar em chunks de 5 para evitar rate limit ou sobrecarga
+            const chunkSize = 5;
+            for (let i = 0; i < items.length; i += chunkSize) {
+                const chunk = items.slice(i, i + chunkSize);
+                
+                await Promise.all(chunk.map(async (item) => {
+                    if (!item.transfeera_id) {
+                        results[item.id_interno] = "NAO_SUBMETIDO";
+                        return;
+                    }
+
+                    try {
+                        const res = await fetch(`${baseUrl}/transfer/${item.transfeera_id}`, {
+                            headers: {
+                                "Authorization": `Bearer ${token}`,
+                                "User-Agent": UA_HEADER,
+                            },
+                        });
+
+                        if (res.ok) {
+                            const payload = await res.json();
+                            const rawStatus = payload.status || "";
+                            const normalized = normalizeTransfeeraStatus(rawStatus);
+                            console.log(`✅ [${item.id_interno}] transfeera_id=${item.transfeera_id} status="${rawStatus}" → "${normalized}"`);
+                            results[item.id_interno] = normalized;
+                        } else {
+                            const errBody = await res.text();
+                            console.warn(`[Transfeera] GET /transfer/${item.transfeera_id} FALHOU (${res.status}): ${errBody}`);
+                            results[item.id_interno] = "ERRO_CONSULTA";
+                        }
+                    } catch (e) {
+                        console.error(`[Transfeera] Erro de rede para transfeera_id=${item.transfeera_id}:`, e);
+                        results[item.id_interno] = "ERRO_REDE";
+                    }
+                }));
             }
 
-            const matched = Object.values(results).filter(s => s !== "NAO_SUBMETIDO").length;
-            console.log(`[Transfeera] Resultado: ${matched}/${ids.length} IDs encontrados`);
+            const matched = Object.values(results).filter(s => s !== "NAO_SUBMETIDO" && !s.startsWith("ERRO_")).length;
+            console.log(`[Transfeera] Rastreio concluído: ${matched}/${items.length} IDs sincronizados.`);
 
             return NextResponse.json({ statuses: results });
         }

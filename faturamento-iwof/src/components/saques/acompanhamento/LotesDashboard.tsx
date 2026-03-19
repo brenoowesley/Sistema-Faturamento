@@ -109,14 +109,11 @@ export default function LotesDashboard() {
             setShowSearchModal(true);
             
             // Trigger Transfeera Sync
-            const ids = formatted.map(f => f.id);
-            const transfeeraIdMap: Record<string, string> = {};
-            for (const f of formatted) {
-                if (f.transfeera_transfer_id) {
-                    transfeeraIdMap[f.id] = f.transfeera_transfer_id;
-                }
-            }
-            syncBatch(ids, Object.keys(transfeeraIdMap).length > 0 ? transfeeraIdMap : undefined);
+            const syncItems = formatted.map(f => ({
+                id_interno: f.id,
+                transfeera_id: f.transfeera_transfer_id || null
+            }));
+            syncBatch(syncItems);
         } else {
             alert("Nenhum trabalhador (com saques exportados) encontrado com este termo.");
         }
