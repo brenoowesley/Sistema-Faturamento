@@ -811,21 +811,26 @@ function LotePanel({
                 .update({ transfeera_batch_id: batchId })
                 .eq("id", loteDbId);
 
+            console.log(`[GestaoSaques] 🔍 IDs recebidos da Transfeera:`, transferIdMap);
+
             // Atualizar cada item com transfeera_transfer_id em massa (Bulk Update)
             const upsertData = Object.entries(transferIdMap).map(([id, tid]) => ({
-                id: id.toLowerCase(),
+                id: id.toLowerCase(), // Garantir que está no formato esperado pelo UUID
                 transfeera_transfer_id: tid
             }));
 
+            console.log(`[GestaoSaques] 📝 Tentando Bulk Upsert em ${upsertData.length} itens...`);
+
             if (upsertData.length > 0) {
-                const { error: upsertErr } = await supabase
+                const { data: upsertResult, error: upsertErr } = await supabase
                     .from("itens_saque")
-                    .upsert(upsertData, { onConflict: "id" });
+                    .upsert(upsertData, { onConflict: "id" })
+                    .select(); // Adicionado select() para ver o que foi afetado
                 
                 if (upsertErr) {
-                    console.error("Erro no bulk upsert:", upsertErr);
-                    // Não dar throw para não anular o feedback de sucesso do envio, 
-                    // mas logar o erro para diagnóstico se falhar.
+                    console.error("[GestaoSaques] ❌ Erro no bulk upsert:", upsertErr);
+                } else {
+                    console.log(`[GestaoSaques] ✅ Bulk Upsert concluído. Linhas afetadas: ${upsertResult?.length || 0}`);
                 }
             }
 
