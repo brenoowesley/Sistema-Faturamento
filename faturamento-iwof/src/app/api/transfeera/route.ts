@@ -87,79 +87,106 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ statuses: {} });
             }
 
-            // Since Transfeera API allows querying transfers, we map id_integracao.
-            // Documentation usually allows array filters like ?id_integracao=uuid1&id_integracao=uuid2
-            // However, depending on the exact implementation, we might need a general fetch.
-            // Here we assume standard REST filters or fetching individually. To be safe, we query. 
-            // In a highly optimized system, we'd batch. Let's send requests concurrently.
-            // Transfeera provides GET /transferencias
-            
-            // To prevent hammering the API or URL length limits, we fetch them individually or in chunks.
+            // Normaliza o status retornado pela Transfeera para valores conhecidos pelo frontend
+            function normalizeTransfeeraStatus(raw: string): string {
+                if (!raw) return "NAO_SUBMETIDO";
+                const s = raw.toUpperCase().trim();
+                // Mapeamento de possíveis variações da API
+                const map: Record<string, string> = {
+                    FINALIZADO: "FINALIZADO",
+                    EFETIVADO: "EFETIVADO",
+                    PAGO: "FINALIZADO",
+                    CONCLUIDO: "FINALIZADO",
+                    CONCLUÍDO: "FINALIZADO",
+                    EM_PROCESSAMENTO: "EM_PROCESSAMENTO",
+                    PROCESSANDO: "EM_PROCESSAMENTO",
+                    EM_PROCESSAMENTO_BANCO: "EM_PROCESSAMENTO",
+                    AGENDADO: "AGENDADO",
+                    SCHEDULED: "AGENDADO",
+                    DEVOLVIDO: "DEVOLVIDO",
+                    RETURNED: "DEVOLVIDO",
+                    FALHA: "FALHA",
+                    FAILED: "FALHA",
+                    ERROR: "FALHA",
+                    CRIADO: "AGENDADO",
+                    CREATED: "AGENDADO",
+                };
+                return map[s] ?? raw; // devolve o original se não mapear, para ficar visível no badge
+            }
+
             const results: Record<string, string> = {};
-            
-            // Chunked fetching for better API citizenship
+
             for (const id of ids) {
-                 try {
-                    // Strategy 1: Search by id_integracao (Official Portuguese V2)
-                    let qsPT = new URLSearchParams({ id_integracao: id }).toString();
-                    console.log(`[Transfeera] Procurando ID ${id} - Strategy 1 (PT): /transferencias?${qsPT}`);
-                    let resPT = await fetch(`${baseUrl}/transferencias?${qsPT}`, {
-                        headers: { 
+                try {
+                    let match = null;
+
+                    // Strategy 1: PT endpoint com per_page=100 para evitar truncamento por paginação
+                    const qsPT = new URLSearchParams({ id_integracao: id, per_page: "100" }).toString();
+                    console.log(`[Transfeera] Buscando ID=${id} → Strategy 1 (PT): /transferencias?${qsPT}`);
+                    const resPT = await fetch(`${baseUrl}/transferencias?${qsPT}`, {
+                        headers: {
                             "Authorization": `Bearer ${token}`,
                             "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
                         }
                     });
-                    
-                    let match = null;
+
+                    console.log(`[Transfeera] Strategy 1 HTTP ${resPT.status} para ID=${id}`);
 
                     if (resPT.ok) {
                         const payload = await resPT.json();
                         const transfers = Array.isArray(payload) ? payload : (payload.data || []);
-                        
-                        // BUSCA RESILIENTE:
+                        console.log(`[Transfeera] Strategy 1 retornou ${transfers.length} item(s). Sample:`, JSON.stringify(transfers[0] ?? null));
+
                         match = transfers.find((t: any) => {
-                            // Pega o ID que veio da API (pode ser integration_id ou id_integracao)
                             const apiId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
-                            // Compara com o ID local em minúsculas
                             return apiId === id.toLowerCase();
                         });
+                    } else {
+                        const errBody = await resPT.text();
+                        console.warn(`[Transfeera] Strategy 1 FALHOU (${resPT.status}): ${errBody}`);
                     }
 
-                    // Strategy 2: Search by integration_id (Official English V2)
+                    // Strategy 2: EN endpoint com per_page=100
                     if (!match) {
-                        let qsEN = new URLSearchParams({ integration_id: id }).toString();
-                        console.log(`[Transfeera] Procurando ID ${id} - Strategy 2 (EN): /transfers?${qsEN}`);
+                        const qsEN = new URLSearchParams({ integration_id: id, per_page: "100" }).toString();
+                        console.log(`[Transfeera] Buscando ID=${id} → Strategy 2 (EN): /transfers?${qsEN}`);
                         const resEN = await fetch(`${baseUrl}/transfers?${qsEN}`, {
-                            headers: { 
+                            headers: {
                                 "Authorization": `Bearer ${token}`,
                                 "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
                             }
                         });
+
+                        console.log(`[Transfeera] Strategy 2 HTTP ${resEN.status} para ID=${id}`);
+
                         if (resEN.ok) {
                             const payload = await resEN.json();
                             const transfers = Array.isArray(payload) ? payload : (payload.data || []);
-                            
-                            // BUSCA RESILIENTE:
+                            console.log(`[Transfeera] Strategy 2 retornou ${transfers.length} item(s). Sample:`, JSON.stringify(transfers[0] ?? null));
+
                             match = transfers.find((t: any) => {
                                 const apiId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
                                 return apiId === id.toLowerCase();
                             });
+                        } else {
+                            const errBody = await resEN.text();
+                            console.warn(`[Transfeera] Strategy 2 FALHOU (${resEN.status}): ${errBody}`);
                         }
                     }
 
                     if (match) {
-                        console.log(`✅ Match encontrado: ${id} -> ${match.status}`);
-                        results[id] = match.status;
+                        const normalizedStatus = normalizeTransfeeraStatus(match.status);
+                        console.log(`✅ Match encontrado: ID=${id} | status_bruto="${match.status}" | normalizado="${normalizedStatus}"`);
+                        results[id] = normalizedStatus;
                     } else {
-                        console.log(`❌ Match falhou para ID: ${id}`);
+                        console.log(`❌ Nenhum match para ID=${id} após ambas as strategies.`);
                         results[id] = "NAO_SUBMETIDO";
                     }
 
-                 } catch (e) {
-                     console.error(`[Transfeera API] Erro de rede/exceção para ID ${id}:`, e);
-                     results[id] = "ERRO_REDE";
-                 }
-
+                } catch (e) {
+                    console.error(`[Transfeera] Erro de rede/exceção para ID=${id}:`, e);
+                    results[id] = "ERRO_REDE";
+                }
             }
 
             return NextResponse.json({ statuses: results });
