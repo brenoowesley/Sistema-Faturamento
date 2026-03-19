@@ -17,6 +17,7 @@ interface SaqueItem {
     valor: number;
     status_item: string;
     motivo_bloqueio?: string;
+    transfeera_transfer_id?: string;
 }
 
 interface LoteSaque {
@@ -51,10 +52,19 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
     // Sincronizar com Transfeera após carregar itens
     useEffect(() => {
         if (!itens || itens.length === 0) return;
-        const ids = itens.filter(i => i.status_item === 'APROVADO').map(i => i.id);
-        if (ids.length > 0) {
-            syncBatch(ids);
+        const approvedItems = itens.filter(i => i.status_item === 'APROVADO');
+        const ids = approvedItems.map(i => i.id);
+        if (ids.length === 0) return;
+
+        // Construir mapa de IDs para consulta direta (quando disponível)
+        const transfeeraIdMap: Record<string, string> = {};
+        for (const item of approvedItems) {
+            if (item.transfeera_transfer_id) {
+                transfeeraIdMap[item.id] = item.transfeera_transfer_id;
+            }
         }
+
+        syncBatch(ids, Object.keys(transfeeraIdMap).length > 0 ? transfeeraIdMap : undefined);
     }, [itens, syncBatch]);
 
     async function fetchData() {
@@ -218,7 +228,7 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
                                         <td className="text-center">
                                             {item.status_item === 'APROVADO' && statuses[item.id] === 'FINALIZADO' ? (
                                                 <button 
-                                                    onClick={() => downloadReceipt(item.id)}
+                                                    onClick={() => downloadReceipt(item.id, item.transfeera_transfer_id)}
                                                     className="btn btn-ghost mx-auto p-2 text-indigo-500 hover:bg-indigo-500/10 cursor-pointer transition-colors" 
                                                     title="Baixar Comprovativo PDF"
                                                 >

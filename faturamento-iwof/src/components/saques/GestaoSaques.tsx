@@ -19,6 +19,8 @@ import {
     ChevronDown,
     ChevronUp,
     Filter,
+    CloudUpload,
+    Loader2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -52,6 +54,9 @@ interface LoteLocal {
     expanded: boolean;
     saving: boolean;
     saveMsg: { type: "success" | "error"; text: string } | null;
+    sendingApi: boolean;
+    apiMsg: { type: "success" | "error"; text: string } | null;
+    savedLoteId?: string; // ID do lote salvo no Supabase (para evitar duplicação)
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -200,6 +205,8 @@ function groupByTipo(items: SaqueItem[]): LoteLocal[] {
         expanded: true,
         saving: false,
         saveMsg: null,
+        sendingApi: false,
+        apiMsg: null,
     }));
 }
 
@@ -717,6 +724,116 @@ function LotePanel({
         }
     }
 
+    async function handleDirectIntegration() {
+        update((l) => ({ ...l, sendingApi: true, apiMsg: null }));
+        try {
+            // ── Passo 1: Salvar no Supabase (idêntico ao handleExport) ──
+            let loteDbId = lote.savedLoteId;
+
+            if (!loteDbId) {
+                const { data: loteDb, error: loteErr } = await supabase
+                    .from("lotes_saques")
+                    .insert({
+                        nome_lote: lote.nome,
+                        tipo_saque: lote.tipo_saque,
+                        total_solicitado: totalSolicitado,
+                        total_real: totalReal,
+                        receita_financeira: receita,
+                        status: "Enviado API",
+                    })
+                    .select()
+                    .single();
+                if (loteErr) throw loteErr;
+                loteDbId = loteDb.id;
+
+                const itens = lote.items.map((i) => ({
+                    id: i.id,
+                    lote_id: loteDbId,
+                    cpf_conta: i.cpf_conta,
+                    cpf_favorecido: i.cpf_favorecido,
+                    nome_usuario: i.nome_usuario || null,
+                    chave_pix: i.chave_pix,
+                    tipo_pix: i.tipo_pix,
+                    valor: i.valor_real,
+                    valor_solicitado: i.valor_solicitado,
+                    data_solicitacao: i.data_solicitacao || null,
+                    status_item: i.status,
+                    motivo_bloqueio: i.motivo_bloqueio ?? null,
+                }));
+                const { error: itemsErr } = await supabase.from("itens_saque").insert(itens);
+                if (itemsErr) throw itemsErr;
+
+                update((l) => ({ ...l, savedLoteId: loteDbId }));
+            }
+
+            // ── Passo 2: Enviar para a API Transfeera ──
+            const apiPayload = {
+                action: "create_batch",
+                lote_nome: lote.nome,
+                items: approved.map((i) => ({
+                    id: i.id,
+                    valor_real: i.valor_real,
+                    tipo_pix: i.tipo_pix,
+                    chave_pix: i.chave_pix,
+                    cpf_favorecido: i.cpf_favorecido,
+                    nome_usuario: i.nome_usuario,
+                })),
+            };
+
+            const res = await fetch("/api/transfeera", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(apiPayload),
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                // Extrair erros da API
+                let errorMsg = data.error || "Erro desconhecido da Transfeera.";
+                if (data.transferErrors && data.transferErrors.length > 0) {
+                    errorMsg += "\n" + data.transferErrors.slice(0, 5).join("\n");
+                }
+                throw new Error(errorMsg);
+            }
+
+            // ── Passo 3: Salvar IDs da Transfeera no Supabase ──
+            const batchId: string = data.batch_id;
+            const transferIdMap: Record<string, string> = data.transferIdMap || {};
+
+            // Atualizar lote com transfeera_batch_id
+            await supabase
+                .from("lotes_saques")
+                .update({ transfeera_batch_id: batchId })
+                .eq("id", loteDbId);
+
+            // Atualizar cada item com transfeera_transfer_id
+            for (const [integrationId, transferId] of Object.entries(transferIdMap)) {
+                await supabase
+                    .from("itens_saque")
+                    .update({ transfeera_transfer_id: transferId })
+                    .eq("id", integrationId);
+            }
+
+            const mappedCount = Object.keys(transferIdMap).length;
+            update((l) => ({
+                ...l,
+                sendingApi: false,
+                apiMsg: {
+                    type: "success",
+                    text: `✅ Lote enviado com sucesso! Batch ID: ${batchId} | ${mappedCount} transferência(s) mapeada(s). Acompanhe em Saques → Acompanhamento.`,
+                },
+            }));
+        } catch (err: unknown) {
+            const e = err as { message?: string };
+            update((l) => ({
+                ...l,
+                sendingApi: false,
+                apiMsg: { type: "error", text: e.message ?? "Erro ao enviar lote para a Transfeera." },
+            }));
+        }
+    }
+
     function handleDownloadExcluidos() {
         triggerDownload(buildExcluidosCsv(lote.items), `excluidos_${lote.tipo_saque.replace(/ /g, "_")}.csv`);
     }
@@ -783,10 +900,28 @@ function LotePanel({
                                 className="btn btn-primary"
                                 style={{ fontSize: 13, padding: "8px 18px" }}
                                 onClick={handleExport}
-                                disabled={lote.saving || approved.length === 0}
+                                disabled={lote.saving || lote.sendingApi || approved.length === 0 || lote.saveMsg?.type === "success" || lote.apiMsg?.type === "success"}
                             >
                                 <Download size={14} />
                                 {lote.saving ? "Salvando…" : "Exportar Transfeera"}
+                            </button>
+                            <button
+                                className="btn"
+                                style={{
+                                    fontSize: 13,
+                                    padding: "8px 18px",
+                                    background: "rgba(52,211,153,0.15)",
+                                    color: "var(--success)",
+                                    border: "1px solid rgba(52,211,153,0.3)",
+                                }}
+                                onClick={handleDirectIntegration}
+                                disabled={lote.saving || lote.sendingApi || approved.length === 0 || lote.apiMsg?.type === "success"}
+                            >
+                                {lote.sendingApi ? (
+                                    <><Loader2 size={14} className="animate-spin" /> Enviando…</>
+                                ) : (
+                                    <><CloudUpload size={14} /> Enviar Lote Direto (API)</>
+                                )}
                             </button>
                         </div>
                     </div>
@@ -799,6 +934,17 @@ function LotePanel({
                             border: `1px solid ${lote.saveMsg.type === "success" ? "rgba(52,211,153,0.2)" : "rgba(248,113,113,0.2)"}`,
                         }}>
                             {lote.saveMsg.text}
+                        </div>
+                    )}
+                    {lote.apiMsg && (
+                        <div style={{
+                            marginTop: 10, padding: "8px 12px", borderRadius: "var(--radius-sm)", fontSize: 13,
+                            background: lote.apiMsg.type === "success" ? "rgba(52,211,153,0.1)" : "rgba(248,113,113,0.1)",
+                            color: lote.apiMsg.type === "success" ? "var(--success)" : "var(--danger)",
+                            border: `1px solid ${lote.apiMsg.type === "success" ? "rgba(52,211,153,0.2)" : "rgba(248,113,113,0.2)"}`,
+                            whiteSpace: "pre-wrap",
+                        }}>
+                            {lote.apiMsg.text}
                         </div>
                     )}
                 </div>

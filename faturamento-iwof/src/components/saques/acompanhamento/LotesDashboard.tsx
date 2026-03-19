@@ -26,6 +26,7 @@ interface WorkerHistory {
     chave_pix: string;
     valor: number;
     created_at: string; // we'll fetch from lote
+    transfeera_transfer_id?: string;
 }
 
 export default function LotesDashboard() {
@@ -81,6 +82,7 @@ export default function LotesDashboard() {
                 cpf_favorecido, 
                 chave_pix, 
                 valor,
+                transfeera_transfer_id,
                 lotes_saques ( created_at )
             `)
             .or(`nome_usuario.ilike.%${globalSearch}%,cpf_favorecido.ilike.%${globalSearch}%,cpf_conta.ilike.%${globalSearch}%`)
@@ -96,6 +98,7 @@ export default function LotesDashboard() {
                 cpf_favorecido: d.cpf_favorecido,
                 chave_pix: d.chave_pix,
                 valor: d.valor,
+                transfeera_transfer_id: d.transfeera_transfer_id,
                 created_at: d.lotes_saques?.created_at || new Date().toISOString()
             }));
 
@@ -107,7 +110,13 @@ export default function LotesDashboard() {
             
             // Trigger Transfeera Sync
             const ids = formatted.map(f => f.id);
-            syncBatch(ids);
+            const transfeeraIdMap: Record<string, string> = {};
+            for (const f of formatted) {
+                if (f.transfeera_transfer_id) {
+                    transfeeraIdMap[f.id] = f.transfeera_transfer_id;
+                }
+            }
+            syncBatch(ids, Object.keys(transfeeraIdMap).length > 0 ? transfeeraIdMap : undefined);
         } else {
             alert("Nenhum trabalhador (com saques exportados) encontrado com este termo.");
         }
@@ -290,7 +299,7 @@ export default function LotesDashboard() {
                                             <td className="p-3 text-center">
                                                 {statuses[item.id] === 'FINALIZADO' ? (
                                                     <button 
-                                                        onClick={() => downloadReceipt(item.id)}
+                                                        onClick={() => downloadReceipt(item.id, item.transfeera_transfer_id)}
                                                         className="btn btn-ghost mx-auto p-2 text-indigo-500 hover:bg-indigo-500/10 cursor-pointer transition-colors" 
                                                         title="Baixar Comprovativo PDF"
                                                     >

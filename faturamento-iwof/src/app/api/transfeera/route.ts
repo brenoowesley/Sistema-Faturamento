@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-// Cache for the Bearer token to avoid authenticating on every request
+// ─── Token Cache ────────────────────────────────────────────────────────────────
 let cachedTransfeeraToken: string | null = null;
 let tokenExpiryTime: number | null = null;
 
-// Auth logic inside the Next.js API
 async function getTransfeeraToken() {
     if (cachedTransfeeraToken && tokenExpiryTime && Date.now() < tokenExpiryTime) {
         return cachedTransfeeraToken;
@@ -13,9 +12,9 @@ async function getTransfeeraToken() {
 
     const clientId = process.env.TRANSFEERA_CLIENT_ID;
     const clientSecret = process.env.TRANSFEERA_CLIENT_SECRET;
-    
-    const baseUrl = process.env.TRANSFEERA_ENV === "sandbox" 
-        ? "https://login-api-sandbox.transfeera.com" 
+
+    const loginBase = process.env.TRANSFEERA_ENV === "sandbox"
+        ? "https://login-api-sandbox.transfeera.com"
         : "https://login-api.transfeera.com";
 
     if (!clientId || !clientSecret) {
@@ -23,36 +22,31 @@ async function getTransfeeraToken() {
         throw new Error("Configuração de API ausente no servidor");
     }
 
-    try {
-        const response = await fetch(`${baseUrl}/authorization`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
-            },
-            body: JSON.stringify({
-                grant_type: "client_credentials",
-                client_id: clientId,
-                client_secret: clientSecret
-            })
-        });
+    const response = await fetch(`${loginBase}/authorization`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
+        },
+        body: JSON.stringify({
+            grant_type: "client_credentials",
+            client_id: clientId,
+            client_secret: clientSecret
+        })
+    });
 
-        if (!response.ok) {
-            const errBody = await response.text();
-            console.error(`Transfeera Auth Error: Status ${response.status} - Body: ${errBody}`);
-            throw new Error(`Transfeera Auth Error: ${response.status}`);
-        }
-
-        const data = await response.json();
-        cachedTransfeeraToken = data.access_token;
-        const expiresInSecs = data.expires_in || 3600;
-        tokenExpiryTime = Date.now() + (expiresInSecs - 60) * 1000;
-        
-        return cachedTransfeeraToken;
-    } catch (e) {
-        console.error("Transfeera token fetch failure:", e);
-        throw e;
+    if (!response.ok) {
+        const errBody = await response.text();
+        console.error(`Transfeera Auth Error: Status ${response.status} - Body: ${errBody}`);
+        throw new Error(`Transfeera Auth Error: ${response.status}`);
     }
+
+    const data = await response.json();
+    cachedTransfeeraToken = data.access_token;
+    const expiresInSecs = data.expires_in || 3600;
+    tokenExpiryTime = Date.now() + (expiresInSecs - 60) * 1000;
+
+    return cachedTransfeeraToken;
 }
 
 function getTransfeeraBaseUrl() {
@@ -61,7 +55,7 @@ function getTransfeeraBaseUrl() {
         : "https://api.transfeera.com";
 }
 
-// Normaliza o status retornado pela Transfeera para valores conhecidos pelo frontend
+// ─── Status Normalizer ──────────────────────────────────────────────────────────
 function normalizeTransfeeraStatus(raw: string): string {
     if (!raw) return "NAO_SUBMETIDO";
     const s = raw.toUpperCase().trim();
@@ -87,44 +81,201 @@ function normalizeTransfeeraStatus(raw: string): string {
     return map[s] ?? raw;
 }
 
+const UA_HEADER = "IWOF - Sistema de Faturamento (breno@iwof.com.br)";
+
+// ─── POST Handler ───────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
     try {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
 
         if (!user) {
-            console.warn("[Transfeera Proxy] Chamada bloqueada: Usuário não autenticado.");
             return NextResponse.json({ error: "Sessão inválida." }, { status: 401 });
         }
 
         const body = await req.json();
         const action = body.action;
-
         const token = await getTransfeeraToken();
         const baseUrl = getTransfeeraBaseUrl();
         const env = process.env.TRANSFEERA_ENV || "production";
 
+        // ═══════════════════════════════════════════════════════════════════════
+        // ACTION: create_batch — Cria um lote de pagamento direto na Transfeera
+        // ═══════════════════════════════════════════════════════════════════════
+        if (action === "create_batch") {
+            const { lote_nome, items } = body as {
+                lote_nome: string;
+                items: Array<{
+                    id: string;           // integration_id (UUID local)
+                    valor_real: number;
+                    tipo_pix: string;
+                    chave_pix: string;
+                    cpf_favorecido: string;
+                    nome_usuario?: string;
+                }>;
+            };
+
+            if (!items || items.length === 0) {
+                return NextResponse.json({ error: "Nenhum item aprovado para enviar." }, { status: 400 });
+            }
+
+            console.log(`[Transfeera] ▶ create_batch: "${lote_nome}" com ${items.length} transferência(s) | Ambiente: ${env}`);
+
+            // Normalizar tipo_pix para o formato que a Transfeera aceita
+            function normalizePixKeyType(tipo: string): string {
+                const map: Record<string, string> = {
+                    "EMAIL": "EMAIL",
+                    "CPF": "CPF",
+                    "CNPJ": "CNPJ",
+                    "TELEFONE": "TELEFONE",
+                    "CHAVE_ALEATORIA": "CHAVE_ALEATORIA",
+                    "EVP": "CHAVE_ALEATORIA",
+                    "ALEATORIO": "CHAVE_ALEATORIA",
+                };
+                return map[tipo.toUpperCase()] || tipo;
+            }
+
+            // Montar payload conforme documentação Transfeera: POST /batch
+            const transfers = items.map((item) => ({
+                value: item.valor_real,
+                integration_id: item.id,
+                pix_description: "REPASSE IWOF",
+                destination_bank_account: {
+                    pix_key_type: normalizePixKeyType(item.tipo_pix),
+                    pix_key: item.chave_pix,
+                },
+                pix_key_validation: {
+                    cpf_cnpj: item.cpf_favorecido.replace(/[.\-\/]/g, ""),
+                },
+            }));
+
+            const batchPayload = {
+                name: lote_nome,
+                type: "TRANSFERENCIA",
+                auto_close: false,
+                transfers,
+            };
+
+            console.log(`[Transfeera] POST /batch payload (first transfer):`, JSON.stringify(transfers[0]));
+
+            const batchRes = await fetch(`${baseUrl}/batch`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                    "User-Agent": UA_HEADER,
+                },
+                body: JSON.stringify(batchPayload),
+            });
+
+            const batchBody = await batchRes.json();
+
+            if (!batchRes.ok) {
+                console.error(`[Transfeera] POST /batch FALHOU (${batchRes.status}):`, JSON.stringify(batchBody));
+
+                // Extrair erros individuais de transferência (ex: chave PIX inválida)
+                const transferErrors: string[] = [];
+                if (batchBody.errors && Array.isArray(batchBody.errors)) {
+                    for (const err of batchBody.errors) {
+                        transferErrors.push(`${err.integration_id || "?"}: ${err.message || JSON.stringify(err)}`);
+                    }
+                }
+
+                return NextResponse.json({
+                    error: batchBody.message || "Erro ao criar lote na Transfeera",
+                    details: batchBody,
+                    transferErrors,
+                }, { status: batchRes.status });
+            }
+
+            console.log(`✅ [Transfeera] Lote criado com sucesso! batch_id=${batchBody.id}`);
+            console.log(`[Transfeera] Resposta completa:`, JSON.stringify(batchBody));
+
+            // Construir mapa integration_id → transfeera_transfer_id
+            const transferIdMap: Record<string, string> = {};
+            const createdTransfers: any[] = batchBody.transfers || [];
+
+            for (const t of createdTransfers) {
+                const integId = (t.integration_id || "").toString();
+                if (integId && t.id) {
+                    transferIdMap[integId] = String(t.id);
+                }
+            }
+
+            console.log(`[Transfeera] Mapa de IDs: ${Object.keys(transferIdMap).length} transferência(s) mapeada(s)`);
+
+            return NextResponse.json({
+                success: true,
+                batch_id: String(batchBody.id),
+                transferIdMap,
+                raw: batchBody,
+            });
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // ACTION: status_by_transfeera_id — Consulta direta por ID numérico
+        // ═══════════════════════════════════════════════════════════════════════
+        if (action === "status_by_transfeera_id") {
+            const ids: string[] = body.ids; // transfeera_transfer_id (numéricos como string)
+            if (!ids || ids.length === 0) {
+                return NextResponse.json({ statuses: {} });
+            }
+
+            console.log(`[Transfeera] ▶ status_by_transfeera_id: ${ids.length} ID(s) | Ambiente: ${env}`);
+
+            const results: Record<string, string> = {};
+
+            for (const transferId of ids) {
+                try {
+                    const res = await fetch(`${baseUrl}/transfer/${transferId}`, {
+                        headers: {
+                            "Authorization": `Bearer ${token}`,
+                            "User-Agent": UA_HEADER,
+                        },
+                    });
+
+                    if (res.ok) {
+                        const payload = await res.json();
+                        const rawStatus = payload.status || "";
+                        const normalized = normalizeTransfeeraStatus(rawStatus);
+                        console.log(`✅ transfer_id=${transferId} status="${rawStatus}" → "${normalized}"`);
+                        results[transferId] = normalized;
+                    } else {
+                        const errBody = await res.text();
+                        console.warn(`[Transfeera] GET /transfer/${transferId} FALHOU (${res.status}): ${errBody}`);
+                        results[transferId] = "ERRO_CONSULTA";
+                    }
+                } catch (e) {
+                    console.error(`[Transfeera] Erro de rede para transfer_id=${transferId}:`, e);
+                    results[transferId] = "ERRO_REDE";
+                }
+            }
+
+            return NextResponse.json({ statuses: results });
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // ACTION: status_batch — Legado: varredura por integration_id (UUID)
+        // ═══════════════════════════════════════════════════════════════════════
         if (action === "status_batch") {
             const ids: string[] = body.ids;
             if (!ids || ids.length === 0) {
                 return NextResponse.json({ statuses: {} });
             }
 
-            console.log(`[Transfeera] ▶ status_batch: ${ids.length} ID(s) | Ambiente: ${env} | Base URL: ${baseUrl}`);
+            console.log(`[Transfeera] ▶ status_batch (legado): ${ids.length} ID(s) | Ambiente: ${env}`);
 
-            // ─── Passo 1: Carregar todos os lotes disponíveis na conta ────────────────
-            // GET /transfer/{id} requer ID numérico interno da Transfeera, não nosso UUID.
-            // A única forma de buscar por integration_id é listar lotes e varrer transferências.
+            // Passo 1: Carregar lotes paginados
             const allBatches: any[] = [];
             let batchPage = 1;
             let hasMoreBatches = true;
 
-            while (hasMoreBatches && batchPage <= 10) { // máximo 10 páginas (500 lotes)
+            while (hasMoreBatches && batchPage <= 10) {
                 const batchRes = await fetch(`${baseUrl}/batch?per_page=50&page=${batchPage}`, {
                     headers: {
                         "Authorization": `Bearer ${token}`,
-                        "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
-                    }
+                        "User-Agent": UA_HEADER,
+                    },
                 });
 
                 if (!batchRes.ok) {
@@ -136,10 +287,8 @@ export async function POST(req: NextRequest) {
                 const batchPayload = await batchRes.json();
                 const pageBatches: any[] = Array.isArray(batchPayload) ? batchPayload : (batchPayload.data || []);
                 console.log(`[Transfeera] GET /batch page=${batchPage} → ${pageBatches.length} lote(s)`);
-
                 allBatches.push(...pageBatches);
 
-                // Se retornou menos de 50, não há mais páginas
                 if (pageBatches.length < 50) {
                     hasMoreBatches = false;
                 } else {
@@ -147,60 +296,46 @@ export async function POST(req: NextRequest) {
                 }
             }
 
-            console.log(`[Transfeera] Total de lotes carregados: ${allBatches.length}`);
+            console.log(`[Transfeera] Total de lotes: ${allBatches.length}`);
 
             if (allBatches.length === 0) {
-                console.warn(`[Transfeera] ⚠️ ZERO lotes encontrados no ambiente "${env}". Verifique se TRANSFEERA_ENV está correto no Vercel e se os pagamentos foram submetidos neste mesmo ambiente.`);
+                console.warn(`[Transfeera] ⚠️ ZERO lotes no ambiente "${env}".`);
                 const emptyResults: Record<string, string> = {};
                 for (const id of ids) emptyResults[id] = "NAO_SUBMETIDO";
                 return NextResponse.json({ statuses: emptyResults });
             }
 
-            // ─── Passo 2: Para cada lote, buscar transferências e indexar por integration_id ──
-            // Construir um mapa: integration_id (lowercase) → objeto da transferência
+            // Passo 2: Construir mapa integration_id → transfer
             const transferMap: Record<string, any> = {};
 
             for (const batch of allBatches) {
-                const batchId = batch.id;
-                const transferRes = await fetch(`${baseUrl}/batch/${batchId}/transfer?per_page=100`, {
+                const transferRes = await fetch(`${baseUrl}/batch/${batch.id}/transfer?per_page=100`, {
                     headers: {
                         "Authorization": `Bearer ${token}`,
-                        "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
-                    }
+                        "User-Agent": UA_HEADER,
+                    },
                 });
 
-                if (!transferRes.ok) {
-                    console.warn(`[Transfeera] GET /batch/${batchId}/transfer FALHOU (${transferRes.status})`);
-                    continue;
-                }
+                if (!transferRes.ok) continue;
 
                 const tPayload = await transferRes.json();
                 const transfers: any[] = Array.isArray(tPayload) ? tPayload : (tPayload.data || []);
 
                 for (const t of transfers) {
                     const integId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
-                    if (integId) {
-                        transferMap[integId] = t;
-                    }
+                    if (integId) transferMap[integId] = t;
                 }
             }
 
-            console.log(`[Transfeera] Mapa de transferências construído com ${Object.keys(transferMap).length} entradas`);
-            if (Object.keys(transferMap).length > 0) {
-                const sampleKey = Object.keys(transferMap)[0];
-                console.log(`[Transfeera] Sample da primeira transferência encontrada:`, JSON.stringify(transferMap[sampleKey]));
-            }
+            console.log(`[Transfeera] Mapa construído: ${Object.keys(transferMap).length} transferência(s)`);
 
-            // ─── Passo 3: Resolver cada ID solicitado ─────────────────────────────────
+            // Passo 3: Resolver IDs
             const results: Record<string, string> = {};
-
             for (const id of ids) {
                 const found = transferMap[id.toLowerCase()];
                 if (found) {
                     const rawStatus = found.status || found.status_transferencia || "";
-                    const normalizedStatus = normalizeTransfeeraStatus(rawStatus);
-                    console.log(`✅ ID=${id} | status_bruto="${rawStatus}" | normalizado="${normalizedStatus}"`);
-                    results[id] = normalizedStatus;
+                    results[id] = normalizeTransfeeraStatus(rawStatus);
                 } else {
                     results[id] = "NAO_SUBMETIDO";
                 }
@@ -225,12 +360,12 @@ export async function POST(req: NextRequest) {
             status = parseInt(message.split(":")[1]) || 500;
             message = `Falha na autenticação com a Transfeera (${status}). Verifique as credenciais do ambiente ${process.env.TRANSFEERA_ENV || 'produção'}.`;
         }
-        
+
         return NextResponse.json({ error: message }, { status });
     }
 }
 
-// GET is used for the receipt downloads — usa bank_receipt_url do objeto de transferência
+// ─── GET Handler: Comprovantes ──────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
     try {
         const supabase = await createClient();
@@ -242,68 +377,84 @@ export async function GET(req: NextRequest) {
 
         const url = new URL(req.url);
         const action = url.searchParams.get("action");
-        const idIntegracao = url.searchParams.get("id");
+        const idParam = url.searchParams.get("id");
+        const transferId = url.searchParams.get("transfer_id"); // Novo: ID numérico da Transfeera
 
-        if (action === "receipt" && idIntegracao) {
+        if (action === "receipt" && (transferId || idParam)) {
             const token = await getTransfeeraToken();
             const baseUrl = getTransfeeraBaseUrl();
-            const env = process.env.TRANSFEERA_ENV || "production";
 
-            console.log(`[Transfeera Receipt] Buscando comprovante para ID=${idIntegracao} | Ambiente: ${env}`);
-
-            // Varrer lotes para encontrar a transferência pelo integration_id
             let transferObj: any = null;
 
-            const batchRes = await fetch(`${baseUrl}/batch?per_page=50&page=1`, {
-                headers: {
-                    "Authorization": `Bearer ${token}`,
-                    "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
+            // ── Caminho rápido: usar transfeera_transfer_id direto ──
+            if (transferId) {
+                console.log(`[Transfeera Receipt] GET /transfer/${transferId} (ID direto)`);
+                const res = await fetch(`${baseUrl}/transfer/${transferId}`, {
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "User-Agent": UA_HEADER,
+                    },
+                });
+
+                if (res.ok) {
+                    transferObj = await res.json();
+                    console.log(`✅ [Transfeera Receipt] Encontrado via ID direto`);
+                } else {
+                    console.warn(`[Transfeera Receipt] GET /transfer/${transferId} FALHOU (${res.status})`);
                 }
-            });
+            }
 
-            if (batchRes.ok) {
-                const batchPayload = await batchRes.json();
-                const batches: any[] = Array.isArray(batchPayload) ? batchPayload : (batchPayload.data || []);
+            // ── Caminho legado: varrer lotes por integration_id ──
+            if (!transferObj && idParam) {
+                console.log(`[Transfeera Receipt] Buscando por integration_id=${idParam} (legado)`);
 
-                for (const batch of batches) {
-                    const tRes = await fetch(`${baseUrl}/batch/${batch.id}/transfer?per_page=100`, {
-                        headers: {
-                            "Authorization": `Bearer ${token}`,
-                            "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
-                        }
-                    });
-                    if (tRes.ok) {
-                        const tPayload = await tRes.json();
-                        const transfers: any[] = Array.isArray(tPayload) ? tPayload : (tPayload.data || []);
-                        const found = transfers.find((t: any) => {
-                            const apiId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
-                            return apiId === idIntegracao.toLowerCase();
+                const batchRes = await fetch(`${baseUrl}/batch?per_page=50&page=1`, {
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "User-Agent": UA_HEADER,
+                    },
+                });
+
+                if (batchRes.ok) {
+                    const batchPayload = await batchRes.json();
+                    const batches: any[] = Array.isArray(batchPayload) ? batchPayload : (batchPayload.data || []);
+
+                    for (const batch of batches) {
+                        const tRes = await fetch(`${baseUrl}/batch/${batch.id}/transfer?per_page=100`, {
+                            headers: {
+                                "Authorization": `Bearer ${token}`,
+                                "User-Agent": UA_HEADER,
+                            },
                         });
-                        if (found) {
-                            transferObj = found;
-                            console.log(`✅ [Transfeera Receipt] Transferência encontrada no lote ${batch.id}`);
-                            break;
+                        if (tRes.ok) {
+                            const tPayload = await tRes.json();
+                            const transfers: any[] = Array.isArray(tPayload) ? tPayload : (tPayload.data || []);
+                            const found = transfers.find((t: any) => {
+                                const apiId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
+                                return apiId === idParam.toLowerCase();
+                            });
+                            if (found) {
+                                transferObj = found;
+                                break;
+                            }
                         }
                     }
                 }
             }
 
             if (!transferObj) {
-                console.warn(`[Transfeera Receipt] Transferência não encontrada para ID=${idIntegracao}`);
                 return NextResponse.json({ error: "Transferência não encontrada no gateway" }, { status: 404 });
             }
 
-            // A Transfeera disponibiliza o link do comprovante em bank_receipt_url no objeto
             const receiptUrl: string | undefined = transferObj.bank_receipt_url || transferObj.comprovante_url || transferObj.receipt_url;
 
             if (!receiptUrl) {
-                console.warn(`[Transfeera Receipt] bank_receipt_url ausente. Status atual: ${transferObj.status}`);
-                return NextResponse.json({ 
-                    error: `Comprovante indisponível. Status: ${transferObj.status || "desconhecido"}. O comprovante só fica disponível quando o pagamento está FINALIZADO.` 
+                return NextResponse.json({
+                    error: `Comprovante indisponível. Status: ${transferObj.status || "desconhecido"}. Disponível apenas quando FINALIZADO.`
                 }, { status: 404 });
             }
 
-            console.log(`✅ [Transfeera Receipt] Fazendo proxy para: ${receiptUrl}`);
+            console.log(`✅ [Transfeera Receipt] Proxy para: ${receiptUrl}`);
 
             const receiptRes = await fetch(receiptUrl);
             if (!receiptRes.ok) {
@@ -315,8 +466,8 @@ export async function GET(req: NextRequest) {
                 status: 200,
                 headers: {
                     "Content-Type": "application/pdf",
-                    "Content-Disposition": `attachment; filename="comprovativo_${idIntegracao}.pdf"`
-                }
+                    "Content-Disposition": `attachment; filename="comprovativo_${transferId || idParam}.pdf"`,
+                },
             });
         }
 
