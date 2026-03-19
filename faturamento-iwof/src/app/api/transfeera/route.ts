@@ -64,6 +64,32 @@ function getTransfeeraBaseUrl() {
         : "https://api.transfeera.com";
 }
 
+// Normaliza o status retornado pela Transfeera para valores conhecidos pelo frontend
+function normalizeTransfeeraStatus(raw: string): string {
+    if (!raw) return "NAO_SUBMETIDO";
+    const s = raw.toUpperCase().trim();
+    const map: Record<string, string> = {
+        FINALIZADO: "FINALIZADO",
+        EFETIVADO: "EFETIVADO",
+        PAGO: "FINALIZADO",
+        CONCLUIDO: "FINALIZADO",
+        CONCLUÍDO: "FINALIZADO",
+        EM_PROCESSAMENTO: "EM_PROCESSAMENTO",
+        PROCESSANDO: "EM_PROCESSAMENTO",
+        EM_PROCESSAMENTO_BANCO: "EM_PROCESSAMENTO",
+        AGENDADO: "AGENDADO",
+        SCHEDULED: "AGENDADO",
+        DEVOLVIDO: "DEVOLVIDO",
+        RETURNED: "DEVOLVIDO",
+        FALHA: "FALHA",
+        FAILED: "FALHA",
+        ERROR: "FALHA",
+        CRIADO: "AGENDADO",
+        CREATED: "AGENDADO",
+    };
+    return map[s] ?? raw;
+}
+
 export async function POST(req: NextRequest) {
     try {
         const supabase = await createClient();
@@ -87,99 +113,94 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ statuses: {} });
             }
 
-            // Normaliza o status retornado pela Transfeera para valores conhecidos pelo frontend
-            function normalizeTransfeeraStatus(raw: string): string {
-                if (!raw) return "NAO_SUBMETIDO";
-                const s = raw.toUpperCase().trim();
-                // Mapeamento de possíveis variações da API
-                const map: Record<string, string> = {
-                    FINALIZADO: "FINALIZADO",
-                    EFETIVADO: "EFETIVADO",
-                    PAGO: "FINALIZADO",
-                    CONCLUIDO: "FINALIZADO",
-                    CONCLUÍDO: "FINALIZADO",
-                    EM_PROCESSAMENTO: "EM_PROCESSAMENTO",
-                    PROCESSANDO: "EM_PROCESSAMENTO",
-                    EM_PROCESSAMENTO_BANCO: "EM_PROCESSAMENTO",
-                    AGENDADO: "AGENDADO",
-                    SCHEDULED: "AGENDADO",
-                    DEVOLVIDO: "DEVOLVIDO",
-                    RETURNED: "DEVOLVIDO",
-                    FALHA: "FALHA",
-                    FAILED: "FALHA",
-                    ERROR: "FALHA",
-                    CRIADO: "AGENDADO",
-                    CREATED: "AGENDADO",
-                };
-                return map[s] ?? raw; // devolve o original se não mapear, para ficar visível no badge
-            }
-
             const results: Record<string, string> = {};
 
             for (const id of ids) {
                 try {
-                    let match = null;
+                    let transferObj: any = null;
 
-                    // Strategy 1: PT endpoint com per_page=100 para evitar truncamento por paginação
-                    const qsPT = new URLSearchParams({ id_integracao: id, per_page: "100" }).toString();
-                    console.log(`[Transfeera] Buscando ID=${id} → Strategy 1 (PT): /transferencias?${qsPT}`);
-                    const resPT = await fetch(`${baseUrl}/transferencias?${qsPT}`, {
+                    // ─── Strategy 1: GET /transfer/{integration_id} ───────────────
+                    // Endpoint oficial documentado: consulta transferência pelo ID de integração
+                    console.log(`[Transfeera] Buscando ID=${id} → Strategy 1: GET /transfer/${id}`);
+                    const res1 = await fetch(`${baseUrl}/transfer/${id}`, {
                         headers: {
                             "Authorization": `Bearer ${token}`,
                             "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
                         }
                     });
 
-                    console.log(`[Transfeera] Strategy 1 HTTP ${resPT.status} para ID=${id}`);
+                    console.log(`[Transfeera] Strategy 1 HTTP ${res1.status} para ID=${id}`);
 
-                    if (resPT.ok) {
-                        const payload = await resPT.json();
-                        const transfers = Array.isArray(payload) ? payload : (payload.data || []);
-                        console.log(`[Transfeera] Strategy 1 retornou ${transfers.length} item(s). Sample:`, JSON.stringify(transfers[0] ?? null));
-
-                        match = transfers.find((t: any) => {
-                            const apiId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
-                            return apiId === id.toLowerCase();
-                        });
+                    if (res1.ok) {
+                        const payload = await res1.json();
+                        // Pode retornar objeto direto ou array
+                        if (Array.isArray(payload)) {
+                            transferObj = payload.find((t: any) => {
+                                const apiId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
+                                return apiId === id.toLowerCase();
+                            }) ?? payload[0] ?? null;
+                        } else if (payload && typeof payload === "object") {
+                            transferObj = payload;
+                        }
+                        console.log(`[Transfeera] Strategy 1 payload:`, JSON.stringify(transferObj ?? payload));
                     } else {
-                        const errBody = await resPT.text();
-                        console.warn(`[Transfeera] Strategy 1 FALHOU (${resPT.status}): ${errBody}`);
+                        const errBody = await res1.text();
+                        console.warn(`[Transfeera] Strategy 1 FALHOU (${res1.status}): ${errBody}`);
                     }
 
-                    // Strategy 2: EN endpoint com per_page=100
-                    if (!match) {
-                        const qsEN = new URLSearchParams({ integration_id: id, per_page: "100" }).toString();
-                        console.log(`[Transfeera] Buscando ID=${id} → Strategy 2 (EN): /transfers?${qsEN}`);
-                        const resEN = await fetch(`${baseUrl}/transfers?${qsEN}`, {
+                    // ─── Strategy 2 (fallback): listar lotes recentes → varrer transferências ──
+                    if (!transferObj) {
+                        console.log(`[Transfeera] Strategy 2: GET /batch?per_page=50`);
+                        const res2 = await fetch(`${baseUrl}/batch?per_page=50`, {
                             headers: {
                                 "Authorization": `Bearer ${token}`,
                                 "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
                             }
                         });
 
-                        console.log(`[Transfeera] Strategy 2 HTTP ${resEN.status} para ID=${id}`);
+                        console.log(`[Transfeera] Strategy 2 HTTP ${res2.status}`);
 
-                        if (resEN.ok) {
-                            const payload = await resEN.json();
-                            const transfers = Array.isArray(payload) ? payload : (payload.data || []);
-                            console.log(`[Transfeera] Strategy 2 retornou ${transfers.length} item(s). Sample:`, JSON.stringify(transfers[0] ?? null));
+                        if (res2.ok) {
+                            const batchPayload = await res2.json();
+                            const batches: any[] = Array.isArray(batchPayload) ? batchPayload : (batchPayload.data || []);
+                            console.log(`[Transfeera] Strategy 2 retornou ${batches.length} lote(s)`);
 
-                            match = transfers.find((t: any) => {
-                                const apiId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
-                                return apiId === id.toLowerCase();
-                            });
+                            // Para cada lote, busca as transferências e procura o ID de integração
+                            for (const batch of batches) {
+                                const batchId = batch.id;
+                                const res3 = await fetch(`${baseUrl}/batch/${batchId}/transfer?per_page=100`, {
+                                    headers: {
+                                        "Authorization": `Bearer ${token}`,
+                                        "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
+                                    }
+                                });
+                                if (res3.ok) {
+                                    const tPayload = await res3.json();
+                                    const transfers: any[] = Array.isArray(tPayload) ? tPayload : (tPayload.data || []);
+                                    const found = transfers.find((t: any) => {
+                                        const apiId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
+                                        return apiId === id.toLowerCase();
+                                    });
+                                    if (found) {
+                                        transferObj = found;
+                                        console.log(`[Transfeera] Strategy 2 match no lote ${batchId}`);
+                                        break;
+                                    }
+                                }
+                            }
                         } else {
-                            const errBody = await resEN.text();
-                            console.warn(`[Transfeera] Strategy 2 FALHOU (${resEN.status}): ${errBody}`);
+                            const errBody = await res2.text();
+                            console.warn(`[Transfeera] Strategy 2 FALHOU (${res2.status}): ${errBody}`);
                         }
                     }
 
-                    if (match) {
-                        const normalizedStatus = normalizeTransfeeraStatus(match.status);
-                        console.log(`✅ Match encontrado: ID=${id} | status_bruto="${match.status}" | normalizado="${normalizedStatus}"`);
+                    if (transferObj) {
+                        const rawStatus = transferObj.status || transferObj.status_transferencia || "";
+                        const normalizedStatus = normalizeTransfeeraStatus(rawStatus);
+                        console.log(`✅ Match: ID=${id} | status_bruto="${rawStatus}" | normalizado="${normalizedStatus}"`);
                         results[id] = normalizedStatus;
                     } else {
-                        console.log(`❌ Nenhum match para ID=${id} após ambas as strategies.`);
+                        console.log(`❌ Nenhum match para ID=${id} após todas as strategies.`);
                         results[id] = "NAO_SUBMETIDO";
                     }
 
@@ -210,7 +231,7 @@ export async function POST(req: NextRequest) {
     }
 }
 
-// GET is used for the receipt downloads
+// GET is used for the receipt downloads — usa bank_receipt_url do objeto de transferência
 export async function GET(req: NextRequest) {
     try {
         const supabase = await createClient();
@@ -228,86 +249,47 @@ export async function GET(req: NextRequest) {
             const token = await getTransfeeraToken();
             const baseUrl = getTransfeeraBaseUrl();
 
-            // First we must find the official Transfeera internal ID based on our id_integracao
-            // Try Strategy 1 (PT)
-            const qsPT = new URLSearchParams({ id_integracao: idIntegracao }).toString();
-            let listRes = await fetch(`${baseUrl}/transferencias?${qsPT}`, {
-                headers: { 
+            // Busca a transferência pelo ID de integração via GET /transfer/{id}
+            console.log(`[Transfeera Receipt] GET /transfer/${idIntegracao}`);
+            let transferObj: any = null;
+
+            const res1 = await fetch(`${baseUrl}/transfer/${idIntegracao}`, {
+                headers: {
                     "Authorization": `Bearer ${token}`,
                     "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
                 }
             });
 
-            let match = null;
-            if (listRes.ok) {
-                const payload = await listRes.json();
-                const transfers = Array.isArray(payload) ? payload : (payload.data || []);
-                
-                // BUSCA RESILIENTE:
-                match = transfers.find((t: any) => {
-                    const apiId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
-                    return apiId === idIntegracao.toLowerCase();
-                });
+            console.log(`[Transfeera Receipt] HTTP ${res1.status}`);
+
+            if (res1.ok) {
+                const payload = await res1.json();
+                transferObj = Array.isArray(payload) ? payload[0] : payload;
+                console.log(`[Transfeera Receipt] Payload:`, JSON.stringify(transferObj));
             }
 
-            // Try Strategy 2 (EN)
-            if (!match) {
-                const qsEN = new URLSearchParams({ integration_id: idIntegracao }).toString();
-                const listResEN = await fetch(`${baseUrl}/transfers?${qsEN}`, {
-                    headers: { 
-                        "Authorization": `Bearer ${token}`,
-                        "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
-                    }
-                });
-                if (listResEN.ok) {
-                    const payload = await listResEN.json();
-                    const transfers = Array.isArray(payload) ? payload : (payload.data || []);
-                    
-                    // BUSCA RESILIENTE:
-                    match = transfers.find((t: any) => {
-                        const apiId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
-                        return apiId === idIntegracao.toLowerCase();
-                    });
-                }
+            if (!transferObj) {
+                return NextResponse.json({ error: "Transferência não encontrada no gateway" }, { status: 404 });
             }
 
-            if (match) {
-                console.log(`✅ Match (Receipt) encontrado: ${idIntegracao} -> ID Transfeera: ${match.id}`);
-            } else {
-                console.log(`❌ Match (Receipt) falhou para ID: ${idIntegracao}`);
+            // A Transfeera disponibiliza o link do comprovante em bank_receipt_url no objeto
+            const receiptUrl: string | undefined = transferObj.bank_receipt_url || transferObj.comprovante_url || transferObj.receipt_url;
+
+            if (!receiptUrl) {
+                console.warn(`[Transfeera Receipt] bank_receipt_url ausente. Status: ${transferObj.status}`);
+                return NextResponse.json({ 
+                    error: `Comprovante indisponível. Status: ${transferObj.status || "desconhecido"}. Disponível apenas quando FINALIZADO.` 
+                }, { status: 404 });
             }
 
-            if (!match || !match.id) {
-                return NextResponse.json({ error: "Transferência não encontrada no gateway após múltiplas tentativas" }, { status: 404 });
-            }
+            console.log(`✅ [Transfeera Receipt] Fazendo proxy para: ${receiptUrl}`);
 
-            // Now get the receipt using Transfeera's internal transfer ID
-            const transfeeraId = match.id;
-            
-            // Try Receipt Strategy 1 (PT)
-            let receiptRes = await fetch(`${baseUrl}/transferencias/${transfeeraId}/comprovante`, {
-                headers: { 
-                    "Authorization": `Bearer ${token}`,
-                    "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
-                }
-            });
-
-            // Try Receipt Strategy 2 (EN)
+            // Faz proxy do PDF para o cliente (evita CORS e não expõe o link temporário)
+            const receiptRes = await fetch(receiptUrl);
             if (!receiptRes.ok) {
-                receiptRes = await fetch(`${baseUrl}/transfers/${transfeeraId}/receipt`, {
-                    headers: { 
-                        "Authorization": `Bearer ${token}`,
-                        "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
-                    }
-                });
+                return NextResponse.json({ error: "Link do comprovante expirado ou indisponível" }, { status: 502 });
             }
 
-            if (!receiptRes.ok) {
-                return NextResponse.json({ error: "Comprovativo não disponível em nenhum endpoint do provedor" }, { status: 502 });
-            }
-
-
-            // Provide the binary stream straight back to the client
             const receiptBlob = await receiptRes.blob();
             return new NextResponse(receiptBlob, {
                 status: 200,
