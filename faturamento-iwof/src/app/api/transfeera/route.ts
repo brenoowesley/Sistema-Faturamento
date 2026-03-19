@@ -81,6 +81,34 @@ function normalizeTransfeeraStatus(raw: string): string {
     return map[s] ?? raw;
 }
 
+/**
+ * Formata a chave PIX conforme as exigências da Transfeera.
+ * Especialmente para TELEFONE, que exige o formato E.164 (+55...)
+ */
+function formatarChavePix(tipo: string, chave: string): string {
+    const t = tipo.toUpperCase();
+    const c = chave.trim();
+    
+    if (t === "TELEFONE") {
+        // Remove tudo que não for número
+        const apenasNumeros = c.replace(/\D/g, "");
+        
+        // Se tem 10 ou 11 dígitos (DDD + Número), assume Brasil e põe +55
+        if (apenasNumeros.length === 10 || apenasNumeros.length === 11) {
+            return `+55${apenasNumeros}`;
+        }
+        
+        // Se já começa com 55 e tem 12 ou 13 dígitos, apenas adiciona o +
+        if (apenasNumeros.startsWith("55") && (apenasNumeros.length === 12 || apenasNumeros.length === 13)) {
+            return `+${apenasNumeros}`;
+        }
+        
+        return c; // Caso não se encaixe, envia original (deixando a API validar)
+    }
+    
+    return c;
+}
+
 const UA_HEADER = "IWOF - Sistema de Faturamento (breno@iwof.com.br)";
 
 // ─── POST Handler ───────────────────────────────────────────────────────────────
@@ -142,10 +170,10 @@ export async function POST(req: NextRequest) {
                 pix_description: "REPASSE IWOF",
                 destination_bank_account: {
                     pix_key_type: normalizePixKeyType(item.tipo_pix),
-                    pix_key: item.chave_pix,
+                    pix_key: formatarChavePix(item.tipo_pix, item.chave_pix),
                 },
                 pix_key_validation: {
-                    cpf_cnpj: item.cpf_favorecido.replace(/[.\-\/]/g, ""),
+                    cpf_cnpj: item.cpf_favorecido.replace(/\D/g, ""),
                 },
             }));
 

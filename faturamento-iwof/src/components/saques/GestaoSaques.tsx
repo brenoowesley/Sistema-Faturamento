@@ -142,8 +142,12 @@ function validateItem(cpf_conta: string, cpf_favorecido: string, chave_pix: stri
         return { status: "REVISAO", motivo_bloqueio: "Tipo PIX é EMAIL mas a chave não contém '@'." };
     if (tipo === "CPF" && /[a-zA-Z]/.test(chave))
         return { status: "REVISAO", motivo_bloqueio: "Tipo PIX é CPF mas a chave contém letras." };
-    if (tipo === "TELEFONE" && !/^[\+\(]?[\d][\d\s\-\(\)]+$/.test(chave))
-        return { status: "REVISAO", motivo_bloqueio: "Tipo PIX é TELEFONE mas o formato é inválido." };
+    if (tipo === "TELEFONE") {
+        const apenasNumeros = chave.replace(/\D/g, "");
+        if (apenasNumeros.length < 10 || apenasNumeros.length > 13) {
+            return { status: "REVISAO", motivo_bloqueio: "Telefone parece incompleto ou inválido. Deve conter DDD + Número." };
+        }
+    }
     if (tipo === "CNPJ" && !/^\d/.test(chave.replace(/[\.\/\-]/g, "")))
         return { status: "REVISAO", motivo_bloqueio: "Tipo PIX é CNPJ mas a chave não parece um CNPJ." };
     return { status: "APROVADO" };
