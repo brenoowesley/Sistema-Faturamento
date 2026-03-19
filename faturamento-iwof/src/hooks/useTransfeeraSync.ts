@@ -31,18 +31,26 @@ export function useTransfeeraSync() {
      * @param items - Lista de objetos { id_interno, transfeera_id }
      */
     const syncBatch = useCallback(async (items: SyncItem[]) => {
-        if (!items || items.length === 0) return;
+        if (!items || items.length === 0) {
+            console.log("[useTransfeeraSync] ⚠️ syncBatch chamado com array vazio.");
+            return;
+        }
+
+        console.log(`[useTransfeeraSync] 🔄 Iniciando sync para ${items.length} itens totais.`);
 
         // Filtrar apenas itens que possuem ID da Transfeera
         const syncableItems = items.filter(item => !!item.transfeera_id);
         
+        console.log(`[useTransfeeraSync] 🔍 Itens com transfeera_id: ${syncableItems.length}`);
+        
         if (syncableItems.length === 0) {
-            console.log("[useTransfeeraSync] Nenhum item com transfeera_id para sincronizar.");
+            console.log("[useTransfeeraSync] ⏭️ Nenhum item com transfeera_id para sincronizar. Abortando.");
             return;
         }
 
         setIsSyncing(true);
         try {
+            console.log("[useTransfeeraSync] 🛰️ Enviando requisição status_batch para o backend...");
             const res = await fetch("/api/transfeera", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },

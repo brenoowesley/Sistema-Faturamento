@@ -247,10 +247,12 @@ export async function POST(req: NextRequest) {
             const items: Array<{ id_interno: string; transfeera_id: string }> = body.items;
 
             if (!items || items.length === 0) {
+                console.log("[Transfeera] ⚠️ status_batch recebido com items vazio.");
                 return NextResponse.json({ statuses: {} });
             }
 
-            console.log(`[Transfeera] ▶ status_batch (otimizado): ${items.length} item(s) | Ambiente: ${env}`);
+            console.log(`[Transfeera] ▶ status_batch: processando ${items.length} item(s).`);
+            console.log(`[Transfeera] Detalhe dos itens:`, JSON.stringify(items));
 
             const results: Record<string, string> = {};
             

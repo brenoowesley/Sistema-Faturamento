@@ -61,6 +61,8 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
             transfeera_id: item.transfeera_transfer_id || null
         }));
 
+        console.log(`[LoteDetalhe] ⚡ Tentando sincronizar ${syncItems.length} itens:`, syncItems);
+
         syncBatch(syncItems);
     }, [itens, syncBatch]);
 
