@@ -217,7 +217,7 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
                                         <td className="font-bold text-fg">R$ {item.valor?.toFixed(2)}</td>
                                         <td>
                                             {item.status_item === 'APROVADO' ? (
-                                                <TransfeeraBadge status={statuses[item.id]} isSyncing={isSyncing} />
+                                                <TransfeeraBadge status={statuses[item.id.toLowerCase()]} isSyncing={isSyncing} />
                                             ) : (
                                                 <span className="badge badge-danger text-xs px-2 py-0.5" title="Não enviado para transfeera">
                                                     Removido da Exportação
@@ -225,7 +225,7 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
                                             )}
                                         </td>
                                         <td className="text-center">
-                                            {item.status_item === 'APROVADO' && statuses[item.id] === 'FINALIZADO' ? (
+                                            {item.status_item === 'APROVADO' && statuses[item.id.toLowerCase()] === 'FINALIZADO' ? (
                                                 <button 
                                                     onClick={() => downloadReceipt(item.id, item.transfeera_transfer_id)}
                                                     className="btn btn-ghost mx-auto p-2 text-indigo-500 hover:bg-indigo-500/10 cursor-pointer transition-colors" 

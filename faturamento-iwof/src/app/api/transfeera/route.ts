@@ -224,7 +224,7 @@ export async function POST(req: NextRequest) {
             const createdTransfers: any[] = batchBody.transfers || [];
 
             for (const t of createdTransfers) {
-                const integId = (t.integration_id || "").toString();
+                const integId = (t.integration_id || "").toString().toLowerCase();
                 if (integId && t.id) {
                     transferIdMap[integId] = String(t.id);
                 }

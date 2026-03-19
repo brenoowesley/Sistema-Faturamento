@@ -811,12 +811,22 @@ function LotePanel({
                 .update({ transfeera_batch_id: batchId })
                 .eq("id", loteDbId);
 
-            // Atualizar cada item com transfeera_transfer_id
-            for (const [integrationId, transferId] of Object.entries(transferIdMap)) {
-                await supabase
+            // Atualizar cada item com transfeera_transfer_id em massa (Bulk Update)
+            const upsertData = Object.entries(transferIdMap).map(([id, tid]) => ({
+                id: id.toLowerCase(),
+                transfeera_transfer_id: tid
+            }));
+
+            if (upsertData.length > 0) {
+                const { error: upsertErr } = await supabase
                     .from("itens_saque")
-                    .update({ transfeera_transfer_id: transferId })
-                    .eq("id", integrationId);
+                    .upsert(upsertData, { onConflict: "id" });
+                
+                if (upsertErr) {
+                    console.error("Erro no bulk upsert:", upsertErr);
+                    // Não dar throw para não anular o feedback de sucesso do envio, 
+                    // mas logar o erro para diagnóstico se falhar.
+                }
             }
 
             const mappedCount = Object.keys(transferIdMap).length;

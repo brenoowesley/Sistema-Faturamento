@@ -291,10 +291,10 @@ export default function LotesDashboard() {
                                                 R$ {item.valor?.toFixed(2)}
                                             </td>
                                             <td className="p-3">
-                                                <TransfeeraBadge status={statuses[item.id]} isSyncing={isSyncing} />
+                                                <TransfeeraBadge status={statuses[item.id.toLowerCase()]} isSyncing={isSyncing} />
                                             </td>
                                             <td className="p-3 text-center">
-                                                {statuses[item.id] === 'FINALIZADO' ? (
+                                                {statuses[item.id.toLowerCase()] === 'FINALIZADO' ? (
                                                     <button 
                                                         onClick={() => downloadReceipt(item.id, item.transfeera_transfer_id)}
                                                         className="btn btn-ghost mx-auto p-2 text-indigo-500 hover:bg-indigo-500/10 cursor-pointer transition-colors" 
