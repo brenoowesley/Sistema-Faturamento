@@ -2,29 +2,36 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 // Normalizador do Status da Transfeera para nosso formato interno
-function normalizeTransfeeraStatus(raw: string): string {
+function normalizeTransfeeraStatus(raw: string | null | undefined): string {
     if (!raw) return "NAO_SUBMETIDO";
     const s = raw.toUpperCase().trim();
-    const map: Record<string, string> = {
-        FINALIZADO: "FINALIZADO",
-        EFETIVADO: "EFETIVADO",
-        PAGO: "FINALIZADO",
-        CONCLUIDO: "FINALIZADO",
-        CONCLUÍDO: "FINALIZADO",
-        EM_PROCESSAMENTO: "EM_PROCESSAMENTO",
-        PROCESSANDO: "EM_PROCESSAMENTO",
-        EM_PROCESSAMENTO_BANCO: "EM_PROCESSAMENTO",
-        AGENDADO: "AGENDADO",
-        SCHEDULED: "AGENDADO",
-        DEVOLVIDO: "DEVOLVIDO",
-        RETURNED: "DEVOLVIDO",
-        FALHA: "FALHA",
-        FAILED: "FALHA",
-        ERROR: "FALHA",
-        CRIADO: "AGENDADO",
-        CREATED: "AGENDADO",
-    };
-    return map[s] ?? raw;
+
+    if (["FINALIZADA", "FINALIZADO", "PAGO", "CONCLUIDO", "CONCLUÍDO", "EFETIVADO"].includes(s)) {
+        return "FINALIZADO";
+    }
+    
+    if (["DEVOLVIDA", "DEVOLVIDO", "RETURNED"].includes(s)) {
+        return "DEVOLVIDO";
+    }
+
+    if (["FALHA", "FAILED", "ERROR", "REJEITADA"].includes(s)) {
+        return "FALHA";
+    }
+
+    if (["CRIADA", "CRIADO", "CREATED", "AGENDADO", "SCHEDULED"].includes(s)) {
+        return "AGENDADO";
+    }
+
+    if (["EM_PROCESSAMENTO", "PROCESSANDO", "EM_PROCESSAMENTO_BANCO", "RECEBIDO", "AGUARDANDO_RECEBIMENTO"].includes(s)) {
+        return "EM_PROCESSAMENTO";
+    }
+    
+    if (["CANCELADA", "CANCELADO"].includes(s)) {
+        return "REMOVIDO";
+    }
+
+    // Fallback de segurança 
+    return "EM_PROCESSAMENTO";
 }
 
 export async function POST(req: NextRequest) {
