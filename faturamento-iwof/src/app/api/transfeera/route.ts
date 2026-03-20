@@ -218,13 +218,30 @@ export async function POST(req: NextRequest) {
             }
 
             console.log(`✅ [Transfeera] Lote criado com sucesso! batch_id=${batchBody.id}`);
-            console.log(`[Transfeera] Resposta completa:`, JSON.stringify(batchBody));
 
-            // Construir mapa integration_id → transfeera_transfer_id
+            // A Transfeera nem sempre devolve as transferências no POST. 
+            // Fazemos um fetch secundário para garantir a captura dos IDs.
+            console.log(`[Transfeera] ⏳ Aguardando processamento para buscar IDs de transferência...`);
+            await new Promise(resolve => setTimeout(resolve, 800)); // Delay para consistência na Transfeera
+
+            const detailRes = await fetch(`${baseUrl}/batch/${batchBody.id}`, {
+                method: "GET",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                    "User-Agent": UA_HEADER,
+                },
+            });
+
+            const detailBody = await detailRes.json();
+            const transfersFromDetail: any[] = detailBody.transfers || [];
+            
+            console.log(`[Transfeera] 🧩 Mapeando ${transfersFromDetail.length} transferências do fetch secundário...`);
+
+            // Construir mapa integration_id (UUID local) → transfeera_transfer_id (ID numérico)
             const transferIdMap: Record<string, string> = {};
-            const createdTransfers: any[] = batchBody.transfers || [];
 
-            for (const t of createdTransfers) {
+            for (const t of transfersFromDetail) {
                 const rawIntegId = t.integration_id || t.id_integracao || "";
                 const integId = rawIntegId.toString().toLowerCase();
                 const transfeeraId = t.id || t.transfer_id || "";
@@ -234,7 +251,7 @@ export async function POST(req: NextRequest) {
                 }
             }
 
-            console.log(`[Transfeera] Mapa de IDs: ${Object.keys(transferIdMap).length} transferência(s) mapeada(s)`);
+            console.log(`[Transfeera] ✅ Mapa de IDs finalizado: ${Object.keys(transferIdMap).length} mapeada(s)`);
 
             return NextResponse.json({
                 success: true,
