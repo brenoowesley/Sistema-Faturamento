@@ -217,30 +217,49 @@ export async function POST(req: NextRequest) {
 
             console.log(`✅ [Transfeera] Lote criado com sucesso! batch_id=${batchBody.id}`);
 
-            // A Transfeera nem sempre devolve as transferências no POST. 
-            // Buscamos as transferências criadas via endpoint específico de listagem
-            console.log(`[Transfeera] ⏳ Buscando detalhes das transferências para o lote ${batchBody.id}...`);
-            await new Promise(resolve => setTimeout(resolve, 800)); // Pequeno delay por segurança
+            // A Transfeera processa as transferências do lote de forma assíncrona. 
+            // Implementamos um Polling para garantir que os IDs sejam capturados.
+            let createdTransfers: any[] = [];
+            let attempts = 0;
+            const maxAttempts = 5;
 
-            const detailRes = await fetch(`${baseUrl}/batch/${batchBody.id}/transfer?per_page=250`, {
-                method: "GET",
-                headers: {
-                    "Authorization": `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                    "User-Agent": UA_HEADER,
-                },
-            });
+            while (attempts < maxAttempts) {
+                attempts++;
+                console.log(`[Transfeera] ⏳ Busca de IDs de transferência (Tentativa ${attempts}/${maxAttempts})...`);
+                
+                // Aguarda 2 segundos entre as tentativas
+                await new Promise(resolve => setTimeout(resolve, 2000));
 
-            const detailData = await detailRes.json();
-            // Transfeera pode retornar direto um array ou dentro de .data
-            const transfersFromDetail = Array.isArray(detailData) ? detailData : (detailData.data || []);
-            
-            console.log(`[Transfeera] 🧩 Mapeando ${transfersFromDetail.length} transferência(s) do lote ${batchBody.id}`);
+                const detailRes = await fetch(`${baseUrl}/batch/${batchBody.id}/transfer?per_page=250`, {
+                    method: "GET",
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "Content-Type": "application/json",
+                        "User-Agent": UA_HEADER,
+                    },
+                });
+
+                if (detailRes.ok) {
+                    const detailData = await detailRes.json();
+                    createdTransfers = Array.isArray(detailData) ? detailData : (detailData.data || []);
+                    
+                    if (createdTransfers.length > 0) {
+                        console.log(`[Transfeera] ✅ Transferências encontradas após ${attempts} tentativa(s).`);
+                        break; 
+                    }
+                }
+                
+                console.log(`[Transfeera] ⚠️ Lote ${batchBody.id} ainda vazio...`);
+            }
+
+            if (createdTransfers.length === 0) {
+                console.warn(`[Transfeera] ❌ Falha ao recuperar IDs após ${maxAttempts} tentativas para o lote ${batchBody.id}.`);
+            }
 
             // Construir mapa integration_id (UUID local) → transfeera_transfer_id (ID numérico)
             const transferIdMap: Record<string, string> = {};
 
-            for (const t of transfersFromDetail) {
+            for (const t of createdTransfers) {
                 const integId = (t.integration_id || "").toString().toLowerCase();
                 if (integId && t.id) {
                     transferIdMap[integId] = String(t.id);
@@ -252,7 +271,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({
                 success: true,
                 batchId: batchBody.id,
-                transfers: transfersFromDetail,
+                transfers: createdTransfers,
                 batch_id: String(batchBody.id),
                 transferIdMap,
             });
