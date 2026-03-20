@@ -2,11 +2,10 @@ import { useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 export type TransfeeraStatus =
-    | "FINALIZADO"
-    | "EM_PROCESSAMENTO"
+    | "CONCLUIDO"
+    | "EXPORTADO"
     | "AGENDADO"
-    | "DEVOLVIDO"
-    | "FALHA"
+    | "ERRO"
     | "NAO_SUBMETIDO"
     | "ERRO_CONSULTA"
     | "ERRO_REDE"
@@ -24,23 +23,15 @@ function normalizeTransfeeraStatus(raw: string | null | undefined): TransfeeraSt
     const s = raw.toUpperCase().trim();
 
     if (["FINALIZADA", "FINALIZADO", "PAGO", "CONCLUIDO", "CONCLUÍDO", "EFETIVADO"].includes(s)) {
-        return "FINALIZADO";
+        return "CONCLUIDO";
     }
     
-    if (["DEVOLVIDA", "DEVOLVIDO", "RETURNED"].includes(s)) {
-        return "DEVOLVIDO";
+    if (["FALHA", "FAILED", "ERROR", "REJEITADA", "DEVOLVIDA", "DEVOLVIDO", "RETURNED"].includes(s)) {
+        return "ERRO";
     }
 
-    if (["FALHA", "FAILED", "ERROR", "REJEITADA"].includes(s)) {
-        return "FALHA";
-    }
-
-    if (["CRIADA", "CRIADO", "CREATED", "AGENDADO", "SCHEDULED"].includes(s)) {
-        return "AGENDADO";
-    }
-
-    if (["EM_PROCESSAMENTO", "PROCESSANDO", "EM_PROCESSAMENTO_BANCO", "RECEBIDO", "AGUARDANDO_RECEBIMENTO"].includes(s)) {
-        return "EM_PROCESSAMENTO";
+    if (["CRIADA", "CRIADO", "CREATED", "RECEBIDO", "AGUARDANDO_RECEBIMENTO", "EM_PROCESSAMENTO", "PROCESSANDO", "EM_PROCESSAMENTO_BANCO", "AGENDADO", "SCHEDULED"].includes(s)) {
+        return "EXPORTADO";
     }
     
     if (["CANCELADA", "CANCELADO"].includes(s)) {
@@ -48,7 +39,7 @@ function normalizeTransfeeraStatus(raw: string | null | undefined): TransfeeraSt
     }
 
     // Fallback de segurança 
-    return "EM_PROCESSAMENTO";
+    return "EXPORTADO";
 }
 
 export function useTransfeeraSync() {
