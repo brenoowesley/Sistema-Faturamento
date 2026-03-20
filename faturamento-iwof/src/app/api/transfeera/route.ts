@@ -221,14 +221,14 @@ export async function POST(req: NextRequest) {
             // Implementamos um Polling para garantir que os IDs sejam capturados.
             let createdTransfers: any[] = [];
             let attempts = 0;
-            const maxAttempts = 5;
+            const maxAttempts = 6;
 
-            while (attempts < maxAttempts) {
-                attempts++;
-                console.log(`[Transfeera] ⏳ Busca de IDs de transferência (Tentativa ${attempts}/${maxAttempts})...`);
-                
-                // Aguarda 2 segundos entre as tentativas
+            while (attempts < maxAttempts && createdTransfers.length === 0) {
+                // Aguarda 2 segundos antes de cada tentativa
                 await new Promise(resolve => setTimeout(resolve, 2000));
+                attempts++;
+                
+                console.log(`[Transfeera] ⏳ Busca de IDs de transferência (Tentativa ${attempts}/${maxAttempts})...`);
 
                 const detailRes = await fetch(`${baseUrl}/batch/${batchBody.id}/transfer?per_page=250`, {
                     method: "GET",
@@ -240,16 +240,17 @@ export async function POST(req: NextRequest) {
                 });
 
                 if (detailRes.ok) {
-                    const detailData = await detailRes.json();
-                    createdTransfers = Array.isArray(detailData) ? detailData : (detailData.data || []);
+                    const tPayload = await detailRes.json();
+                    const list = Array.isArray(tPayload) ? tPayload : (tPayload.data || []);
                     
-                    if (createdTransfers.length > 0) {
-                        console.log(`[Transfeera] ✅ Transferências encontradas após ${attempts} tentativa(s).`);
+                    if (list.length > 0) {
+                        createdTransfers = list;
+                        console.log(`[Transfeera] ✅ Transferências encontradas após ${attempts} tentativa(s) para o lote ${batchBody.id}.`);
                         break; 
                     }
                 }
                 
-                console.log(`[Transfeera] ⚠️ Lote ${batchBody.id} ainda vazio...`);
+                console.log(`[Transfeera] ⚠️ Lote ainda vazio, a aguardar processamento... tentativa ${attempts}/${maxAttempts}`);
             }
 
             if (createdTransfers.length === 0) {
