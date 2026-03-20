@@ -180,7 +180,7 @@ export async function POST(req: NextRequest) {
             const batchPayload = {
                 name: lote_nome,
                 type: "TRANSFERENCIA",
-                auto_close: false,
+                auto_close: true, // Ativado para gerar e retornar IDs de transferência imediatamente
                 transfers,
             };
 
@@ -197,6 +197,7 @@ export async function POST(req: NextRequest) {
             });
 
             const batchBody = await batchRes.json();
+            console.log(`[Transfeera] [DEBUG] Resposta Bruta do Lote:`, JSON.stringify(batchBody, null, 2));
 
             if (!batchRes.ok) {
                 console.error(`[Transfeera] POST /batch FALHOU (${batchRes.status}):`, JSON.stringify(batchBody));
