@@ -297,7 +297,7 @@ export async function POST(req: NextRequest) {
 
             console.log(`[Transfeera] ▶ status_by_batch_id: buscando transferências do lote ${batchId}...`);
 
-            const detailRes = await fetch(`${baseUrl}/batch/${batchId}/transfer?per_page=250`, {
+            const detailRes = await fetch(`${baseUrl}/batch/${batchId}/transfer`, {
                 method: "GET",
                 headers: {
                     "Authorization": `Bearer ${token}`,
