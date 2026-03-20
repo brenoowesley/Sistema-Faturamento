@@ -217,64 +217,13 @@ export async function POST(req: NextRequest) {
 
             console.log(`✅ [Transfeera] Lote criado com sucesso! batch_id=${batchBody.id}`);
 
-            // A Transfeera processa as transferências do lote de forma assíncrona. 
-            // Implementamos um Polling para garantir que os IDs sejam capturados.
-            let createdTransfers: any[] = [];
-            let attempts = 0;
-            const maxAttempts = 5;
-
-            while (attempts < maxAttempts && createdTransfers.length === 0) {
-                // Aguarda 2 segundos antes de cada tentativa
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                attempts++;
-                
-                console.log(`[Transfeera] ⏳ Busca de IDs de transferência (Tentativa ${attempts}/${maxAttempts})...`);
-
-                const detailRes = await fetch(`${baseUrl}/batch/${batchBody.id}/transfer?per_page=250`, {
-                    method: "GET",
-                    headers: {
-                        "Authorization": `Bearer ${token}`,
-                        "Content-Type": "application/json",
-                        "User-Agent": UA_HEADER,
-                    },
-                });
-
-                if (detailRes.ok) {
-                    const tPayload = await detailRes.json();
-                    const list = Array.isArray(tPayload) ? tPayload : (tPayload.data || []);
-                    
-                    if (list.length > 0) {
-                        createdTransfers = list;
-                        console.log(`[Transfeera] ✅ Transferências encontradas após ${attempts} tentativa(s) para o lote ${batchBody.id}.`);
-                        break; 
-                    }
-                }
-                
-                console.log(`[Transfeera] ⚠️ Lote ainda vazio, a aguardar processamento... tentativa ${attempts}/${maxAttempts}`);
-            }
-
-            if (createdTransfers.length === 0) {
-                console.warn(`[Transfeera] ❌ Falha ao recuperar IDs após ${maxAttempts} tentativas para o lote ${batchBody.id}.`);
-            }
-
-            // Construir mapa integration_id (UUID local) → transfeera_transfer_id (ID numérico)
-            const transferIdMap: Record<string, string> = {};
-
-            for (const t of createdTransfers) {
-                const integId = (t.integration_id || "").toString().toLowerCase();
-                if (integId && t.id) {
-                    transferIdMap[integId] = String(t.id);
-                }
-            }
-
-            console.log(`[Transfeera] ✅ Mapa de IDs finalizado: ${Object.keys(transferIdMap).length} mapeada(s)`);
-
+            // A Transfeera passou a notificar os processamentos via Webhook de forma assíncrona.
+            // Aqui, apenas confirmamos a criação do batch para o frontend, e delegamos o
+            // preenchimento dos IDs e atualizações de status para o gateway assíncrono.
             return NextResponse.json({
                 success: true,
-                batchId: batchBody.id,
-                transfers: createdTransfers,
                 batch_id: String(batchBody.id),
-                transferIdMap,
+                batchId: batchBody.id, // Retrocompatibilidade pro frontend
             });
         }
 

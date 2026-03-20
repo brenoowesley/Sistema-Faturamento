@@ -802,9 +802,8 @@ function LotePanel({
                 throw new Error(errorMsg);
             }
 
-            // ── Passo 3: Salvar IDs da Transfeera no Supabase ──
+            // ── Passo 3: Atualizar Lote no Supabase e Finalizar ──
             const batchId: string = data.batchId || data.batch_id;
-            const transferIdMap: Record<string, string> = data.transferIdMap || {};
 
             // 1. Atualizar lote com transfeera_batch_id
             await supabase
@@ -812,31 +811,12 @@ function LotePanel({
                 .update({ transfeera_batch_id: batchId })
                 .eq("id", loteDbId);
 
-            // 2. Atualizar cada item individualmente conforme solicitado
-            const updatePromises = Object.entries(transferIdMap).map(([id, tid]) => {
-                const integId = id.toString().toLowerCase(); // Garante normalização do UUID
-                return supabase
-                    .from("itens_saque")
-                    .update({ transfeera_transfer_id: tid })
-                    .eq("id", integId);
-            });
-
-            const results = await Promise.all(updatePromises);
-            const errors = results.filter(r => r.error);
-
-            if (errors.length > 0) {
-                console.error(`[GestaoSaques] ❌ Erro ao atualizar ${errors.length} itens no Supabase:`, errors);
-            } else {
-                console.log(`[GestaoSaques] ✅ Todos os ${results.length} itens atualizados com sucesso.`);
-            }
-
-            const mappedCount = Object.keys(transferIdMap).length;
             update((l) => ({
                 ...l,
                 sendingApi: false,
                 apiMsg: {
                     type: "success",
-                    text: `✅ Lote enviado com sucesso! Batch ID: ${batchId} | ${mappedCount} transferência(s) mapeada(s). Acompanhe em Saques → Acompanhamento.`,
+                    text: `✅ Lote recebido e em processamento. Os status individuais serão atualizados automaticamente na listagem em instantes.`,
                 },
             }));
         } catch (err: unknown) {
