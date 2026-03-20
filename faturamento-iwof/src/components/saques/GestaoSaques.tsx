@@ -803,7 +803,7 @@ function LotePanel({
 
             // ── Passo 3: Salvar IDs da Transfeera no Supabase ──
             const batchId: string = data.batchId || data.batch_id;
-            const transfers: any[] = data.transfers || [];
+            const transferIdMap: Record<string, string> = data.transferIdMap || {};
 
             // 1. Atualizar lote com transfeera_batch_id
             await supabase
@@ -811,27 +811,25 @@ function LotePanel({
                 .update({ transfeera_batch_id: batchId })
                 .eq("id", loteDbId);
 
-            // 2. Atualizar cada item individualmente usando Promise.all para garantir persistência
-            if (transfers.length > 0) {
-                const updatePromises = transfers.map(async (t: any) => {
-                    const integId = (t.integration_id || t.id_integracao || "").toString().toLowerCase();
-                    if (!integId) return;
+            // 2. Atualizar cada item individualmente conforme solicitado
+            const updatePromises = Object.entries(transferIdMap).map(([id, tid]) => {
+                const integId = id.toString().toLowerCase(); // Garante normalização do UUID
+                return supabase
+                    .from("itens_saque")
+                    .update({ transfeera_transfer_id: tid })
+                    .eq("id", integId);
+            });
 
-                    const { error } = await supabase
-                        .from("itens_saque")
-                        .update({ transfeera_transfer_id: t.id.toString() })
-                        .eq("id", integId);
-                    
-                    if (error) {
-                        console.error(`[GestaoSaques] ❌ Erro ao atualizar item ${integId}:`, error);
-                    }
-                });
+            const results = await Promise.all(updatePromises);
+            const errors = results.filter(r => r.error);
 
-                await Promise.all(updatePromises);
-                console.log(`[GestaoSaques] ✅ Sincronização de ${transfers.length} itens no Supabase concluída.`);
+            if (errors.length > 0) {
+                console.error(`[GestaoSaques] ❌ Erro ao atualizar ${errors.length} itens no Supabase:`, errors);
+            } else {
+                console.log(`[GestaoSaques] ✅ Todos os ${results.length} itens atualizados com sucesso.`);
             }
 
-            const mappedCount = transfers.length;
+            const mappedCount = Object.keys(transferIdMap).length;
             update((l) => ({
                 ...l,
                 sendingApi: false,
