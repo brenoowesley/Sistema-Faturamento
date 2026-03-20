@@ -90,11 +90,15 @@ export function useTransfeeraSync() {
                             newStatuses[item.id_interno] = normalizedStatus;
 
                             // Preparar update para o Supabase
-                            const payload: any = { status_item: normalizedStatus };
+                            const payload: any = { 
+                                status_item: normalizedStatus,
+                                transfeera_transfer_id: String(remoteTransfer.id),
+                            };
                             
-                            // Se o hook descobrir um transfeera_transfer_id que não conhecíamos, salvamos ele
-                            if (!item.transfeera_id && remoteTransfer.id) {
-                                payload.transfeera_transfer_id = String(remoteTransfer.id);
+                            // Se a Transfeera já gerou o link do comprovante, salvamos no banco
+                            const comprovanteLink = remoteTransfer.bank_receipt_url || remoteTransfer.receipt_url;
+                            if (comprovanteLink) {
+                                payload.comprovante_url = comprovanteLink;
                             }
 
                             updatePromises.push(
