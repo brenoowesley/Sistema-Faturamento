@@ -286,6 +286,39 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ statuses: results });
         }
 
+        // ═══════════════════════════════════════════════════════════════════════
+        // ACTION: status_by_batch_id — Rastreio por Lote em vez de iteração
+        // ═══════════════════════════════════════════════════════════════════════
+        if (action === "status_by_batch_id") {
+            const { batchId } = body;
+            if (!batchId) {
+                return NextResponse.json({ error: "batchId é obrigatório" }, { status: 400 });
+            }
+
+            console.log(`[Transfeera] ▶ status_by_batch_id: buscando transferências do lote ${batchId}...`);
+
+            const detailRes = await fetch(`${baseUrl}/batch/${batchId}/transfer?per_page=250`, {
+                method: "GET",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                    "User-Agent": UA_HEADER,
+                },
+            });
+
+            if (!detailRes.ok) {
+                const errBody = await detailRes.text();
+                console.error(`[Transfeera] GET /batch/${batchId}/transfer FALHOU:`, errBody);
+                return NextResponse.json({ error: "Erro ao consultar lote na Transfeera" }, { status: detailRes.status });
+            }
+
+            const payload = await detailRes.json();
+            const list = Array.isArray(payload) ? payload : (payload.data || []);
+
+            console.log(`[Transfeera] ✅ status_by_batch_id: ${list.length} transferências encontradas no lote ${batchId}.`);
+            return NextResponse.json({ success: true, transfers: list });
+        }
+
         return NextResponse.json({ error: "Invalid action" }, { status: 400 });
 
     } catch (err: any) {

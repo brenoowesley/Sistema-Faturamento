@@ -27,6 +27,7 @@ interface LoteSaque {
     total_real: number;
     status: string;
     created_at: string;
+    transfeera_batch_id?: string;
 }
 
 export default function LoteDetalhe({ loteId }: { loteId: string }) {
@@ -52,7 +53,7 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
     // Sincronizar com Transfeera após carregar itens
     useEffect(() => {
         if (!itens || itens.length === 0) return;
-        const approvedItems = itens.filter(i => i.status_item === 'APROVADO');
+        const approvedItems = itens.filter(i => i.status_item === 'APROVADO' || i.status_item === 'EM_PROCESSAMENTO' || i.status_item === 'AGENDADO' || i.status_item === 'RETORNADO' || i.status_item === 'FALHA');
         if (approvedItems.length === 0) return;
 
         // Mapear para o novo formato de sincronização
@@ -63,8 +64,8 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
 
         console.log(`[LoteDetalhe] ⚡ Tentando sincronizar ${syncItems.length} itens:`, syncItems);
 
-        syncBatch(syncItems);
-    }, [itens, syncBatch]);
+        syncBatch(lote?.transfeera_batch_id || null, syncItems);
+    }, [itens, lote, syncBatch]);
 
     async function fetchData() {
         setLoading(true);
