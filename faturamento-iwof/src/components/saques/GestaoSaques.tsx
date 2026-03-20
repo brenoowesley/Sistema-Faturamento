@@ -791,6 +791,7 @@ function LotePanel({
             });
 
             const data = await res.json();
+            console.log("[GestaoSaques] 🏷️ Resposta da API Transfeera:", data);
 
             if (!res.ok) {
                 // Extrair erros da API
