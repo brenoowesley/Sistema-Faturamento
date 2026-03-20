@@ -81,32 +81,53 @@ export function useTransfeeraSync() {
                     const newStatuses: Record<string, TransfeeraStatus> = {};
                     const updatePromises = [];
 
-                    for (const item of items) {
-                        const remoteTransfer = data.transfers.find((t: any) => t.integration_id === item.id_interno);
-                        
-                        if (remoteTransfer) {
-                            const normalizedStatus = normalizeTransfeeraStatus(remoteTransfer.status);
-                            newStatuses[item.id_interno] = normalizedStatus;
+                    for (const remoteTransfer of data.transfers) {
+                        // Tentativa 1: Match perfeito pelo integration_id
+                        let itemLocal = items.find(
+                            (item) => item.id_interno && remoteTransfer.integration_id && 
+                                      String(item.id_interno).toLowerCase() === String(remoteTransfer.integration_id).toLowerCase()
+                        );
 
-                            // Preparar update para o Supabase
-                            const payload: any = { 
-                                status_item: normalizedStatus,
-                                transfeera_transfer_id: String(remoteTransfer.id),
-                            };
-                            
-                            // Se a Transfeera já gerou o link do comprovante, salvamos no banco
-                            const comprovanteLink = remoteTransfer.bank_receipt_url || remoteTransfer.receipt_url;
-                            if (comprovanteLink) {
-                                payload.comprovante_url = comprovanteLink;
-                            }
+                        // Tentativa 2 (Fallback): Lotes do Excel não têm integration_id. Cruzamos por CPF e Valor.
+                        if (!itemLocal) {
+                            itemLocal = items.find((item: any) => {
+                                const localCpf = String(item.cpf_favorecido || item.cpf_conta || "").replace(/\D/g, "");
+                                const remoteCpf = String(remoteTransfer.destination_bank_account?.cpf_cnpj || "").replace(/\D/g, "");
+                                
+                                const localValue = Number(item.valor_real || item.valor || 0);
+                                const remoteValue = Number(remoteTransfer.value || 0);
 
-                            updatePromises.push(
-                                supabase
-                                    .from("itens_saque")
-                                    .update(payload)
-                                    .eq("id", item.id_interno)
-                            );
+                                return localCpf === remoteCpf && localValue === remoteValue && localCpf.length > 10;
+                            });
                         }
+
+                        if (!itemLocal) {
+                            // console.warn(`[useTransfeeraSync] ⚠️ Saque ${remoteTransfer.id} não identificado localmente.`);
+                            continue;
+                        }
+
+                        const normalizedStatus = normalizeTransfeeraStatus(remoteTransfer.status);
+                        newStatuses[itemLocal.id_interno] = normalizedStatus;
+
+                        // Preparar update para o Supabase
+                        const payload: any = { status_item: normalizedStatus };
+
+                        if (remoteTransfer.id) {
+                            payload.transfeera_transfer_id = String(remoteTransfer.id);
+                        }
+                        
+                        // Se a Transfeera já gerou o link do comprovante, salvamos no banco
+                        const comprovanteLink = remoteTransfer.bank_receipt_url || remoteTransfer.receipt_url;
+                        if (comprovanteLink) {
+                            payload.comprovante_url = comprovanteLink;
+                        }
+
+                        updatePromises.push(
+                            supabase
+                                .from("itens_saque")
+                                .update(payload)
+                                .eq("id", itemLocal.id_interno)
+                        );
                     }
 
                     if (updatePromises.length > 0) {
