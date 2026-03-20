@@ -221,7 +221,7 @@ export async function POST(req: NextRequest) {
             // Implementamos um Polling para garantir que os IDs sejam capturados.
             let createdTransfers: any[] = [];
             let attempts = 0;
-            const maxAttempts = 6;
+            const maxAttempts = 5;
 
             while (attempts < maxAttempts && createdTransfers.length === 0) {
                 // Aguarda 2 segundos antes de cada tentativa
