@@ -297,26 +297,42 @@ export async function POST(req: NextRequest) {
 
             console.log(`[Transfeera] ▶ status_by_batch_id: buscando transferências do lote ${batchId}...`);
 
-            const detailRes = await fetch(`${baseUrl}/batch/${batchId}/transfer`, {
-                method: "GET",
-                headers: {
-                    "Authorization": `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                    "User-Agent": UA_HEADER,
-                },
-            });
+            let allTransfers: any[] = [];
+            let currentPage = 1;
+            let totalPages = 1;
 
-            if (!detailRes.ok) {
-                const errBody = await detailRes.text();
-                console.error(`[Transfeera] GET /batch/${batchId}/transfer FALHOU:`, errBody);
-                return NextResponse.json({ error: "Erro ao consultar lote na Transfeera" }, { status: detailRes.status });
+            while (currentPage <= totalPages) {
+                const tRes = await fetch(`${baseUrl}/batch/${batchId}/transfer?page=${currentPage}`, {
+                    method: 'GET',
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "User-Agent": UA_HEADER,
+                        "Accept": "application/json"
+                    }
+                });
+
+                if (!tRes.ok) {
+                    console.error(`[Transfeera] Erro na paginação ${currentPage}:`, await tRes.text());
+                    break;
+                }
+
+                const tPayload = await tRes.json();
+                const list = Array.isArray(tPayload) ? tPayload : (tPayload.data || []);
+                allTransfers = [...allTransfers, ...list];
+
+                // Checar metadata para ver se há mais páginas
+                if (tPayload.metadata && tPayload.metadata.pagination) {
+                    const { itemsPerPage, totalItems } = tPayload.metadata.pagination;
+                    totalPages = Math.ceil(totalItems / itemsPerPage);
+                } else {
+                    break; // Se não houver metadata, interrompe
+                }
+                
+                currentPage++;
             }
 
-            const payload = await detailRes.json();
-            const list = Array.isArray(payload) ? payload : (payload.data || []);
-
-            console.log(`[Transfeera] ✅ status_by_batch_id: ${list.length} transferências encontradas no lote ${batchId}.`);
-            return NextResponse.json({ success: true, transfers: list });
+            console.log(`[Transfeera] ✅ status_by_batch_id: ${allTransfers.length} transferências totais encontradas no lote ${batchId}.`);
+            return NextResponse.json({ success: true, transfers: allTransfers });
         }
 
         return NextResponse.json({ error: "Invalid action" }, { status: 400 });
