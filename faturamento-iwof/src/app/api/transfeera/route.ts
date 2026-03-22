@@ -295,14 +295,15 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ error: "batchId é obrigatório" }, { status: 400 });
             }
 
-            console.log(`[Transfeera] ▶ status_by_batch_id: buscando transferências do lote ${batchId}...`);
+            console.log(`[Transfeera] ▶ Buscando transferências do lote ${batchId}...`);
 
             let allTransfers: any[] = [];
             let currentPage = 1;
             let hasMore = true;
 
             while (hasMore) {
-                const tRes = await fetch(`${baseUrl}/transfer?batch_id=${batchId}&page=${currentPage}`, {
+                // Retornamos para o endpoint correto de Lotes, que aceita o parâmetro ?page=
+                const tRes = await fetch(`${baseUrl}/batch/${batchId}/transfer?page=${currentPage}`, {
                     method: "GET",
                     headers: {
                         Authorization: `Bearer ${token}`,
@@ -312,33 +313,31 @@ export async function POST(req: NextRequest) {
                 });
 
                 if (!tRes.ok) {
-                    console.error(`[Transfeera] Erro na requisição (página ${currentPage}):`, await tRes.text());
+                    const errText = await tRes.text();
+                    console.error(`[Transfeera] Erro na requisição da página ${currentPage}:`, errText);
                     break;
                 }
 
                 const tPayload = await tRes.json();
-                // Extrai os dados (seja da propriedade data ou do próprio array)
+                
+                // A Transfeera pode retornar o array dentro de "data" ou na raiz
                 const list = Array.isArray(tPayload.data) ? tPayload.data : (Array.isArray(tPayload) ? tPayload : []);
                 
                 if (list.length > 0) {
                     allTransfers.push(...list);
                 }
 
-                // Verifica paginação para continuar o loop
+                // Verifica os metadados para saber se existe uma próxima página (limite padrão é 45 itens por página)
                 if (tPayload.metadata && tPayload.metadata.pagination) {
                     const { itemsPerPage, totalItems } = tPayload.metadata.pagination;
-                    const totalPages = Math.ceil(totalItems / itemsPerPage);
-                    if (currentPage >= totalPages) {
-                        hasMore = false;
-                    } else {
-                        currentPage++;
-                    }
+                    hasMore = currentPage < Math.ceil(totalItems / itemsPerPage);
+                    currentPage++;
                 } else {
                     hasMore = false;
                 }
             }
 
-            console.log(`[Transfeera] ✅ status_by_batch_id: ${allTransfers.length} transferências recuperadas.`);
+            console.log(`[Transfeera] ✅ ${allTransfers.length} transferências recuperadas no total.`);
             return NextResponse.json({ success: true, transfers: allTransfers });
         }
 
