@@ -6,7 +6,7 @@ import { Search, Filter, Calendar, FileText, ChevronRight, Loader2, CheckCircle2
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Modal from "@/components/Modal";
-import { useTransfeeraSync, TransfeeraStatus } from "@/hooks/useTransfeeraSync";
+import { useTransfeeraSync } from "@/hooks/useTransfeeraSync";
 
 interface LoteSaque {
     id: string;
@@ -27,6 +27,7 @@ interface WorkerHistory {
     valor: number;
     created_at: string; // we'll fetch from lote
     transfeera_transfer_id?: string;
+    status_transfeera?: string;
 }
 
 export default function LotesDashboard() {
@@ -46,7 +47,7 @@ export default function LotesDashboard() {
     const [isSearching, setIsSearching] = useState(false);
     const [searchResults, setSearchResults] = useState<WorkerHistory[]>([]);
     const [showSearchModal, setShowSearchModal] = useState(false);
-    const { statuses, isSyncing, syncBatch, downloadReceipt } = useTransfeeraSync();
+    const { isSyncing, syncBatch, downloadReceipt } = useTransfeeraSync();
 
     useEffect(() => {
         fetchLotes();
@@ -83,6 +84,7 @@ export default function LotesDashboard() {
                 chave_pix, 
                 valor,
                 transfeera_transfer_id,
+                status_transfeera,
                 lotes_saques ( created_at )
             `)
             .or(`nome_usuario.ilike.%${globalSearch}%,cpf_favorecido.ilike.%${globalSearch}%,cpf_conta.ilike.%${globalSearch}%`)
@@ -99,6 +101,7 @@ export default function LotesDashboard() {
                 chave_pix: d.chave_pix,
                 valor: d.valor,
                 transfeera_transfer_id: d.transfeera_transfer_id,
+                status_transfeera: d.status_transfeera,
                 created_at: d.lotes_saques?.created_at || new Date().toISOString()
             }));
 
@@ -284,10 +287,10 @@ export default function LotesDashboard() {
                                                 R$ {item.valor?.toFixed(2)}
                                             </td>
                                             <td className="p-3">
-                                                <TransfeeraBadge status={statuses[item.id.toLowerCase()]} isSyncing={isSyncing} />
+                                                <TransfeeraBadge status={item.status_transfeera} isSyncing={isSyncing} />
                                             </td>
                                             <td className="p-3 text-center">
-                                                {statuses[item.id.toLowerCase()] === 'FINALIZADO' ? (
+                                                {['CONCLUIDO', 'FINALIZADO', 'FINALIZADA', 'PAGO', 'EFETIVADO'].includes(item.status_transfeera?.toUpperCase() || '') ? (
                                                     <button 
                                                         onClick={() => downloadReceipt(item.id, item.transfeera_transfer_id)}
                                                         className="btn btn-ghost mx-auto p-2 text-indigo-500 hover:bg-indigo-500/10 cursor-pointer transition-colors" 
@@ -321,7 +324,7 @@ export default function LotesDashboard() {
     );
 }
 
-function TransfeeraBadge({ status, isSyncing }: { status?: TransfeeraStatus, isSyncing: boolean }) {
+function TransfeeraBadge({ status, isSyncing }: { status?: string, isSyncing: boolean }) {
     if (isSyncing && !status) {
         return (
             <span className="badge inline-flex items-center gap-1 border border-border bg-bg text-fg-muted">
