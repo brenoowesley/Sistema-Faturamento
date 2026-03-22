@@ -57,6 +57,7 @@ interface LoteLocal {
     saveMsg: { type: "success" | "error"; text: string } | null;
     sendingApi: boolean;
     apiMsg: { type: "success" | "error"; text: string } | null;
+    apiErrorItems?: Record<string, string>;
     savedLoteId?: string; // ID do lote salvo no Supabase (para evitar duplicação)
 }
 
@@ -356,11 +357,12 @@ function matches(value: string, filter: string): boolean {
     return value.toLowerCase().includes(filter.toLowerCase());
 }
 
-function AprovadosTable({ items, onUpdateTipoPix, onRemove, onEdit }: {
+function AprovadosTable({ items, onUpdateTipoPix, onRemove, onEdit, apiErrorItems = {} }: {
     items: SaqueItem[];
     onUpdateTipoPix: (id: string, tipo: string) => void;
     onRemove: (id: string) => void;
     onEdit: (item: SaqueItem) => void;
+    apiErrorItems?: Record<string, string>;
 }) {
     const [f, setF] = useState({ data: "", nome: "", cpf: "", tipoPix: "", chavePix: "", vlrSol: "", vlrReal: "" });
 
@@ -415,10 +417,15 @@ function AprovadosTable({ items, onUpdateTipoPix, onRemove, onEdit }: {
                 </tr>
             </thead>
             <tbody>
-                {filtered.map((i) => (
-                    <tr key={i.id}>
+                {filtered.map((i) => {
+                    const errorMsg = apiErrorItems[i.id];
+                    return (
+                    <tr key={i.id} style={errorMsg ? { backgroundColor: "rgba(248,113,113,0.1)", outline: "1px solid var(--danger)" } : {}}>
                         <td className="table-mono">{fmtDate(parseDate(i.data_solicitacao))}</td>
-                        <td style={{ fontSize: 12, color: "var(--fg-dim)" }}>{i.nome_usuario || "—"}</td>
+                        <td style={{ fontSize: 12, color: "var(--fg-dim)" }}>
+                            {i.nome_usuario || "—"}
+                            {errorMsg && <div style={{ color: "var(--danger)", fontSize: 11, fontWeight: 700, marginTop: 4 }}>Erro: {errorMsg}</div>}
+                        </td>
                         <td className="table-mono">{i.cpf_favorecido}</td>
                         <td>
                             <select
@@ -449,7 +456,8 @@ function AprovadosTable({ items, onUpdateTipoPix, onRemove, onEdit }: {
                             </div>
                         </td>
                     </tr>
-                ))}
+                    );
+                })}
                 {filtered.length === 0 && hasFilters && (
                     <tr><td colSpan={9} style={{ textAlign: "center", padding: 20, color: "var(--fg-dim)", fontSize: 13 }}>
                         <Filter size={14} style={{ marginRight: 6, opacity: 0.5 }} />
@@ -846,10 +854,19 @@ function LotePanel({
             if (!res.ok) {
                 // Extrair erros da API
                 let errorMsg = data.error || "Erro desconhecido da Transfeera.";
-                if (data.transferErrors && data.transferErrors.length > 0) {
+                const apiErrorItems: Record<string, string> = {};
+                
+                if (data.errorItems && Array.isArray(data.errorItems)) {
+                    data.errorItems.forEach((err: any) => {
+                        if (err.id) apiErrorItems[err.id] = err.message;
+                    });
+                    errorMsg += "\n⚠️ Verifique as linhas destacadas em vermelho na tabela.";
+                } else if (data.transferErrors && data.transferErrors.length > 0) {
                     errorMsg += "\n" + data.transferErrors.slice(0, 5).join("\n");
                 }
-                throw new Error(errorMsg);
+                
+                update((l) => ({ ...l, sendingApi: false, apiMsg: { type: "error", text: errorMsg }, apiErrorItems }));
+                return;
             }
 
             // ── Passo 3: Atualizar Lote no Supabase e Finalizar ──
@@ -1014,7 +1031,7 @@ function LotePanel({
                             ))}
                         </div>
                         <div style={{ overflowX: "auto" }}>
-                            {lote.activeTab === "APROVADO" && <AprovadosTable items={approved} onUpdateTipoPix={updateAprovadoTipo} onRemove={handleRemoveItem} onEdit={setEditingItem} />}
+                            {lote.activeTab === "APROVADO" && <AprovadosTable items={approved} onUpdateTipoPix={updateAprovadoTipo} onRemove={handleRemoveItem} onEdit={setEditingItem} apiErrorItems={lote.apiErrorItems} />}
                             {lote.activeTab === "REVISAO" && (
                                 <RevisaoTable
                                     items={revisao}

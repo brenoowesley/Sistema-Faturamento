@@ -199,15 +199,22 @@ export async function POST(req: NextRequest) {
             if (!batchRes.ok) {
                 console.error(`[Transfeera] POST /batch FALHOU (${batchRes.status}):`, JSON.stringify(batchBody));
                 const transferErrors: string[] = [];
+                const errorItems: { id: string, message: string }[] = [];
+                
                 if (batchBody.errors && Array.isArray(batchBody.errors)) {
                     for (const err of batchBody.errors) {
                         transferErrors.push(`${err.integration_id || "?"}: ${err.message || JSON.stringify(err)}`);
+                        errorItems.push({
+                            id: err.integration_id || "",
+                            message: err.message || JSON.stringify(err)
+                        });
                     }
                 }
                 return NextResponse.json({
                     error: batchBody.message || "Erro ao criar lote na Transfeera",
                     details: batchBody,
                     transferErrors,
+                    errorItems,
                 }, { status: batchRes.status });
             }
 
