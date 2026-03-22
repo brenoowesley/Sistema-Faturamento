@@ -162,14 +162,25 @@ export async function POST(req: NextRequest) {
                 return map[tipo.toUpperCase()] || tipo;
             }
 
-            // ==========================================
-            // PASSO 1: CRIAR O LOTE VAZIO
-            // ==========================================
-            console.log(`[Transfeera] Passo 1: Criando lote vazio...`);
+            // Montar payload TUDO-EM-UM conforme documentação Transfeera
+            const transfers = items.map((item) => ({
+                value: item.valor_real,
+                integration_id: item.id, // O nosso UUID local vai aqui
+                pix_description: "REPASSE IWOF",
+                destination_bank_account: {
+                    pix_key_type: normalizePixKeyType(item.tipo_pix),
+                    pix_key: formatarChavePix(item.tipo_pix, item.chave_pix),
+                },
+                pix_key_validation: {
+                    cpf_cnpj: item.cpf_favorecido.replace(/\D/g, ""),
+                },
+            }));
+
             const batchPayload = {
                 name: lote_nome,
                 type: "TRANSFERENCIA",
-                auto_close: true // Permitido, fecha logo após todos os itens serem enviados
+                auto_close: true, // Fecha automaticamente após processar
+                transfers, // Mandamos os itens aqui mesmo!
             };
 
             const batchRes = await fetch(`${baseUrl}/batch`, {
@@ -183,101 +194,49 @@ export async function POST(req: NextRequest) {
             });
 
             const batchBody = await batchRes.json();
-            
+
             if (!batchRes.ok) {
-                console.error(`[Transfeera] ❌ Passo 1 (POST /batch) FALHOU:`, JSON.stringify(batchBody));
-                return NextResponse.json({
-                    error: batchBody.message || "Erro ao criar lote vazio na Transfeera",
-                    details: batchBody
-                }, { status: batchRes.status });
-            }
-
-            const batchId = batchBody.id;
-            console.log(`✅ [Transfeera] Passo 1 Concluído: Lote ID ${batchId} criado.`);
-
-            // ==========================================
-            // PASSO 2: INSERIR TRANSFERÊNCIAS E CAPTURAR IDs
-            // ==========================================
-            console.log(`[Transfeera] Passo 2: Inserindo ${items.length} transferências no lote ${batchId}...`);
-            const transfersPayload = items.map((item) => ({
-                value: item.valor_real,
-                integration_id: item.id, // Mapeamento CRÍTICO
-                pix_description: "REPASSE IWOF",
-                destination_bank_account: {
-                    pix_key_type: normalizePixKeyType(item.tipo_pix),
-                    pix_key: formatarChavePix(item.tipo_pix, item.chave_pix),
-                },
-                pix_key_validation: {
-                    cpf_cnpj: item.cpf_favorecido.replace(/\D/g, ""),
-                },
-            }));
-
-            const transfersRes = await fetch(`${baseUrl}/batch/${batchId}/transfer`, {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                    "User-Agent": UA_HEADER,
-                },
-                body: JSON.stringify(transfersPayload),
-            });
-
-            const transfersBody = await transfersRes.json();
-
-            if (!transfersRes.ok) {
-                console.error(`[Transfeera] ❌ Passo 2 (POST /transfer) FALHOU:`, JSON.stringify(transfersBody));
-                
-                // Extrair erros individuais
+                console.error(`[Transfeera] POST /batch FALHOU (${batchRes.status}):`, JSON.stringify(batchBody));
                 const transferErrors: string[] = [];
-                if (transfersBody.errors && Array.isArray(transfersBody.errors)) {
-                    for (const err of transfersBody.errors) {
+                if (batchBody.errors && Array.isArray(batchBody.errors)) {
+                    for (const err of batchBody.errors) {
                         transferErrors.push(`${err.integration_id || "?"}: ${err.message || JSON.stringify(err)}`);
                     }
                 }
-
                 return NextResponse.json({
-                    error: transfersBody.message || "Erro ao inserir transferências no lote",
-                    details: transfersBody,
-                    transferErrors
-                }, { status: transfersRes.status });
+                    error: batchBody.message || "Erro ao criar lote na Transfeera",
+                    details: batchBody,
+                    transferErrors,
+                }, { status: batchRes.status });
             }
 
-            const createdTransfers = Array.isArray(transfersBody) ? transfersBody : (transfersBody.data || []);
-            console.log(`✅ [Transfeera] Passo 2 Concluído: ${createdTransfers.length} transferências inseridas.`);
+            console.log(`✅ [Transfeera] Lote criado com sucesso! batch_id=${batchBody.id}`);
 
-            // ==========================================
-            // PASSO 3: SALVAR IDs NO SUPABASE
-            // ==========================================
-            console.log(`[Transfeera] Passo 3: Vinculando IDs gerados ao banco de dados local...`);
-            const updatePromises = [];
-            
-            for (const remote of createdTransfers) {
-                if (remote.integration_id && remote.id) {
-                    updatePromises.push(
-                        supabase
-                            .from("itens_saque")
-                            .update({ transfeera_transfer_id: String(remote.id) })
-                            .eq("id", remote.integration_id)
-                    );
-                }
-            }
-
-            if (updatePromises.length > 0) {
-                const results = await Promise.all(updatePromises);
-                const errors = results.filter(r => r.error);
-                if (errors.length > 0) {
-                    console.error(`[Transfeera] ⚠️ Falha ao salvar algumas atualizações no Supabase:`, errors);
-                } else {
-                    console.log(`✅ [Transfeera] Passo 3 Concluído: ${updatePromises.length} itens atualizados localmente.`);
-                }
+            // O PULO DO GATO: A Transfeera devolve os itens criados na resposta! 
+            // Vamos extrair os IDs gerados e gravar no Supabase no mesmo segundo.
+            if (batchBody.transfers && Array.isArray(batchBody.transfers)) {
+                console.log(`[Transfeera] 💾 Salvando ${batchBody.transfers.length} IDs da Transfeera no banco de dados...`);
+                
+                const updatePromises = batchBody.transfers.map((t: any) => {
+                    // Match perfeito: usa o nosso integration_id para saber em qual linha do banco gravar o ID deles (t.id)
+                    if (!t.integration_id || !t.id) return Promise.resolve();
+                    
+                    return supabase
+                        .from("itens_saque")
+                        .update({ transfeera_transfer_id: String(t.id) })
+                        .eq("id", t.integration_id);
+                });
+                
+                await Promise.all(updatePromises);
+                console.log(`[Transfeera] ✅ Todos os IDs atrelados com sucesso!`);
             } else {
-                console.log(`⚠️ [Transfeera] Passo 3: Nenhum item para atualizar no banco.`);
+                console.log(`[Transfeera] ⚠️ Lote criado, mas a API não retornou o array 'transfers' na resposta.`);
             }
 
             return NextResponse.json({
                 success: true,
-                batch_id: String(batchId),
-                batchId: batchId,
+                batch_id: String(batchBody.id),
+                batchId: batchBody.id,
             });
         }
 
