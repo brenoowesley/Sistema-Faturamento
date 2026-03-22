@@ -107,17 +107,6 @@ export default function LotesDashboard() {
 
             setSearchResults(formatted);
             setShowSearchModal(true);
-            
-            // Trigger Transfeera Sync
-            const syncItems = formatted.map(f => ({
-                id: f.id,
-                transfeera_id: f.transfeera_transfer_id || null
-            }));
-            
-            // Na pesquisa global não temos um único batch_id. 
-            // Abortamos a sincronização síncrona, deixando que o webhook 
-            // ou a tela de LoteDetalhe lide com as atualizações de batch.
-            syncBatch(null, syncItems);
         } else {
             alert("Nenhum trabalhador (com saques exportados) encontrado com este termo.");
         }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Search, ArrowLeft, Download, FileText, CheckCircle2, Loader2 } from "lucide-react";
+import { Search, ArrowLeft, Download, FileText, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useTransfeeraSync, TransfeeraStatus } from "@/hooks/useTransfeeraSync";
@@ -50,21 +50,25 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
         fetchData();
     }, [loteId, highlight]);
 
-    // Sincronizar com Transfeera após carregar itens
-    useEffect(() => {
+    // Sincronização manual com Transfeera
+    const handleSincronizar = async () => {
         if (!itens || itens.length === 0) return;
-        const approvedItems = itens.filter(i => i.status_item === 'APROVADO' || i.status_item === 'EM_PROCESSAMENTO' || i.status_item === 'AGENDADO' || i.status_item === 'RETORNADO' || i.status_item === 'FALHA');
-        if (approvedItems.length === 0) return;
+        const approvedItems = itens.filter(i => 
+            ['APROVADO', 'EM_PROCESSAMENTO', 'AGENDADO', 'RETORNADO', 'FALHA'].includes(i.status_item)
+        );
+        
+        if (approvedItems.length === 0) {
+            alert("Não existem itens exportados ou em processamento para sincronizar.");
+            return;
+        }
 
-        // Mapear para o novo formato de sincronização
         const syncItems = approvedItems.map(item => ({
             id: item.id,
             transfeera_id: item.transfeera_transfer_id || null
         }));
-        console.log(`[LoteDetalhe] ⚡ Tentando sincronizar ${syncItems.length} itens:`, syncItems);
 
-        syncBatch(lote?.transfeera_batch_id || null, syncItems);
-    }, [itens, lote, syncBatch]);
+        await syncBatch(lote?.transfeera_batch_id || null, syncItems);
+    };
 
     async function fetchData() {
         setLoading(true);
@@ -137,7 +141,26 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
                             {lote.tipo_saque}
                         </span>
                     </h1>
-                    <p className="text-sm text-fg-dim">Detalhes e acompanhamento dos {itens.length} pagamentos do lote.</p>
+                    <div className="flex items-center gap-4 mt-1">
+                        <p className="text-sm text-fg-dim">Detalhes e acompanhamento dos {itens.length} pagamentos do lote.</p>
+                        
+                        <button
+                            onClick={handleSincronizar}
+                            disabled={isSyncing || !lote.transfeera_batch_id}
+                            className={`btn btn-xs flex items-center gap-1.5 transition-all ${
+                                isSyncing 
+                                    ? 'bg-accent/20 text-accent cursor-not-allowed' 
+                                    : 'bg-accent/10 hover:bg-accent/20 text-accent border border-accent/20'
+                            }`}
+                        >
+                            {isSyncing ? (
+                                <Loader2 size={12} className="animate-spin" />
+                            ) : (
+                                <RefreshCw size={12} />
+                            )}
+                            {isSyncing ? "Sincronizando..." : "Sincronizar Status"}
+                        </button>
+                    </div>
                 </div>
                 <div className="ml-auto text-right">
                     <p className="text-xs font-semibold text-fg-dim uppercase tracking-wider mb-1">Total do Lote</p>
