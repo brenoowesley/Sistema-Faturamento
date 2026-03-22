@@ -341,29 +341,33 @@ export async function POST(req: NextRequest) {
                 const supabaseAdmin = createAdminClient();
                 const updatePromises = list.map(async (t: any) => {
                     const remoteId = t.integration_id || t.id_integracao;
+                    
+                    // SEGURANÇA: Se não há integration_id, este item não pertence ao nosso sistema. Ignora.
                     if (!remoteId) return null;
 
                     const s = String(t.status || "").toUpperCase().trim();
-                    
-                    // 1. Salva o ID oficial da Transfeera no banco (Crucial para o download do comprovante)
                     const payload: any = { 
                         transfeera_transfer_id: String(t.id)
                     };
 
-                    // 2. Tradução RIGOROSA do status para respeitar a Constraint do banco
+                    // MAPEAMENTO ESTREITO: Só altera o status_item para itens identificados na API
                     if (["FINALIZADA", "FINALIZADO", "PAGO", "CONCLUIDO", "CONCLUÍDO", "EFETIVADO"].includes(s)) {
                         payload.status_item = "CONCLUIDO";
+                        payload.motivo_bloqueio = null; 
                     } else if (["FALHA", "FAILED", "ERROR", "REJEITADA", "DEVOLVIDA", "DEVOLVIDO", "RETURNED"].includes(s)) {
                         payload.status_item = "FALHA";
+                        // Preenche com o erro real da Transfeera
+                        payload.motivo_bloqueio = t.status_description || "Erro no processamento Transfeera";
                     } else if (["CANCELADA", "CANCELADO"].includes(s)) {
                         payload.status_item = "REMOVIDO";
+                        payload.motivo_bloqueio = "Cancelado na plataforma Transfeera";
                     }
 
-                    // A tentativa de salvar comprovante_url foi removida para evitar bloqueios de schema cache
-
+                    // O 'eq("id", remoteId)' garante que APENAS o saque específico identificado pela Transfeera
+                    // seja alterado. Saques bloqueados anteriormente que não estão na lista da API permanecem intocados.
                     const { error } = await supabaseAdmin.from("itens_saque").update(payload).eq("id", remoteId);
-                    if (error) console.error(`❌ [Supabase ERRO] Falha no saque ${remoteId}:`, error.message);
                     
+                    if (error) console.error(`❌ [Supabase ERRO] Falha no saque ${remoteId}:`, error.message);
                     return error;
                 });
 
