@@ -135,6 +135,9 @@ export function useTransfeeraSync() {
                             console.error(`[useTransfeeraSync] ❌ Falha ao salvar no Supabase:`, errors);
                         } else {
                             console.log(`[useTransfeeraSync] ✅ ${updatePromises.length} itens salvos perfeitamente no banco de dados!`);
+                            
+                            // ADICIONE ESTA LINHA PARA ATUALIZAR A INTERFACE IMEDIATAMENTE:
+                            window.location.reload();
                         }
                     }
 
