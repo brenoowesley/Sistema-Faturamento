@@ -469,13 +469,14 @@ function AprovadosTable({ items, onUpdateTipoPix, onRemove, onEdit, apiErrorItem
     );
 }
 
-function RevisaoTable({ items, onUpdateChave, onUpdateTipo, onSave, onRemove, onEdit }: {
+function RevisaoTable({ items, onUpdateChave, onUpdateTipo, onSave, onRemove, onEdit, apiErrorItems = {} }: {
     items: SaqueItem[];
     onUpdateChave: (id: string, novaChave: string, cpfFavorecido: string, tipoAtual: string) => void;
     onUpdateTipo: (id: string, novoTipo: string) => void;
     onSave: (id: string) => void;
     onRemove: (id: string) => void;
     onEdit: (item: SaqueItem) => void;
+    apiErrorItems?: Record<string, string>;
 }) {
     const [f, setF] = useState({ cpf: "", nome: "", tipoPix: "", chavePix: "", vlrReal: "" });
 
@@ -520,10 +521,15 @@ function RevisaoTable({ items, onUpdateChave, onUpdateTipo, onSave, onRemove, on
                 </tr>
             </thead>
             <tbody>
-                {filtered.map((i) => (
-                    <tr key={i.id}>
+                {filtered.map((i) => {
+                    const errorMsg = apiErrorItems[i.id] || (i.motivo_bloqueio?.startsWith("[Transfeera API]") ? i.motivo_bloqueio.replace("[Transfeera API] ", "") : null);
+                    return (
+                    <tr key={i.id} style={errorMsg ? { backgroundColor: "rgba(248,113,113,0.1)", outline: "1px solid var(--danger)" } : {}}>
                         <td className="table-mono">{i.cpf_favorecido}</td>
-                        <td style={{ fontSize: 12, color: "var(--fg-dim)" }}>{i.nome_usuario || "—"}</td>
+                        <td style={{ fontSize: 12, color: "var(--fg-dim)" }}>
+                            {i.nome_usuario || "—"}
+                            {errorMsg && <div style={{ color: "var(--danger)", fontSize: 11, fontWeight: 700, marginTop: 4 }}>Erro: {errorMsg}</div>}
+                        </td>
                         <td>
                             <select
                                 value={i.tipo_pix_edit ?? i.tipo_pix}
@@ -554,7 +560,8 @@ function RevisaoTable({ items, onUpdateChave, onUpdateTipo, onSave, onRemove, on
                             </div>
                         </td>
                     </tr>
-                ))}
+                    );
+                })}
                 {filtered.length === 0 && hasFilters && (
                     <tr><td colSpan={7} style={{ textAlign: "center", padding: 20, color: "var(--fg-dim)", fontSize: 13 }}>
                         <Filter size={14} style={{ marginRight: 6, opacity: 0.5 }} />
@@ -860,12 +867,31 @@ function LotePanel({
                     data.errorItems.forEach((err: any) => {
                         if (err.id) apiErrorItems[err.id] = err.message;
                     });
-                    errorMsg += "\n⚠️ Verifique as linhas destacadas em vermelho na tabela.";
+                    errorMsg += "\n⚠️ Os itens listados com problemas foram movidos automaticamente para a aba de Revisão.";
                 } else if (data.transferErrors && data.transferErrors.length > 0) {
                     errorMsg += "\n" + data.transferErrors.slice(0, 5).join("\n");
                 }
                 
-                update((l) => ({ ...l, sendingApi: false, apiMsg: { type: "error", text: errorMsg }, apiErrorItems }));
+                update((l) => {
+                    const hasAppErrorItems = Object.keys(apiErrorItems).length > 0;
+                    return {
+                        ...l, 
+                        sendingApi: false, 
+                        apiMsg: { type: "error", text: errorMsg }, 
+                        apiErrorItems,
+                        activeTab: hasAppErrorItems ? "REVISAO" : l.activeTab,
+                        items: l.items.map(i => {
+                            if (apiErrorItems[i.id] && i.status === "APROVADO") {
+                                return {
+                                    ...i,
+                                    status: "REVISAO" as ItemStatus,
+                                    motivo_bloqueio: `[Transfeera API] ${apiErrorItems[i.id]}`
+                                };
+                            }
+                            return i;
+                        })
+                    };
+                });
                 return;
             }
 
@@ -1040,6 +1066,7 @@ function LotePanel({
                                     onSave={saveRevisaoItem}
                                     onRemove={handleRemoveItem}
                                     onEdit={setEditingItem}
+                                    apiErrorItems={lote.apiErrorItems}
                                 />
                             )}
                             {lote.activeTab === "BLOQUEADO" && <BloqueadosTable items={bloqueados} onForceApprove={setForceApproveItem} onEdit={setEditingItem} />}
