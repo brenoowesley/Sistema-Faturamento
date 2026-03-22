@@ -295,30 +295,51 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ error: "batchId é obrigatório" }, { status: 400 });
             }
 
-            console.log(`[Transfeera] ▶ Buscando detalhes do lote ${batchId}...`);
+            console.log(`[Transfeera] ▶ Buscando transferências do lote ${batchId} na rota oficial...`);
 
-            const tRes = await fetch(`${baseUrl}/batch/${batchId}`, {
-                method: "GET",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "User-Agent": UA_HEADER,
-                    Accept: "application/json",
-                },
-            });
+            let allTransfers: any[] = [];
+            let currentPage = 1;
 
-            if (!tRes.ok) {
-                const errText = await tRes.text();
-                console.error(`[Transfeera] Erro na requisição do lote ${batchId}:`, errText);
-                return NextResponse.json({ success: false, error: "Erro ao buscar detalhes do lote" }, { status: tRes.status });
+            while (true) {
+                // Rota oficial com paginação para puxar grandes volumes
+                const url = `${baseUrl}/batch/${batchId}/transfer?page=${currentPage}&per_page=100`;
+                
+                const tRes = await fetch(url, {
+                    method: "GET",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        "User-Agent": UA_HEADER,
+                        Accept: "application/json",
+                    },
+                });
+
+                if (!tRes.ok) {
+                    const errText = await tRes.text();
+                    console.error(`[Transfeera] ❌ Erro na requisição da página ${currentPage}:`, errText);
+                    break; // Interrompe o loop em caso de erro, mas salva o que já foi resgatado
+                }
+
+                const tPayload = await tRes.json();
+                
+                // Debug temporário para inspecionar o formato exato da resposta
+                if (currentPage === 1) {
+                    console.log(`[Transfeera] 🔍 Payload bruto (pág 1):`, JSON.stringify(tPayload).substring(0, 300));
+                }
+
+                // Extrai o array (suporta o retorno direto ou encapsulado em "data")
+                const list = Array.isArray(tPayload) ? tPayload : (tPayload.data || []);
+                
+                // Condição de parada: se a página vier vazia, esgotamos os itens do lote
+                if (list.length === 0) {
+                    break;
+                }
+
+                allTransfers.push(...list);
+                currentPage++;
             }
 
-            const tPayload = await tRes.json();
-
-            // Extrai o array de transferências de dentro do objeto do lote retornado pela API
-            const list = tPayload.transfers || (tPayload.data && tPayload.data.transfers) || [];
-
-            console.log(`[Transfeera] ✅ ${list.length} transferências recuperadas de dentro do lote ${batchId}.`);
-            return NextResponse.json({ success: true, transfers: list });
+            console.log(`[Transfeera] ✅ ${allTransfers.length} transferências recuperadas do lote ${batchId}.`);
+            return NextResponse.json({ success: true, transfers: allTransfers });
         }
 
         return NextResponse.json({ error: "Invalid action" }, { status: 400 });
