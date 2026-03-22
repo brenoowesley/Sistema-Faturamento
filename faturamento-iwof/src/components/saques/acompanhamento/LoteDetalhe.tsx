@@ -235,14 +235,10 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
                                         </td>
                                         <td className="font-bold text-fg">R$ {item.valor?.toFixed(2)}</td>
                                         <td>
-                                            {item.status_item !== 'REMOVIDO' ? (
-                                                <TransfeeraBadge status={item.status_transfeera} isSyncing={isSyncing} />
-                                            ) : (
-                                                <span className="badge badge-danger text-xs px-2 py-0.5">Removido da Exportação</span>
-                                            )}
+                                            <TransfeeraBadge statusItem={item.status_item} isSyncing={isSyncing} />
                                         </td>
                                         <td className="text-center">
-                                            {item.status_item !== 'REMOVIDO' && ['CONCLUIDO', 'FINALIZADO', 'FINALIZADA', 'PAGO', 'EFETIVADO'].includes(item.status_transfeera?.toUpperCase() || '') ? (
+                                            {item.status_item !== 'REMOVIDO' && item.status_item === 'CONCLUIDO' ? (
                                                 <button 
                                                     onClick={() => downloadReceipt(item.id, item.transfeera_transfer_id)}
                                                     className="btn btn-ghost mx-auto p-2 text-indigo-500 hover:bg-indigo-500/10 cursor-pointer transition-colors" 
@@ -267,8 +263,8 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
     );
 }
 
-function TransfeeraBadge({ status, isSyncing }: { status?: string, isSyncing: boolean }) {
-    if (isSyncing && !status) {
+function TransfeeraBadge({ statusItem, isSyncing }: { statusItem: string, isSyncing: boolean }) {
+    if (isSyncing) {
         return (
             <span className="badge inline-flex items-center gap-1 border border-border bg-bg text-fg-muted">
                 <Loader2 size={12} className="animate-spin opacity-70" />
@@ -277,41 +273,23 @@ function TransfeeraBadge({ status, isSyncing }: { status?: string, isSyncing: bo
         );
     }
 
-    if (!status || status === "NAO_SUBMETIDO") {
-         return (
-            <span className="badge inline-flex items-center gap-1 border border-border bg-bg text-fg-dim">
-                Não Submetida
-            </span>
-        );
-    }
-
-    switch (status) {
-        case "FINALIZADO":
-        case "EFETIVADO":
+    switch (statusItem) {
+        case "CONCLUIDO":
             return (
                 <span className="badge text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 font-bold flex items-center gap-1">
-                    <CheckCircle2 size={12} /> Concluído
+                    <CheckCircle2 size={12} /> Efetivado
                 </span>
             );
-        case "EM_PROCESSAMENTO":
-        case "AGENDADO":
-            return <span className="badge text-indigo-500 bg-indigo-500/10 border border-indigo-500/20 font-bold">Em Regulação</span>;
-        case "DEVOLVIDO":
         case "FALHA":
-            return <span className="badge text-red-500 bg-red-500/10 border border-red-500/20 font-bold">Pagamento Falhou</span>;
-        case "ERRO_CONSULTA":
-            return <span className="badge text-orange-500 bg-orange-500/10 border border-orange-500/20 font-bold">Erro Transfeera</span>;
-        case "ERRO_REDE":
-            return <span className="badge text-orange-500 bg-orange-500/10 border border-orange-500/20 font-bold">Erro de Rede</span>;
+            return <span className="badge text-red-500 bg-red-500/10 border border-red-500/20 font-bold">Falhou / Devolvido</span>;
+        case "REMOVIDO":
+            return <span className="badge text-gray-500 bg-gray-500/10 border border-gray-500/20 font-bold">Cancelado</span>;
+        case "APROVADO":
+            return <span className="badge text-indigo-500 bg-indigo-500/10 border border-indigo-500/20 font-bold">Em Processamento</span>;
+        case "BLOQUEADO":
+            return <span className="badge text-orange-500 bg-orange-500/10 border border-orange-500/20 font-bold">Bloqueado Internamente</span>;
         default:
-            if ((status as any)?.startsWith("ERRO_")) {
-                return (
-                    <span className="badge text-orange-500 bg-orange-500/10 border border-orange-500/20 font-bold" title="Erro HTTP da API">
-                        Transfeera {(status as any).replace("ERRO_", "")}
-                    </span>
-                );
-            }
-            return <span className="badge border border-border bg-bg text-fg-dim">A Aguardar Sincronização</span>;
+            return <span className="badge border border-border bg-bg text-fg-dim">Não Submetido</span>;
     }
 }
 
