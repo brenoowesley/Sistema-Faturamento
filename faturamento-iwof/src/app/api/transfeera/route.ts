@@ -139,15 +139,14 @@ export async function POST(req: NextRequest) {
                     tipo_pix: string;
                     chave_pix: string;
                     cpf_favorecido: string;
-                    nome_usuario?: string;
                 }>;
             };
 
-            if (!items || items.length === 0) {
-                return NextResponse.json({ error: "Nenhum item aprovado para enviar." }, { status: 400 });
+            if (!lote_nome || !items || items.length === 0) {
+                return NextResponse.json({ error: "Lote sem nome ou sem itens" }, { status: 400 });
             }
 
-            console.log(`[Transfeera] ▶ create_batch: "${lote_nome}" com ${items.length} transferência(s) | Ambiente: ${env}`);
+            console.log(`[Transfeera] ▶ create_batch: Iniciando 3 passos para "${lote_nome}" com ${items.length} transferência(s) | Ambiente: ${env}`);
 
             // Normalizar tipo_pix para o formato que a Transfeera aceita
             function normalizePixKeyType(tipo: string): string {
@@ -163,25 +162,14 @@ export async function POST(req: NextRequest) {
                 return map[tipo.toUpperCase()] || tipo;
             }
 
-            // Montar payload conforme documentação Transfeera: POST /batch
-            const transfers = items.map((item) => ({
-                value: item.valor_real,
-                integration_id: item.id,
-                pix_description: "REPASSE IWOF",
-                destination_bank_account: {
-                    pix_key_type: normalizePixKeyType(item.tipo_pix),
-                    pix_key: formatarChavePix(item.tipo_pix, item.chave_pix),
-                },
-                pix_key_validation: {
-                    cpf_cnpj: item.cpf_favorecido.replace(/\D/g, ""),
-                },
-            }));
-
+            // ==========================================
+            // PASSO 1: CRIAR O LOTE VAZIO
+            // ==========================================
+            console.log(`[Transfeera] Passo 1: Criando lote vazio...`);
             const batchPayload = {
                 name: lote_nome,
                 type: "TRANSFERENCIA",
-                auto_close: true, // Ativado para gerar e retornar IDs de transferência imediatamente
-                transfers,
+                auto_close: true // Permitido, fecha logo após todos os itens serem enviados
             };
 
             const batchRes = await fetch(`${baseUrl}/batch`, {
@@ -195,35 +183,101 @@ export async function POST(req: NextRequest) {
             });
 
             const batchBody = await batchRes.json();
-            console.log(`[Transfeera] [DEBUG] Resposta Bruta do Lote:`, JSON.stringify(batchBody, null, 2));
-
+            
             if (!batchRes.ok) {
-                console.error(`[Transfeera] POST /batch FALHOU (${batchRes.status}):`, JSON.stringify(batchBody));
+                console.error(`[Transfeera] ❌ Passo 1 (POST /batch) FALHOU:`, JSON.stringify(batchBody));
+                return NextResponse.json({
+                    error: batchBody.message || "Erro ao criar lote vazio na Transfeera",
+                    details: batchBody
+                }, { status: batchRes.status });
+            }
 
-                // Extrair erros individuais de transferência (ex: chave PIX inválida)
+            const batchId = batchBody.id;
+            console.log(`✅ [Transfeera] Passo 1 Concluído: Lote ID ${batchId} criado.`);
+
+            // ==========================================
+            // PASSO 2: INSERIR TRANSFERÊNCIAS E CAPTURAR IDs
+            // ==========================================
+            console.log(`[Transfeera] Passo 2: Inserindo ${items.length} transferências no lote ${batchId}...`);
+            const transfersPayload = items.map((item) => ({
+                value: item.valor_real,
+                integration_id: item.id, // Mapeamento CRÍTICO
+                pix_description: "REPASSE IWOF",
+                destination_bank_account: {
+                    pix_key_type: normalizePixKeyType(item.tipo_pix),
+                    pix_key: formatarChavePix(item.tipo_pix, item.chave_pix),
+                },
+                pix_key_validation: {
+                    cpf_cnpj: item.cpf_favorecido.replace(/\D/g, ""),
+                },
+            }));
+
+            const transfersRes = await fetch(`${baseUrl}/batch/${batchId}/transfer`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                    "User-Agent": UA_HEADER,
+                },
+                body: JSON.stringify(transfersPayload),
+            });
+
+            const transfersBody = await transfersRes.json();
+
+            if (!transfersRes.ok) {
+                console.error(`[Transfeera] ❌ Passo 2 (POST /transfer) FALHOU:`, JSON.stringify(transfersBody));
+                
+                // Extrair erros individuais
                 const transferErrors: string[] = [];
-                if (batchBody.errors && Array.isArray(batchBody.errors)) {
-                    for (const err of batchBody.errors) {
+                if (transfersBody.errors && Array.isArray(transfersBody.errors)) {
+                    for (const err of transfersBody.errors) {
                         transferErrors.push(`${err.integration_id || "?"}: ${err.message || JSON.stringify(err)}`);
                     }
                 }
 
                 return NextResponse.json({
-                    error: batchBody.message || "Erro ao criar lote na Transfeera",
-                    details: batchBody,
-                    transferErrors,
-                }, { status: batchRes.status });
+                    error: transfersBody.message || "Erro ao inserir transferências no lote",
+                    details: transfersBody,
+                    transferErrors
+                }, { status: transfersRes.status });
             }
 
-            console.log(`✅ [Transfeera] Lote criado com sucesso! batch_id=${batchBody.id}`);
+            const createdTransfers = Array.isArray(transfersBody) ? transfersBody : (transfersBody.data || []);
+            console.log(`✅ [Transfeera] Passo 2 Concluído: ${createdTransfers.length} transferências inseridas.`);
 
-            // A Transfeera passou a notificar os processamentos via Webhook de forma assíncrona.
-            // Aqui, apenas confirmamos a criação do batch para o frontend, e delegamos o
-            // preenchimento dos IDs e atualizações de status para o gateway assíncrono.
+            // ==========================================
+            // PASSO 3: SALVAR IDs NO SUPABASE
+            // ==========================================
+            console.log(`[Transfeera] Passo 3: Vinculando IDs gerados ao banco de dados local...`);
+            const updatePromises = [];
+            
+            for (const remote of createdTransfers) {
+                if (remote.integration_id && remote.id) {
+                    updatePromises.push(
+                        supabase
+                            .from("itens_saque")
+                            .update({ transfeera_transfer_id: String(remote.id) })
+                            .eq("id", remote.integration_id)
+                    );
+                }
+            }
+
+            if (updatePromises.length > 0) {
+                const results = await Promise.all(updatePromises);
+                const errors = results.filter(r => r.error);
+                if (errors.length > 0) {
+                    console.error(`[Transfeera] ⚠️ Falha ao salvar algumas atualizações no Supabase:`, errors);
+                } else {
+                    console.log(`✅ [Transfeera] Passo 3 Concluído: ${updatePromises.length} itens atualizados localmente.`);
+                }
+            } else {
+                console.log(`⚠️ [Transfeera] Passo 3: Nenhum item para atualizar no banco.`);
+            }
+
             return NextResponse.json({
                 success: true,
-                batch_id: String(batchBody.id),
-                batchId: batchBody.id, // Retrocompatibilidade pro frontend
+                batch_id: String(batchId),
+                batchId: batchId,
             });
         }
 
