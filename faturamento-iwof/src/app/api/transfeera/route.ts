@@ -336,17 +336,18 @@ export async function POST(req: NextRequest) {
                     const remoteId = t.integration_id || t.id_integracao;
                     if (!remoteId) return Promise.resolve();
 
-                    // Normalização de Status no Backend
+                    // Normalização e Salvamento Separado
                     const s = String(t.status || "").toUpperCase().trim();
-                    let statusItem = "EXPORTADO";
-                    if (["FINALIZADA", "FINALIZADO", "PAGO", "CONCLUIDO", "CONCLUÍDO", "EFETIVADO"].includes(s)) statusItem = "CONCLUIDO";
-                    else if (["FALHA", "FAILED", "ERROR", "REJEITADA", "DEVOLVIDA", "DEVOLVIDO", "RETURNED"].includes(s)) statusItem = "ERRO";
-                    else if (["CANCELADA", "CANCELADO"].includes(s)) statusItem = "REMOVIDO";
-
+                    
                     const payload: any = { 
-                        status_item: statusItem,
+                        status_transfeera: s, // Guarda o status original da Transfeera na nova coluna!
                         transfeera_transfer_id: String(t.id)
                     };
+
+                    // Atualiza o status_item interno APENAS se for um estado final (para fechar o ciclo do seu sistema)
+                    if (["FINALIZADA", "FINALIZADO", "PAGO", "CONCLUIDO", "CONCLUÍDO", "EFETIVADO"].includes(s)) payload.status_item = "CONCLUIDO";
+                    else if (["FALHA", "FAILED", "ERROR", "REJEITADA", "DEVOLVIDA", "DEVOLVIDO", "RETURNED"].includes(s)) payload.status_item = "ERRO";
+                    else if (["CANCELADA", "CANCELADO"].includes(s)) payload.status_item = "REMOVIDO";
                     
                     const comprovanteLink = t.bank_receipt_url || t.receipt_url;
                     if (comprovanteLink) payload.comprovante_url = comprovanteLink;

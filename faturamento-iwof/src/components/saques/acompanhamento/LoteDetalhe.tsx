@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Search, ArrowLeft, Download, FileText, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useTransfeeraSync, TransfeeraStatus } from "@/hooks/useTransfeeraSync";
+import { useTransfeeraSync } from "@/hooks/useTransfeeraSync";
 
 interface SaqueItem {
     id: string;
@@ -16,6 +16,7 @@ interface SaqueItem {
     tipo_pix: string;
     valor: number;
     status_item: string;
+    status_transfeera?: string;
     motivo_bloqueio?: string;
     transfeera_transfer_id?: string;
 }
@@ -41,60 +42,52 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
     const [searchTerm, setSearchTerm] = useState(highlight || "");
     const [statusFilter, setStatusFilter] = useState("TODOS");
 
-    const { statuses, isSyncing, syncBatch, downloadReceipt } = useTransfeeraSync();
+    const { isSyncing, syncBatch, downloadReceipt } = useTransfeeraSync();
+    const hasAutoSynced = useRef(false); // Evita loop de auto-sync
 
     useEffect(() => {
-        if (highlight) {
-            setSearchTerm(highlight);
-        }
-        fetchData();
-    }, [loteId, highlight]);
+        if (highlight) setSearchTerm(highlight);
 
-    // Sincronização manual com Transfeera
+        const loadAndAutoSync = async () => {
+            setLoading(true);
+            // 1. Carrega os dados iniciais rápidos da sua base de dados
+            const { data: lData } = await supabase.from("lotes_saques").select("*").eq("id", loteId).single();
+            if (lData) setLote(lData);
+
+            const { data: iData } = await supabase.from("itens_saque").select("*").eq("lote_id", loteId).order("nome_usuario", { ascending: true });
+            if (iData) setItens(iData);
+            setLoading(false); // Libera a tela para o utilizador ver
+
+            // 2. Faz o Auto-Sync na Transfeera de forma invisível (apenas na 1ª vez)
+            if (!hasAutoSynced.current && lData?.transfeera_batch_id && iData && iData.length > 0) {
+                hasAutoSynced.current = true;
+                
+                const syncItems = iData.map(item => ({
+                    id: item.id,
+                    transfeera_id: item.transfeera_transfer_id || null,
+                }));
+                
+                const success = await syncBatch(lData.transfeera_batch_id, syncItems);
+                if (success) {
+                    // 3. Atualiza os dados da tabela silenciosamente (sem loading)
+                    const { data: updatedItens } = await supabase.from("itens_saque").select("*").eq("lote_id", loteId).order("nome_usuario", { ascending: true });
+                    if (updatedItens) setItens(updatedItens);
+                }
+            }
+        };
+
+        loadAndAutoSync();
+    }, [loteId, highlight, syncBatch, supabase]);
+
+    // O botão manual agora só recarrega a tabela após o sync
     const handleSincronizar = async () => {
-        if (!itens || itens.length === 0) return;
-        const approvedItems = itens.filter(i => 
-            ['APROVADO', 'EM_PROCESSAMENTO', 'AGENDADO', 'RETORNADO', 'FALHA'].includes(i.status_item)
-        );
-        
-        if (approvedItems.length === 0) {
-            alert("Não existem itens exportados ou em processamento para sincronizar.");
-            return;
+        if (!itens || !lote?.transfeera_batch_id) return;
+        const success = await syncBatch(lote.transfeera_batch_id, itens);
+        if (success) {
+            const { data } = await supabase.from("itens_saque").select("*").eq("lote_id", loteId).order("nome_usuario", { ascending: true });
+            if (data) setItens(data);
         }
-
-        const syncItems = approvedItems.map(item => ({
-            id: item.id,
-            transfeera_id: item.transfeera_transfer_id || null,
-            cpf_favorecido: item.cpf_favorecido,
-            valor: item.valor,
-            chave_pix: item.chave_pix
-        }));
-
-        await syncBatch(lote?.transfeera_batch_id || null, syncItems);
     };
-
-    async function fetchData() {
-        setLoading(true);
-        // Fetch Lote
-        const { data: loteData, error: loteErr } = await supabase
-            .from("lotes_saques")
-            .select("*")
-            .eq("id", loteId)
-            .single();
-
-        if (loteData) setLote(loteData);
-
-        // Fetch Itens
-        const { data: itensData, error: itensErr } = await supabase
-            .from("itens_saque")
-            .select("*")
-            .eq("lote_id", loteId)
-            .order("nome_usuario", { ascending: true });
-
-        if (itensData) setItens(itensData);
-
-        setLoading(false);
-    }
 
     const filteredItens = useMemo(() => {
         let result = itens;
@@ -242,16 +235,14 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
                                         </td>
                                         <td className="font-bold text-fg">R$ {item.valor?.toFixed(2)}</td>
                                         <td>
-                                            {item.status_item === 'APROVADO' ? (
-                                                <TransfeeraBadge status={statuses[item.id.toLowerCase()]} isSyncing={isSyncing} />
+                                            {item.status_item !== 'REMOVIDO' ? (
+                                                <TransfeeraBadge status={item.status_transfeera} isSyncing={isSyncing} />
                                             ) : (
-                                                <span className="badge badge-danger text-xs px-2 py-0.5" title="Não enviado para transfeera">
-                                                    Removido da Exportação
-                                                </span>
+                                                <span className="badge badge-danger text-xs px-2 py-0.5">Removido da Exportação</span>
                                             )}
                                         </td>
                                         <td className="text-center">
-                                            {item.status_item === 'APROVADO' && statuses[item.id.toLowerCase()] === 'FINALIZADO' ? (
+                                            {item.status_item !== 'REMOVIDO' && ['CONCLUIDO', 'FINALIZADO', 'FINALIZADA', 'PAGO', 'EFETIVADO'].includes(item.status_transfeera?.toUpperCase() || '') ? (
                                                 <button 
                                                     onClick={() => downloadReceipt(item.id, item.transfeera_transfer_id)}
                                                     className="btn btn-ghost mx-auto p-2 text-indigo-500 hover:bg-indigo-500/10 cursor-pointer transition-colors" 
@@ -276,7 +267,7 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
     );
 }
 
-function TransfeeraBadge({ status, isSyncing }: { status?: TransfeeraStatus, isSyncing: boolean }) {
+function TransfeeraBadge({ status, isSyncing }: { status?: string, isSyncing: boolean }) {
     if (isSyncing && !status) {
         return (
             <span className="badge inline-flex items-center gap-1 border border-border bg-bg text-fg-muted">
