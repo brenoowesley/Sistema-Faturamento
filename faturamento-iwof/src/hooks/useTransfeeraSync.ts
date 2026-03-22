@@ -92,43 +92,30 @@ export function useTransfeeraSync() {
                     const updatePromises = [];
 
                     for (const remoteTransfer of data.transfers) {
-                        // 1. O saque pertence a este lote?
-                        const remoteBatchId = String(remoteTransfer.Batch?.id || "");
-                        if (remoteBatchId !== String(batchId)) continue; // Se não for do lote atual, descarta.
+                        // Extrai o ID de integração oficial que recebemos no payload
+                        const remoteId = remoteTransfer.integration_id || remoteTransfer.id_integracao;
+                        if (!remoteId) continue;
 
-                        // 2. Busca o item local que faz o Match Triplo (Lote + Valor + Chave/CPF)
-                        const itemLocal = itensLocais.find((item) => {
-                            // Validação de Valor
-                            const localValue = Number(item.valor_real || item.valor || 0);
-                            const remoteValue = Number(remoteTransfer.value || 0);
-                            if (localValue !== remoteValue) return false;
-
-                            // Limpeza de chaves para comparação (remove espaços, formatações)
-                            const remotePixKey = String(remoteTransfer.DestinationBankAccount?.pix_key || "").replace(/[^a-zA-Z0-9@.+]/g, "").toLowerCase();
-                            const localPixKey = String(item.chave_pix || "").replace(/[^a-zA-Z0-9@.+]/g, "").toLowerCase();
-                            const localCpf = String(item.cpf_favorecido || "").replace(/\D/g, "");
-
-                            // O match ocorre se a chave PIX bater exatamente OU se o CPF estiver embutido na chave (caso de chaves que são o próprio CPF/Telefone)
-                            return (remotePixKey === localPixKey) || (remotePixKey === localCpf) || (remotePixKey.includes(localCpf));
-                        });
+                        // Match 100% determinístico por UUID
+                        const itemLocal = itensLocais.find(
+                            (item) => item.id && String(item.id).toLowerCase() === String(remoteId).toLowerCase()
+                        );
 
                         if (!itemLocal) continue;
 
-                        console.log(`🔍 [MATCH TRIPLO SUCESSO] Saque de R$ ${remoteTransfer.value} pareado com o ID: ${itemLocal.id}`);
+                        console.log(`🔍 [MATCH PERFEITO] UUID: ${itemLocal.id} | Status: ${remoteTransfer.status}`);
 
                         const normalizedStatus = normalizeTransfeeraStatus(remoteTransfer.status);
-                        
-                        // Atualiza o dicionário de status da interface
                         newStatuses[itemLocal.id] = normalizedStatus;
 
-                        // Prepara os dados para salvar no Supabase
+                        // Payload de atualização para o banco de dados
                         const payload: any = { 
                             status_item: normalizedStatus,
                             transfeera_transfer_id: String(remoteTransfer.id)
                         };
                         
-                        // Extrai o comprovante caso já exista
-                        const comprovanteLink = remoteTransfer.bank_receipt_url || remoteTransfer.receipt_url || remoteTransfer.comprovante_url;
+                        // Captura do Comprovante (as chaves vieram confirmadas no payload: bank_receipt_url e receipt_url)
+                        const comprovanteLink = remoteTransfer.bank_receipt_url || remoteTransfer.receipt_url;
                         if (comprovanteLink) {
                             payload.comprovante_url = comprovanteLink;
                         }
@@ -147,11 +134,11 @@ export function useTransfeeraSync() {
                         if (errors.length > 0) {
                             console.error(`[useTransfeeraSync] ❌ Falha ao salvar no Supabase:`, errors);
                         } else {
-                            console.log(`[useTransfeeraSync] ✅ ${updatePromises.length} itens salvos com comprovantes e status atualizados.`);
+                            console.log(`[useTransfeeraSync] ✅ ${updatePromises.length} itens salvos perfeitamente no banco de dados!`);
                         }
                     }
 
-                    // Renderiza as cores na tela instantaneamente
+                    // Atualiza a tela instantaneamente
                     setStatuses((prev) => ({ ...prev, ...newStatuses }));
                 } else {
                     console.log(`[useTransfeeraSync] ⚠️ API respondeu com sucesso mas sem transfers.`);
