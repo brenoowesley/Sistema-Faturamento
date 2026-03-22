@@ -337,11 +337,13 @@ export async function POST(req: NextRequest) {
                     if (!remoteId) return null;
 
                     const s = String(t.status || "").toUpperCase().trim();
+                    
+                    // 1. Salva o ID oficial da Transfeera no banco (Crucial para o download do comprovante)
                     const payload: any = { 
                         transfeera_transfer_id: String(t.id)
                     };
 
-                    // Tradução RIGOROSA para o padrão do seu banco de dados
+                    // 2. Tradução RIGOROSA do status para respeitar a Constraint do banco
                     if (["FINALIZADA", "FINALIZADO", "PAGO", "CONCLUIDO", "CONCLUÍDO", "EFETIVADO"].includes(s)) {
                         payload.status_item = "CONCLUIDO";
                     } else if (["FALHA", "FAILED", "ERROR", "REJEITADA", "DEVOLVIDA", "DEVOLVIDO", "RETURNED"].includes(s)) {
@@ -350,10 +352,8 @@ export async function POST(req: NextRequest) {
                         payload.status_item = "REMOVIDO";
                     }
 
-                    const comprovanteLink = t.bank_receipt_url || t.receipt_url;
-                    if (comprovanteLink) payload.comprovante_url = comprovanteLink;
+                    // A tentativa de salvar comprovante_url foi removida para evitar bloqueios de schema cache
 
-                    // Faz a atualização (agora vai passar sem ser bloqueada!)
                     const { error } = await supabaseAdmin.from("itens_saque").update(payload).eq("id", remoteId);
                     if (error) console.error(`❌ [Supabase ERRO] Falha no saque ${remoteId}:`, error.message);
                     
