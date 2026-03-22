@@ -77,6 +77,12 @@ export function useTransfeeraSync() {
 
             if (res.ok) {
                 const data = await res.json();
+                
+                if (data.transfers && data.transfers.length > 0) {
+                    console.log("🔍 [RAIO-X] Estrutura completa das 5 transferências mais recentes:");
+                    console.log(JSON.stringify(data.transfers.slice(0, 5), null, 2));
+                }
+
                 if (data.success && data.transfers) {
                     const newStatuses: Record<string, TransfeeraStatus> = {};
                     const updatePromises = [];
