@@ -18,32 +18,7 @@ export interface SyncItem {
     cpf_favorecido?: string;
     valor_real?: number;
     valor?: number;
-    chave_pix?: string; // Adicionado para o match triplo
-}
-
-// Normalização do Status da Transfeera para nosso formato interno
-function normalizeTransfeeraStatus(raw: string | null | undefined): TransfeeraStatus {
-    if (!raw) return "NAO_SUBMETIDO";
-    const s = raw.toUpperCase().trim();
-
-    if (["FINALIZADA", "FINALIZADO", "PAGO", "CONCLUIDO", "CONCLUÍDO", "EFETIVADO"].includes(s)) {
-        return "CONCLUIDO";
-    }
-    
-    if (["FALHA", "FAILED", "ERROR", "REJEITADA", "DEVOLVIDA", "DEVOLVIDO", "RETURNED"].includes(s)) {
-        return "ERRO";
-    }
-
-    if (["CRIADA", "CRIADO", "CREATED", "RECEBIDO", "AGUARDANDO_RECEBIMENTO", "EM_PROCESSAMENTO", "PROCESSANDO", "EM_PROCESSAMENTO_BANCO", "AGENDADO", "SCHEDULED"].includes(s)) {
-        return "EXPORTADO";
-    }
-    
-    if (["CANCELADA", "CANCELADO"].includes(s)) {
-        return "REMOVIDO";
-    }
-
-    // Fallback de segurança 
-    return "EXPORTADO";
+    chave_pix?: string;
 }
 
 export function useTransfeeraSync() {
@@ -52,18 +27,24 @@ export function useTransfeeraSync() {
     const [isSyncing, setIsSyncing] = useState(false);
 
     /**
-     * Sincroniza o status de múltiplos itens baseando-se no transfeera_batch_id delegando ao backend.
+     * Sincroniza o status pedindo para o backend fazer o update com poderes de Admin.
      */
     const syncBatch = useCallback(async (batchId: string | null, itensLocais: SyncItem[]) => {
+        if (!itensLocais || itensLocais.length === 0) {
+            console.log("[useTransfeeraSync] ⚠️ syncBatch chamado sem itens.");
+            return;
+        }
+
         if (!batchId) {
             console.log("[useTransfeeraSync] ⏭️ Lote sem transfeera_batch_id, abortando rastreio por lote.");
             return;
         }
 
-        console.log(`[useTransfeeraSync] 🔄 Delegando sync do lote ${batchId} para o backend...`);
+        console.log(`[useTransfeeraSync] 🔄 Iniciando sync para lote ${batchId}...`);
         setIsSyncing(true);
 
         try {
+            console.log("[useTransfeeraSync] 🛰️ Solicitando sincronização ao backend...");
             const res = await fetch("/api/transfeera", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -76,14 +57,15 @@ export function useTransfeeraSync() {
             if (res.ok) {
                 const data = await res.json();
                 if (data.success) {
-                    console.log(`[useTransfeeraSync] ✅ Sync via backend concluído com sucesso. Recarregando a interface...`);
-                    // O backend já atualizou o Supabase. Apenas recarregamos para buscar o estado atual.
-                    window.location.reload();
+                    console.log(`[useTransfeeraSync] ✅ Sincronização concluída pelo Backend! Atualizando tela para puxar dados frescos...`);
+                    // O backend já salvou tudo no banco com segurança. 
+                    // Agora apenas recarregamos a página para o React puxar os dados novos.
+                    window.location.reload(); 
                 } else {
-                    console.error("[useTransfeeraSync] ⚠️ Backend respondeu com falha:", data);
+                    console.error(`[useTransfeeraSync] ⚠️ API falhou internamente:`, data.error);
                 }
             } else {
-                console.error("Falha ao buscar lote na action do backend:", res.status);
+                console.error("Falha ao comunicar com a Transfeera:", res.status);
             }
         } catch (err) {
             console.error("Erro de rede ao sincronizar lote:", err);
@@ -94,13 +76,9 @@ export function useTransfeeraSync() {
 
     /**
      * Baixa o comprovante PDF de uma transferência.
-     * 
-     * @param integrationId - UUID local do item
-     * @param transfeeraTransferId - ID numérico da Transfeera (opcional, para consulta direta)
      */
     const downloadReceipt = useCallback(async (integrationId: string, transfeeraTransferId?: string) => {
         try {
-            // Construir URL com parâmetros disponíveis
             const params = new URLSearchParams({ action: "receipt" });
             if (transfeeraTransferId) {
                 params.set("transfer_id", transfeeraTransferId);
