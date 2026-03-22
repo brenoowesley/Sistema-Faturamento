@@ -40,7 +40,7 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
     const [itens, setItens] = useState<SaqueItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState(highlight || "");
-    const [statusFilter, setStatusFilter] = useState("TODOS");
+    const [statusFilters, setStatusFilters] = useState<string[]>([]);
 
     const { isSyncing, syncBatch, downloadReceipt } = useTransfeeraSync();
     const hasAutoSynced = useRef(false); // Evita loop de auto-sync
@@ -92,16 +92,8 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
     const filteredItens = useMemo(() => {
         let result = itens;
 
-        if (statusFilter === "CONCLUIDOS") {
-            result = result.filter(i => i.status_item === "CONCLUIDO");
-        } else if (statusFilter === "PROCESSANDO") {
-            result = result.filter(i => i.status_item === "APROVADO");
-        } else if (statusFilter === "FALHAS") {
-            result = result.filter(i => i.status_item === "FALHA");
-        } else if (statusFilter === "BLOQUEADOS") {
-            result = result.filter(i => i.status_item === "BLOQUEADO");
-        } else if (statusFilter === "REMOVIDOS") {
-            result = result.filter(i => i.status_item === "REMOVIDO");
+        if (statusFilters.length > 0) {
+            result = result.filter(i => statusFilters.includes(i.status_item));
         }
 
         if (searchTerm) {
@@ -114,7 +106,7 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
         }
 
         return result;
-    }, [itens, searchTerm, statusFilter]);
+    }, [itens, searchTerm, statusFilters]);
 
     if (loading) {
         return <div className="p-12 text-center text-fg-muted font-mono">Carregando detalhes do lote...</div>;
@@ -172,8 +164,8 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
 
             {/* Toolbar */}
             <div className="card bg-bg-card p-4 rounded-lg flex flex-col sm:flex-row justify-between items-center gap-4">
-                <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto flex-1">
-                    <div className="relative w-full sm:w-80">
+                <div className="flex flex-col lg:flex-row gap-4 w-full flex-1">
+                    <div className="relative w-full lg:w-80">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted" size={16} />
                         <input
                             type="text"
@@ -184,18 +176,29 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
                             autoFocus={!!highlight}
                         />
                     </div>
-                    <select 
-                        className="input w-full sm:w-48"
-                        value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value)}
-                    >
-                        <option value="TODOS">Todos os Registros</option>
-                        <option value="CONCLUIDOS">Concluídos</option>
-                        <option value="PROCESSANDO">Em Processamento</option>
-                        <option value="FALHAS">Falhas / Devolvidos</option>
-                        <option value="BLOQUEADOS">Bloqueados Internamente</option>
-                        <option value="REMOVIDOS">Removidos / Cancelados</option>
-                    </select>
+                    <div className="flex flex-wrap gap-3 text-sm text-fg-dim items-center">
+                        <span className="font-semibold text-xs uppercase tracking-wider">Filtrar:</span>
+                        {[
+                            { value: 'CONCLUIDO', label: 'Efetivados' },
+                            { value: 'APROVADO', label: 'Em Processamento' },
+                            { value: 'FALHA', label: 'Falhas' },
+                            { value: 'BLOQUEADO', label: 'Bloqueados' },
+                            { value: 'REMOVIDO', label: 'Cancelados' }
+                        ].map(opt => (
+                            <label key={opt.value} className="flex items-center gap-1.5 cursor-pointer hover:text-fg transition-colors">
+                                <input 
+                                    type="checkbox" 
+                                    className="accent-accent"
+                                    checked={statusFilters.includes(opt.value)}
+                                    onChange={(e) => {
+                                        if (e.target.checked) setStatusFilters(prev => [...prev, opt.value]);
+                                        else setStatusFilters(prev => prev.filter(v => v !== opt.value));
+                                    }}
+                                />
+                                {opt.label}
+                            </label>
+                        ))}
+                    </div>
                 </div>
                 <div className="text-sm text-fg-muted whitespace-nowrap">
                     Exibindo {filteredItens.length} de {itens.length} registros
