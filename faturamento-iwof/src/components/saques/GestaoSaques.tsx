@@ -21,6 +21,7 @@ import {
     Filter,
     CloudUpload,
     Loader2,
+    Edit,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -355,9 +356,11 @@ function matches(value: string, filter: string): boolean {
     return value.toLowerCase().includes(filter.toLowerCase());
 }
 
-function AprovadosTable({ items, onUpdateTipoPix }: {
+function AprovadosTable({ items, onUpdateTipoPix, onRemove, onEdit }: {
     items: SaqueItem[];
     onUpdateTipoPix: (id: string, tipo: string) => void;
+    onRemove: (id: string) => void;
+    onEdit: (item: SaqueItem) => void;
 }) {
     const [f, setF] = useState({ data: "", nome: "", cpf: "", tipoPix: "", chavePix: "", vlrSol: "", vlrReal: "" });
 
@@ -408,6 +411,7 @@ function AprovadosTable({ items, onUpdateTipoPix }: {
                         <input style={filterInputStyle} placeholder="filtrar…" value={f.vlrReal} onChange={(e) => setF((p) => ({ ...p, vlrReal: e.target.value }))} />
                     </th>
                     <th>Receita</th>
+                    <th>Ações</th>
                 </tr>
             </thead>
             <tbody>
@@ -438,10 +442,16 @@ function AprovadosTable({ items, onUpdateTipoPix }: {
                         <td style={{ color: "var(--fg-muted)" }}>R$ {i.valor_solicitado.toFixed(2)}</td>
                         <td style={{ fontWeight: 600, color: "var(--accent)" }}>R$ {i.valor_real.toFixed(2)}</td>
                         <td style={{ fontWeight: 600, color: "var(--success)" }}>R$ {(i.valor_solicitado - i.valor_real).toFixed(2)}</td>
+                        <td>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                <button className="btn btn-ghost" style={{ padding: "4px 8px", color: "var(--accent)" }} onClick={() => onEdit(i)} title="Editar"><Edit size={14} /></button>
+                                <button className="btn btn-ghost" style={{ padding: "4px 8px", color: "var(--danger)" }} onClick={() => onRemove(i.id)} title="Remover Manualmente"><XCircle size={14} /></button>
+                            </div>
+                        </td>
                     </tr>
                 ))}
                 {filtered.length === 0 && hasFilters && (
-                    <tr><td colSpan={8} style={{ textAlign: "center", padding: 20, color: "var(--fg-dim)", fontSize: 13 }}>
+                    <tr><td colSpan={9} style={{ textAlign: "center", padding: 20, color: "var(--fg-dim)", fontSize: 13 }}>
                         <Filter size={14} style={{ marginRight: 6, opacity: 0.5 }} />
                         Nenhum resultado para os filtros aplicados.
                     </td></tr>
@@ -451,11 +461,13 @@ function AprovadosTable({ items, onUpdateTipoPix }: {
     );
 }
 
-function RevisaoTable({ items, onUpdateChave, onUpdateTipo, onSave }: {
+function RevisaoTable({ items, onUpdateChave, onUpdateTipo, onSave, onRemove, onEdit }: {
     items: SaqueItem[];
     onUpdateChave: (id: string, novaChave: string, cpfFavorecido: string, tipoAtual: string) => void;
     onUpdateTipo: (id: string, novoTipo: string) => void;
     onSave: (id: string) => void;
+    onRemove: (id: string) => void;
+    onEdit: (item: SaqueItem) => void;
 }) {
     const [f, setF] = useState({ cpf: "", nome: "", tipoPix: "", chavePix: "", vlrReal: "" });
 
@@ -525,9 +537,13 @@ function RevisaoTable({ items, onUpdateChave, onUpdateTipo, onSave }: {
                         <td style={{ fontWeight: 600, color: "var(--warning)" }}>R$ {i.valor_real.toFixed(2)}</td>
                         <td><span style={{ fontSize: 12, color: "var(--warning)" }}>{i.motivo_bloqueio}</span></td>
                         <td>
-                            <button className="btn btn-ghost" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => onSave(i.id)}>
-                                <Save size={13} /> Salvar
-                            </button>
+                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                <button className="btn btn-ghost" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => onSave(i.id)}>
+                                    <Save size={13} /> Salvar
+                                </button>
+                                <button className="btn btn-ghost" style={{ padding: "4px 8px", color: "var(--accent)" }} onClick={() => onEdit(i)} title="Editar Original"><Edit size={14} /></button>
+                                <button className="btn btn-ghost" style={{ padding: "4px 8px", color: "var(--danger)" }} onClick={() => onRemove(i.id)} title="Remover Manualmente"><XCircle size={14} /></button>
+                            </div>
                         </td>
                     </tr>
                 ))}
@@ -542,7 +558,11 @@ function RevisaoTable({ items, onUpdateChave, onUpdateTipo, onSave }: {
     );
 }
 
-function BloqueadosTable({ items, onForceApprove }: { items: SaqueItem[]; onForceApprove: (i: SaqueItem) => void }) {
+function BloqueadosTable({ items, onForceApprove, onEdit }: { 
+    items: SaqueItem[]; 
+    onForceApprove: (i: SaqueItem) => void;
+    onEdit: (item: SaqueItem) => void;
+}) {
     const [f, setF] = useState({ cpfConta: "", cpf: "", nome: "", chavePix: "", vlrReal: "" });
 
     const filtered = items.filter((i) =>
@@ -595,13 +615,16 @@ function BloqueadosTable({ items, onForceApprove }: { items: SaqueItem[]; onForc
                         <td style={{ fontWeight: 600, color: "var(--danger)" }}>R$ {i.valor_real.toFixed(2)}</td>
                         <td><span style={{ fontSize: 12, color: "var(--danger)" }}>{i.motivo_bloqueio}</span></td>
                         <td>
-                            <button
-                                className="btn"
-                                style={{ padding: "6px 12px", fontSize: 12, background: "rgba(248,113,113,0.12)", color: "var(--danger)", border: "1px solid rgba(248,113,113,0.3)" }}
-                                onClick={() => onForceApprove(i)}
-                            >
-                                <AlertOctagon size={13} /> Forçar Aprovação
-                            </button>
+                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                <button
+                                    className="btn"
+                                    style={{ padding: "6px 12px", fontSize: 12, background: "rgba(248,113,113,0.12)", color: "var(--danger)", border: "1px solid rgba(248,113,113,0.3)" }}
+                                    onClick={() => onForceApprove(i)}
+                                >
+                                    <AlertOctagon size={13} /> Forçar Aprovação
+                                </button>
+                                <button className="btn btn-ghost" style={{ padding: "4px 8px", color: "var(--accent)" }} onClick={() => onEdit(i)} title="Editar Original"><Edit size={14} /></button>
+                            </div>
                         </td>
                     </tr>
                 ))}
@@ -627,8 +650,35 @@ function LotePanel({
 }) {
     const supabase = createClient();
     const [forceApproveItem, setForceApproveItem] = useState<SaqueItem | null>(null);
+    const [editingItem, setEditingItem] = useState<SaqueItem | null>(null);
 
     const update = (updater: (l: LoteLocal) => LoteLocal) => onUpdateLote(lote.tipo_saque, updater);
+
+    function handleRemoveItem(id: string) {
+        update((l) => ({
+            ...l,
+            items: l.items.map((i) => 
+                i.id === id ? { ...i, status: "BLOQUEADO" as ItemStatus, motivo_bloqueio: "Removido manualmente pelo usuário." } : i
+            )
+        }));
+    }
+
+    function handleSaveEdit(updatedItem: SaqueItem) {
+        const validation = validateItem(
+            updatedItem.cpf_conta, 
+            updatedItem.cpf_favorecido, 
+            updatedItem.chave_pix, 
+            updatedItem.tipo_pix
+        );
+        
+        update((l) => ({
+            ...l,
+            items: l.items.map((i) => 
+                i.id === updatedItem.id ? { ...updatedItem, ...validation } : i
+            )
+        }));
+        setEditingItem(null);
+    }
 
     const approved = lote.items.filter((i) => i.status === "APROVADO");
     const revisao = lote.items.filter((i) => i.status === "REVISAO");
@@ -964,16 +1014,18 @@ function LotePanel({
                             ))}
                         </div>
                         <div style={{ overflowX: "auto" }}>
-                            {lote.activeTab === "APROVADO" && <AprovadosTable items={approved} onUpdateTipoPix={updateAprovadoTipo} />}
+                            {lote.activeTab === "APROVADO" && <AprovadosTable items={approved} onUpdateTipoPix={updateAprovadoTipo} onRemove={handleRemoveItem} onEdit={setEditingItem} />}
                             {lote.activeTab === "REVISAO" && (
                                 <RevisaoTable
                                     items={revisao}
                                     onUpdateChave={handleUpdateChave}
                                     onUpdateTipo={handleUpdateTipo}
                                     onSave={saveRevisaoItem}
+                                    onRemove={handleRemoveItem}
+                                    onEdit={setEditingItem}
                                 />
                             )}
-                            {lote.activeTab === "BLOQUEADO" && <BloqueadosTable items={bloqueados} onForceApprove={setForceApproveItem} />}
+                            {lote.activeTab === "BLOQUEADO" && <BloqueadosTable items={bloqueados} onForceApprove={setForceApproveItem} onEdit={setEditingItem} />}
                         </div>
                     </div>
                 )}
@@ -982,7 +1034,76 @@ function LotePanel({
             {forceApproveItem && (
                 <ForcarAprovacaoModal item={forceApproveItem} onConfirm={confirmForceApprove} onClose={() => setForceApproveItem(null)} />
             )}
+
+            {editingItem && (
+                <EditarSaqueModal item={editingItem} onSave={handleSaveEdit} onClose={() => setEditingItem(null)} />
+            )}
         </>
+    );
+}
+
+// ─── Modal Editar Saque ────────────────────────────────────────────────────────
+function EditarSaqueModal({ item, onSave, onClose }: { item: SaqueItem; onSave: (i: SaqueItem) => void; onClose: () => void; }) {
+    const [form, setForm] = useState(item);
+
+    return (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", animation: "fadeIn 0.2s" }}>
+            <div className="card" style={{ width: 440, padding: 24, boxShadow: "0 20px 40px rgba(0,0,0,0.2)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                    <h3 style={{ fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}><Edit size={16} color="var(--accent)" /> Editar Saque Original</h3>
+                    <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", opacity: 0.5 }}><X size={16} /></button>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div>
+                        <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--fg-dim)", marginBottom: 4 }}>Nome do Favorecido</label>
+                        <input className="input" value={form.nome_usuario} onChange={e => setForm({ ...form, nome_usuario: e.target.value })} style={{ width: "100%" }} />
+                    </div>
+                    
+                    <div style={{ display: "flex", gap: 12 }}>
+                        <div style={{ flex: 1 }}>
+                            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--fg-dim)", marginBottom: 4 }}>CPF Solicitante</label>
+                            <input className="input" value={form.cpf_conta} onChange={e => setForm({ ...form, cpf_conta: e.target.value })} style={{ width: "100%" }} />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--fg-dim)", marginBottom: 4 }}>CPF Favorecido</label>
+                            <input className="input" value={form.cpf_favorecido} onChange={e => setForm({ ...form, cpf_favorecido: e.target.value })} style={{ width: "100%" }} />
+                        </div>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 12 }}>
+                        <div style={{ width: 120 }}>
+                            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--fg-dim)", marginBottom: 4 }}>Tipo PIX</label>
+                            <select className="input" value={form.tipo_pix} onChange={e => setForm({ ...form, tipo_pix: (e.target.value as any) })} style={{ width: "100%" }}>
+                                {["EMAIL", "CPF", "CNPJ", "TELEFONE", "CHAVE_ALEATORIA"].map((o) => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--fg-dim)", marginBottom: 4 }}>Chave PIX Original</label>
+                            <input className="input" value={form.chave_pix} onChange={e => setForm({ ...form, chave_pix: e.target.value })} style={{ width: "100%" }} />
+                        </div>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 12 }}>
+                        <div style={{ flex: 1 }}>
+                            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--fg-dim)", marginBottom: 4 }}>Valor Solicitado (R$)</label>
+                            <input type="number" step="0.01" className="input" value={form.valor_solicitado} onChange={e => setForm({ ...form, valor_solicitado: parseFloat(e.target.value) || 0 })} style={{ width: "100%" }} />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--fg-dim)", marginBottom: 4 }}>Valor Real (R$)</label>
+                            <input type="number" step="0.01" className="input text-accent font-bold" value={form.valor_real} onChange={e => setForm({ ...form, valor_real: parseFloat(e.target.value) || 0 })} style={{ width: "100%" }} />
+                        </div>
+                    </div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
+                    <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+                    <button className="btn btn-primary" onClick={() => onSave(form)}>
+                        <Save size={14} /> Salvar Modificações
+                    </button>
+                </div>
+            </div>
+        </div>
     );
 }
 
