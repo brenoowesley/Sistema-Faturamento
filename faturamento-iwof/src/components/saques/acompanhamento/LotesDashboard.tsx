@@ -111,9 +111,7 @@ export default function LotesDashboard() {
             // Trigger Transfeera Sync
             const syncItems = formatted.map(f => ({
                 id: f.id,
-                transfeera_id: f.transfeera_transfer_id || null,
-                cpf_favorecido: f.cpf_favorecido,
-                valor_real: f.valor
+                transfeera_id: f.transfeera_transfer_id || null
             }));
             
             // Na pesquisa global não temos um único batch_id. 

@@ -15,9 +15,6 @@ export type TransfeeraStatus =
 export interface SyncItem {
     id: string;
     transfeera_id?: string | null;
-    cpf_favorecido?: string;
-    valor_real?: number;
-    valor?: number;
 }
 
 // Normalização do Status da Transfeera para nosso formato interno
@@ -85,29 +82,13 @@ export function useTransfeeraSync() {
                     const updatePromises = [];
 
                     for (const remoteTransfer of data.transfers) {
-                        // Tentativa 1: Match perfeito pelo integration_id
-                        let itemLocal = itensLocais.find(
+                        // Cruzamento rigoroso por ID 
+                        const itemLocal = itensLocais.find(
                             (item) => item.id && remoteTransfer.integration_id && 
                                       String(item.id).toLowerCase() === String(remoteTransfer.integration_id).toLowerCase()
                         );
 
-                        // Tentativa 2 (Fallback): Lotes do Excel não têm integration_id. Cruzamos por CPF e Valor.
-                        if (!itemLocal) {
-                            itemLocal = itensLocais.find((item) => {
-                                const localCpf = String(item.cpf_favorecido || "").replace(/\D/g, "");
-                                const remoteCpf = String(remoteTransfer.destination_bank_account?.cpf_cnpj || "").replace(/\D/g, "");
-                                
-                                const localValue = Number(item.valor_real || item.valor || 0);
-                                const remoteValue = Number(remoteTransfer.value || 0);
-
-                                return localCpf === remoteCpf && localValue === remoteValue && localCpf.length > 10;
-                            });
-                        }
-
-                        if (!itemLocal) {
-                            // console.warn(`[useTransfeeraSync] ⚠️ Saque ${remoteTransfer.id} não identificado localmente.`);
-                            continue;
-                        }
+                        if (!itemLocal) continue;
 
                         const normalizedStatus = normalizeTransfeeraStatus(remoteTransfer.status);
                         newStatuses[itemLocal.id.toLowerCase()] = normalizedStatus;
