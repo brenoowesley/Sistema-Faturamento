@@ -208,9 +208,11 @@ export async function POST(req: NextRequest) {
         for (const cons of consolidados) {
             const cliente = cons.clientes as any;
 
-            // Prevent duplicate HC/NC payload generation if the DB has split rows (NF and NC type) 
-            if (processedClientsGcp.has(cliente.id)) continue;
-            processedClientsGcp.add(cliente.id);
+            // Prevent duplicate HC/NC payload generation if the DB has split rows (NF and NC type)
+            // Chave composta: permite que o Queiroz emita faturas distintas por competência
+            const deduplicationKey = cons.data_competencia ? `${cliente.id}_${cons.data_competencia}` : cliente.id;
+            if (processedClientsGcp.has(deduplicationKey)) continue;
+            processedClientsGcp.add(deduplicationKey);
 
             const ciclo = cliente.ciclos_faturamento?.nome || "GERAL";
             const isNordestao = ciclo === "NORDESTÃO";
@@ -240,12 +242,13 @@ export async function POST(req: NextRequest) {
                 const splitDt = new Date(lote.queiroz_split_date + "T12:00:00");
 
                 if (cliente.nome_conta_azul?.includes('(Mês Anterior)') || cliente.razao_social?.includes('(Mês Anterior)')) {
-                    periodoCustom = `${formatDataSegura(lote.data_inicio_ciclo)} à ${formatDataSegura(lote.queiroz_split_date)}`;
+                    // Termina 1 dia antes da data de corte
+                    const prevDay = new Date(splitDt);
+                    prevDay.setDate(splitDt.getDate() - 1);
+                    periodoCustom = `${formatDataSegura(lote.data_inicio_ciclo)} à ${formatDataSegura(prevDay.toISOString())}`;
                 } else if (cliente.nome_conta_azul?.includes('(Mês Atual)') || cliente.razao_social?.includes('(Mês Atual)')) {
-                    // Dia seguinte ao corte
-                    const nextDay = new Date(splitDt);
-                    nextDay.setDate(splitDt.getDate() + 1);
-                    periodoCustom = `${formatDataSegura(nextDay.toISOString())} à ${formatDataSegura(lote.data_fim_ciclo)}`;
+                    // Inicia exatamente na data de corte
+                    periodoCustom = `${formatDataSegura(lote.queiroz_split_date)} à ${formatDataSegura(lote.data_fim_ciclo)}`;
                 }
             }
 
