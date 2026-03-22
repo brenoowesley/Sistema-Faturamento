@@ -13,8 +13,11 @@ export type TransfeeraStatus =
     | (string & {});
 
 export interface SyncItem {
-    id_interno: string;
+    id: string;
     transfeera_id?: string | null;
+    cpf_favorecido?: string;
+    valor_real?: number;
+    valor?: number;
 }
 
 // Normalização do Status da Transfeera para nosso formato interno
@@ -50,8 +53,8 @@ export function useTransfeeraSync() {
     /**
      * Sincroniza o status de múltiplos itens baseando-se no transfeera_batch_id.
      */
-    const syncBatch = useCallback(async (batchId: string | null, items: SyncItem[]) => {
-        if (!items || items.length === 0) {
+    const syncBatch = useCallback(async (batchId: string | null, itensLocais: SyncItem[]) => {
+        if (!itensLocais || itensLocais.length === 0) {
             console.log("[useTransfeeraSync] ⚠️ syncBatch chamado sem itens.");
             return;
         }
@@ -61,7 +64,7 @@ export function useTransfeeraSync() {
             return;
         }
 
-        console.log(`[useTransfeeraSync] 🔄 Iniciando sync para lote ${batchId} com ${items.length} itens locais.`);
+        console.log(`[useTransfeeraSync] 🔄 Iniciando sync para lote ${batchId} com ${itensLocais.length} itens locais.`);
         setIsSyncing(true);
 
         try {
@@ -83,15 +86,15 @@ export function useTransfeeraSync() {
 
                     for (const remoteTransfer of data.transfers) {
                         // Tentativa 1: Match perfeito pelo integration_id
-                        let itemLocal = items.find(
-                            (item) => item.id_interno && remoteTransfer.integration_id && 
-                                      String(item.id_interno).toLowerCase() === String(remoteTransfer.integration_id).toLowerCase()
+                        let itemLocal = itensLocais.find(
+                            (item) => item.id && remoteTransfer.integration_id && 
+                                      String(item.id).toLowerCase() === String(remoteTransfer.integration_id).toLowerCase()
                         );
 
                         // Tentativa 2 (Fallback): Lotes do Excel não têm integration_id. Cruzamos por CPF e Valor.
                         if (!itemLocal) {
-                            itemLocal = items.find((item: any) => {
-                                const localCpf = String(item.cpf_favorecido || item.cpf_conta || "").replace(/\D/g, "");
+                            itemLocal = itensLocais.find((item) => {
+                                const localCpf = String(item.cpf_favorecido || "").replace(/\D/g, "");
                                 const remoteCpf = String(remoteTransfer.destination_bank_account?.cpf_cnpj || "").replace(/\D/g, "");
                                 
                                 const localValue = Number(item.valor_real || item.valor || 0);
@@ -107,7 +110,7 @@ export function useTransfeeraSync() {
                         }
 
                         const normalizedStatus = normalizeTransfeeraStatus(remoteTransfer.status);
-                        newStatuses[itemLocal.id_interno] = normalizedStatus;
+                        newStatuses[itemLocal.id.toLowerCase()] = normalizedStatus;
 
                         // Preparar update para o Supabase
                         const payload: any = { status_item: normalizedStatus };
@@ -126,7 +129,7 @@ export function useTransfeeraSync() {
                             supabase
                                 .from("itens_saque")
                                 .update(payload)
-                                .eq("id", itemLocal.id_interno)
+                                .eq("id", itemLocal.id)
                         );
                     }
 

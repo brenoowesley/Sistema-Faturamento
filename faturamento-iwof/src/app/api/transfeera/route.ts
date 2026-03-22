@@ -305,10 +305,9 @@ export async function POST(req: NextRequest) {
                 const tRes = await fetch(`${baseUrl}/transfer?batch_id=${batchId}&page=${currentPage}`, {
                     method: "GET",
                     headers: {
-                        "Authorization": `Bearer ${token}`,
-                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
                         "User-Agent": UA_HEADER,
-                        "Accept": "application/json",
+                        Accept: "application/json",
                     },
                 });
 
@@ -318,6 +317,7 @@ export async function POST(req: NextRequest) {
                 }
 
                 const tPayload = await tRes.json();
+                // Extrai os dados (seja da propriedade data ou do próprio array)
                 const list = Array.isArray(tPayload.data) ? tPayload.data : (Array.isArray(tPayload) ? tPayload : []);
                 
                 if (list.length > 0) {

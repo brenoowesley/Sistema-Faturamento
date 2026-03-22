@@ -58,8 +58,10 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
 
         // Mapear para o novo formato de sincronização
         const syncItems = approvedItems.map(item => ({
-            id_interno: item.id,
-            transfeera_id: item.transfeera_transfer_id || null
+            id: item.id,
+            transfeera_id: item.transfeera_transfer_id || null,
+            cpf_favorecido: item.cpf_favorecido,
+            valor_real: item.valor
         }));
 
         console.log(`[LoteDetalhe] ⚡ Tentando sincronizar ${syncItems.length} itens:`, syncItems);
