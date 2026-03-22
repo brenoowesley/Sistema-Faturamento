@@ -92,10 +92,16 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
     const filteredItens = useMemo(() => {
         let result = itens;
 
-        if (statusFilter === "EXPORTADOS") {
+        if (statusFilter === "CONCLUIDOS") {
+            result = result.filter(i => i.status_item === "CONCLUIDO");
+        } else if (statusFilter === "PROCESSANDO") {
             result = result.filter(i => i.status_item === "APROVADO");
+        } else if (statusFilter === "FALHAS") {
+            result = result.filter(i => i.status_item === "FALHA");
+        } else if (statusFilter === "BLOQUEADOS") {
+            result = result.filter(i => i.status_item === "BLOQUEADO");
         } else if (statusFilter === "REMOVIDOS") {
-            result = result.filter(i => i.status_item !== "APROVADO");
+            result = result.filter(i => i.status_item === "REMOVIDO");
         }
 
         if (searchTerm) {
@@ -184,8 +190,11 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
                         onChange={(e) => setStatusFilter(e.target.value)}
                     >
                         <option value="TODOS">Todos os Registros</option>
-                        <option value="EXPORTADOS">Apenas Exportados</option>
-                        <option value="REMOVIDOS">Removidos / Bloqueados</option>
+                        <option value="CONCLUIDOS">Concluídos</option>
+                        <option value="PROCESSANDO">Em Processamento</option>
+                        <option value="FALHAS">Falhas / Devolvidos</option>
+                        <option value="BLOQUEADOS">Bloqueados Internamente</option>
+                        <option value="REMOVIDOS">Removidos / Cancelados</option>
                     </select>
                 </div>
                 <div className="text-sm text-fg-muted whitespace-nowrap">
