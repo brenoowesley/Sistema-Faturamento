@@ -295,10 +295,9 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ error: "batchId é obrigatório" }, { status: 400 });
             }
 
-            console.log(`[Transfeera] ▶ Buscando transferências (V2) do lote ${batchId}...`);
+            console.log(`[Transfeera] ▶ Buscando detalhes do lote ${batchId}...`);
 
-            // Utilizando a API V2 oficial da Transfeera
-            const tRes = await fetch(`${baseUrl}/transferencias?id_lote=${batchId}`, {
+            const tRes = await fetch(`${baseUrl}/batch/${batchId}`, {
                 method: "GET",
                 headers: {
                     Authorization: `Bearer ${token}`,
@@ -309,16 +308,16 @@ export async function POST(req: NextRequest) {
 
             if (!tRes.ok) {
                 const errText = await tRes.text();
-                console.error(`[Transfeera] Erro na requisição V2 do lote ${batchId}:`, errText);
-                return NextResponse.json({ success: false, error: "Erro ao buscar lote" }, { status: tRes.status });
+                console.error(`[Transfeera] Erro na requisição do lote ${batchId}:`, errText);
+                return NextResponse.json({ success: false, error: "Erro ao buscar detalhes do lote" }, { status: tRes.status });
             }
 
             const tPayload = await tRes.json();
 
-            // Garante que é um array, independentemente do formato (data ou raiz)
-            const list = Array.isArray(tPayload.data) ? tPayload.data : (Array.isArray(tPayload) ? tPayload : []);
+            // Extrai o array de transferências de dentro do objeto do lote retornado pela API
+            const list = tPayload.transfers || (tPayload.data && tPayload.data.transfers) || [];
 
-            console.log(`[Transfeera] ✅ ${list.length} transferências recuperadas do lote ${batchId} (V2).`);
+            console.log(`[Transfeera] ✅ ${list.length} transferências recuperadas de dentro do lote ${batchId}.`);
             return NextResponse.json({ success: true, transfers: list });
         }
 
