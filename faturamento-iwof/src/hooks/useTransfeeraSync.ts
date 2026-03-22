@@ -52,24 +52,18 @@ export function useTransfeeraSync() {
     const [isSyncing, setIsSyncing] = useState(false);
 
     /**
-     * Sincroniza o status de múltiplos itens baseando-se no transfeera_batch_id.
+     * Sincroniza o status de múltiplos itens baseando-se no transfeera_batch_id delegando ao backend.
      */
     const syncBatch = useCallback(async (batchId: string | null, itensLocais: SyncItem[]) => {
-        if (!itensLocais || itensLocais.length === 0) {
-            console.log("[useTransfeeraSync] ⚠️ syncBatch chamado sem itens.");
-            return;
-        }
-
         if (!batchId) {
             console.log("[useTransfeeraSync] ⏭️ Lote sem transfeera_batch_id, abortando rastreio por lote.");
             return;
         }
 
-        console.log(`[useTransfeeraSync] 🔄 Iniciando sync para lote ${batchId} com ${itensLocais.length} itens locais.`);
+        console.log(`[useTransfeeraSync] 🔄 Delegando sync do lote ${batchId} para o backend...`);
         setIsSyncing(true);
 
         try {
-            console.log("[useTransfeeraSync] 🛰️ Buscando transferências do lote...");
             const res = await fetch("/api/transfeera", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -81,80 +75,22 @@ export function useTransfeeraSync() {
 
             if (res.ok) {
                 const data = await res.json();
-                
-                if (data.transfers && data.transfers.length > 0) {
-                    console.log("🔍 [RAIO-X] Estrutura completa das 5 transferências mais recentes:");
-                    console.log(JSON.stringify(data.transfers.slice(0, 5), null, 2));
-                }
-
-                if (data.success && data.transfers) {
-                    const newStatuses: Record<string, TransfeeraStatus> = {};
-                    const updatePromises = [];
-
-                    for (const remoteTransfer of data.transfers) {
-                        // Extrai o ID de integração oficial que recebemos no payload
-                        const remoteId = remoteTransfer.integration_id || remoteTransfer.id_integracao;
-                        if (!remoteId) continue;
-
-                        // Match 100% determinístico por UUID
-                        const itemLocal = itensLocais.find(
-                            (item) => item.id && String(item.id).toLowerCase() === String(remoteId).toLowerCase()
-                        );
-
-                        if (!itemLocal) continue;
-
-                        console.log(`🔍 [MATCH PERFEITO] UUID: ${itemLocal.id} | Status: ${remoteTransfer.status}`);
-
-                        const normalizedStatus = normalizeTransfeeraStatus(remoteTransfer.status);
-                        newStatuses[itemLocal.id] = normalizedStatus;
-
-                        // Payload de atualização para o banco de dados
-                        const payload: any = { 
-                            status_item: normalizedStatus,
-                            transfeera_transfer_id: String(remoteTransfer.id)
-                        };
-                        
-                        // Captura do Comprovante (as chaves vieram confirmadas no payload: bank_receipt_url e receipt_url)
-                        const comprovanteLink = remoteTransfer.bank_receipt_url || remoteTransfer.receipt_url;
-                        if (comprovanteLink) {
-                            payload.comprovante_url = comprovanteLink;
-                        }
-
-                        updatePromises.push(
-                            supabase
-                                .from("itens_saque")
-                                .update(payload)
-                                .eq("id", itemLocal.id)
-                        );
-                    }
-
-                    if (updatePromises.length > 0) {
-                        const results = await Promise.all(updatePromises);
-                        const errors = results.filter(r => r.error);
-                        if (errors.length > 0) {
-                            console.error(`[useTransfeeraSync] ❌ Falha ao salvar no Supabase:`, errors);
-                        } else {
-                            console.log(`[useTransfeeraSync] ✅ ${updatePromises.length} itens salvos perfeitamente no banco de dados!`);
-                            
-                            // ADICIONE ESTA LINHA PARA ATUALIZAR A INTERFACE IMEDIATAMENTE:
-                            window.location.reload();
-                        }
-                    }
-
-                    // Atualiza a tela instantaneamente
-                    setStatuses((prev) => ({ ...prev, ...newStatuses }));
+                if (data.success) {
+                    console.log(`[useTransfeeraSync] ✅ Sync via backend concluído com sucesso. Recarregando a interface...`);
+                    // O backend já atualizou o Supabase. Apenas recarregamos para buscar o estado atual.
+                    window.location.reload();
                 } else {
-                    console.log(`[useTransfeeraSync] ⚠️ API respondeu com sucesso mas sem transfers.`);
+                    console.error("[useTransfeeraSync] ⚠️ Backend respondeu com falha:", data);
                 }
             } else {
-                console.error("Falha ao buscar lote na Transfeera:", res.status);
+                console.error("Falha ao buscar lote na action do backend:", res.status);
             }
         } catch (err) {
             console.error("Erro de rede ao sincronizar lote:", err);
         } finally {
             setIsSyncing(false);
         }
-    }, [supabase]);
+    }, []);
 
     /**
      * Baixa o comprovante PDF de uma transferência.
