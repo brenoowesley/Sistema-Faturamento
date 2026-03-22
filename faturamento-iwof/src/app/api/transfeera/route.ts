@@ -332,19 +332,22 @@ export async function POST(req: NextRequest) {
             // 💡 O PULO DO GATO: Atualiza o Supabase direto do Backend usando poder de Admin (ignora bloqueios do browser)
             if (list.length > 0) {
                 const supabaseAdmin = createAdminClient();
-                const updatePromises = list.map((t: any) => {
-                    const remoteId = t.integration_id || t.id_integracao;
-                    if (!remoteId) return Promise.resolve();
+                
+                // 1. Verifica se a chave de segurança está configurada
+                if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+                    console.error("🚨 [ALERTA CRÍTICO] SUPABASE_SERVICE_ROLE_KEY não está configurada! O backend não tem permissão de Admin.");
+                }
 
-                    // Normalização e Salvamento Separado
+                const updatePromises = list.map(async (t: any) => {
+                    const remoteId = t.integration_id || t.id_integracao;
+                    if (!remoteId) return null;
+
                     const s = String(t.status || "").toUpperCase().trim();
-                    
                     const payload: any = { 
-                        status_transfeera: s, // Guarda o status original da Transfeera na nova coluna!
+                        status_transfeera: s,
                         transfeera_transfer_id: String(t.id)
                     };
 
-                    // Atualiza o status_item interno APENAS se for um estado final (para fechar o ciclo do seu sistema)
                     if (["FINALIZADA", "FINALIZADO", "PAGO", "CONCLUIDO", "CONCLUÍDO", "EFETIVADO"].includes(s)) payload.status_item = "CONCLUIDO";
                     else if (["FALHA", "FAILED", "ERROR", "REJEITADA", "DEVOLVIDA", "DEVOLVIDO", "RETURNED"].includes(s)) payload.status_item = "ERRO";
                     else if (["CANCELADA", "CANCELADO"].includes(s)) payload.status_item = "REMOVIDO";
@@ -352,11 +355,20 @@ export async function POST(req: NextRequest) {
                     const comprovanteLink = t.bank_receipt_url || t.receipt_url;
                     if (comprovanteLink) payload.comprovante_url = comprovanteLink;
 
-                    return supabaseAdmin.from("itens_saque").update(payload).eq("id", remoteId);
+                    // 2. Faz o update e EXIGE que o Supabase reporte o erro se falhar
+                    const { error } = await supabaseAdmin.from("itens_saque").update(payload).eq("id", remoteId);
+                    
+                    if (error) {
+                        console.error(`❌ [Supabase ERRO] Falha ao atualizar saque ${remoteId}:`, error.message);
+                    } else {
+                        console.log(`✅ [Supabase OK] Saque ${remoteId} atualizado no banco!`);
+                    }
+                    
+                    return error;
                 });
 
                 await Promise.all(updatePromises);
-                console.log(`[Transfeera] ✅ ${list.length} itens sincronizados no Supabase pelo Backend!`);
+                console.log(`[Transfeera] 🏁 Fim do processamento de banco de dados.`);
             }
 
             return NextResponse.json({ success: true, transfers: list });
