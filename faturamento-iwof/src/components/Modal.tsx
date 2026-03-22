@@ -12,26 +12,10 @@ interface ModalProps {
 }
 
 export default function Modal({ isOpen, onClose, title, children, width = "560px" }: ModalProps) {
-    const overlayRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onClose();
-        };
-        if (isOpen) document.addEventListener("keydown", handleEsc);
-        return () => document.removeEventListener("keydown", handleEsc);
-    }, [isOpen, onClose]);
-
     if (!isOpen) return null;
 
     return (
-        <div
-            ref={overlayRef}
-            className="modal-overlay"
-            onClick={(e) => {
-                if (e.target === overlayRef.current) onClose();
-            }}
-        >
+        <div className="modal-overlay">
             <div className="modal-container card-glass" style={{ maxWidth: width }}>
                 <div className="modal-header">
                     <h2 className="modal-title">{title}</h2>

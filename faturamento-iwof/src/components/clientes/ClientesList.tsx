@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Plus, Search, ChevronLeft, ChevronRight, Pencil, Trash2, Users, UserCheck, UserX, Clock, Download, ExternalLink, Filter, X } from "lucide-react";
+import { Plus, Search, ChevronLeft, ChevronRight, Pencil, Trash2, Users, UserCheck, UserX, Clock, Download, ExternalLink, Filter, X, Loader2 } from "lucide-react";
 import Modal from "@/components/Modal";
 import { createClient } from "@/lib/supabase/client";
 import * as XLSX from "xlsx";
@@ -84,6 +84,7 @@ interface ClienteForm {
     emails_faturamento: string;
     status: boolean;
     loja_mae_id: string;
+    codigo_ibge: string;
 }
 
 const EMPTY_FORM: ClienteForm = {
@@ -111,6 +112,7 @@ const EMPTY_FORM: ClienteForm = {
     emails_faturamento: "",
     status: true,
     loja_mae_id: "",
+    codigo_ibge: "",
 };
 
 const PAGE_SIZES = [25, 50, 100] as const;
@@ -159,6 +161,7 @@ function ClientesListContent() {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [form, setForm] = useState<ClienteForm>(EMPTY_FORM);
     const [saving, setSaving] = useState(false);
+    const [cepLoading, setCepLoading] = useState(false);
 
     /* delete confirmation */
     const [deleteTarget, setDeleteTarget] = useState<Cliente | null>(null);
@@ -306,8 +309,35 @@ function ClientesListContent() {
             emails_faturamento: c.emails_faturamento ?? "",
             status: c.status ?? true,
             loja_mae_id: c.loja_mae_id ?? "",
+            codigo_ibge: (c as any).codigo_ibge ?? "",
         });
         setModalOpen(true);
+    };
+
+    /* --- ViaCEP auto-fill --- */
+    const buscarCep = async (rawCep: string) => {
+        const cepLimpo = rawCep.replace(/\D/g, "");
+        if (cepLimpo.length !== 8) return;
+        setCepLoading(true);
+        try {
+            const res = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
+            const data = await res.json();
+            if (!data.erro) {
+                setForm(prev => ({
+                    ...prev,
+                    endereco: data.logradouro || prev.endereco,
+                    bairro: data.bairro || prev.bairro,
+                    cidade: data.localidade || prev.cidade,
+                    estado: data.uf || prev.estado,
+                    complemento: data.complemento || prev.complemento,
+                    codigo_ibge: data.ibge || prev.codigo_ibge,
+                }));
+            }
+        } catch (err) {
+            console.error("Erro ao buscar CEP:", err);
+        } finally {
+            setCepLoading(false);
+        }
     };
 
     /* refresh counts after mutation */
@@ -340,6 +370,7 @@ function ClientesListContent() {
             nome_conta_azul: form.nome_conta_azul || null,
             emails_faturamento: form.emails_faturamento || null,
             loja_mae_id: form.loja_mae_id || null,
+            codigo_ibge: form.codigo_ibge || null,
         };
 
         if (editingId) {
@@ -851,10 +882,20 @@ function ClientesListContent() {
                     <div className="form-grid">
                         <div className="input-group">
                             <label className="input-label">CEP</label>
-                            <input className="input" style={{ paddingLeft: 14 }}
-                                value={form.cep}
-                                onChange={(e) => setForm({ ...form, cep: e.target.value })}
-                            />
+                            <div style={{ position: 'relative' }}>
+                                <input className="input" style={{ paddingLeft: 14, paddingRight: cepLoading ? 36 : 14 }}
+                                    value={form.cep}
+                                    onChange={(e) => setForm({ ...form, cep: e.target.value })}
+                                    onBlur={() => buscarCep(form.cep)}
+                                    placeholder="00000-000"
+                                />
+                                {cepLoading && (
+                                    <Loader2 size={16} className="animate-spin" style={{
+                                        position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+                                        color: 'var(--accent)'
+                                    }} />
+                                )}
+                            </div>
                         </div>
                         <div className="input-group">
                             <label className="input-label">Estado</label>
@@ -896,6 +937,15 @@ function ClientesListContent() {
                             <input className="input" style={{ paddingLeft: 14 }}
                                 value={form.complemento}
                                 onChange={(e) => setForm({ ...form, complemento: e.target.value })}
+                            />
+                        </div>
+                        <div className="input-group">
+                            <label className="input-label">Cód. IBGE</label>
+                            <input className="input" style={{ paddingLeft: 14, opacity: 0.7 }}
+                                value={form.codigo_ibge}
+                                readOnly
+                                placeholder="Preenchido via CEP"
+                                title="Preenchido automaticamente via CEP"
                             />
                         </div>
                     </div>
