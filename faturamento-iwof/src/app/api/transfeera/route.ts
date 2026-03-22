@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // ─── Token Cache ────────────────────────────────────────────────────────────────
 let cachedTransfeeraToken: string | null = null;
@@ -300,10 +301,7 @@ export async function POST(req: NextRequest) {
         }
 
         // ═══════════════════════════════════════════════════════════════════════
-        // ACTION: status_by_batch_id — Rastreio por Lote em vez de iteração
-        // ═══════════════════════════════════════════════════════════════════════
-        // ═══════════════════════════════════════════════════════════════════════
-        // ACTION: status_by_batch_id — Rota Oficial Exata (/batch/{id}/transfer)
+        // ACTION: status_by_batch_id — Busca oficial e Sync via Backend (Seguro)
         // ═══════════════════════════════════════════════════════════════════════
         if (action === "status_by_batch_id") {
             const { batchId } = body;
@@ -311,8 +309,7 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ error: "batchId é obrigatório" }, { status: 400 });
             }
 
-            console.log(`[Transfeera] ▶ Teste Raio-X: Buscando rota /batch/${batchId}/transfer pura...`);
-
+            console.log(`[Transfeera] ▶ Buscando lote ${batchId} e sincronizando via Backend...`);
             const url = `${baseUrl}/batch/${batchId}/transfer`;
             
             const tRes = await fetch(url, {
@@ -325,19 +322,42 @@ export async function POST(req: NextRequest) {
             });
 
             const tPayload = await tRes.json();
-
-            console.log(`[Transfeera] 🔍 PAYLOAD COMPLETO DA ROTA OFICIAL:`);
-            console.log(JSON.stringify(tPayload, null, 2));
-
             if (!tRes.ok) {
                 console.error(`[Transfeera] ❌ Erro na requisição:`, tPayload);
                 return NextResponse.json({ success: false, error: "Erro na Transfeera", details: tPayload }, { status: tRes.status });
             }
 
-            // Extrai o array dependendo de como a Transfeera devolver (direto ou dentro de 'data')
             const list = Array.isArray(tPayload) ? tPayload : (tPayload.data || []);
             
-            console.log(`[Transfeera] ✅ Encontradas ${list.length} transferências no payload.`);
+            // 💡 O PULO DO GATO: Atualiza o Supabase direto do Backend usando poder de Admin (ignora bloqueios do browser)
+            if (list.length > 0) {
+                const supabaseAdmin = createAdminClient();
+                const updatePromises = list.map((t: any) => {
+                    const remoteId = t.integration_id || t.id_integracao;
+                    if (!remoteId) return Promise.resolve();
+
+                    // Normalização de Status no Backend
+                    const s = String(t.status || "").toUpperCase().trim();
+                    let statusItem = "EXPORTADO";
+                    if (["FINALIZADA", "FINALIZADO", "PAGO", "CONCLUIDO", "CONCLUÍDO", "EFETIVADO"].includes(s)) statusItem = "CONCLUIDO";
+                    else if (["FALHA", "FAILED", "ERROR", "REJEITADA", "DEVOLVIDA", "DEVOLVIDO", "RETURNED"].includes(s)) statusItem = "ERRO";
+                    else if (["CANCELADA", "CANCELADO"].includes(s)) statusItem = "REMOVIDO";
+
+                    const payload: any = { 
+                        status_item: statusItem,
+                        transfeera_transfer_id: String(t.id)
+                    };
+                    
+                    const comprovanteLink = t.bank_receipt_url || t.receipt_url;
+                    if (comprovanteLink) payload.comprovante_url = comprovanteLink;
+
+                    return supabaseAdmin.from("itens_saque").update(payload).eq("id", remoteId);
+                });
+
+                await Promise.all(updatePromises);
+                console.log(`[Transfeera] ✅ ${list.length} itens sincronizados no Supabase pelo Backend!`);
+            }
+
             return NextResponse.json({ success: true, transfers: list });
         }
 
