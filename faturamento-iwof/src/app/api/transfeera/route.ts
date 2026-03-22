@@ -295,50 +295,31 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ error: "batchId é obrigatório" }, { status: 400 });
             }
 
-            console.log(`[Transfeera] ▶ Buscando transferências do lote ${batchId}...`);
+            console.log(`[Transfeera] ▶ Buscando transferências (V2) do lote ${batchId}...`);
 
-            let allTransfers: any[] = [];
-            let currentPage = 1;
-            let hasMore = true;
+            // Utilizando a API V2 oficial da Transfeera
+            const tRes = await fetch(`${baseUrl}/transferencias?id_lote=${batchId}`, {
+                method: "GET",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "User-Agent": UA_HEADER,
+                    Accept: "application/json",
+                },
+            });
 
-            while (hasMore) {
-                // Retornamos para o endpoint correto de Lotes, que aceita o parâmetro ?page=
-                const tRes = await fetch(`${baseUrl}/batch/${batchId}/transfer?page=${currentPage}`, {
-                    method: "GET",
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                        "User-Agent": UA_HEADER,
-                        Accept: "application/json",
-                    },
-                });
-
-                if (!tRes.ok) {
-                    const errText = await tRes.text();
-                    console.error(`[Transfeera] Erro na requisição da página ${currentPage}:`, errText);
-                    break;
-                }
-
-                const tPayload = await tRes.json();
-                
-                // A Transfeera pode retornar o array dentro de "data" ou na raiz
-                const list = Array.isArray(tPayload.data) ? tPayload.data : (Array.isArray(tPayload) ? tPayload : []);
-                
-                if (list.length > 0) {
-                    allTransfers.push(...list);
-                }
-
-                // Verifica os metadados para saber se existe uma próxima página (limite padrão é 45 itens por página)
-                if (tPayload.metadata && tPayload.metadata.pagination) {
-                    const { itemsPerPage, totalItems } = tPayload.metadata.pagination;
-                    hasMore = currentPage < Math.ceil(totalItems / itemsPerPage);
-                    currentPage++;
-                } else {
-                    hasMore = false;
-                }
+            if (!tRes.ok) {
+                const errText = await tRes.text();
+                console.error(`[Transfeera] Erro na requisição V2 do lote ${batchId}:`, errText);
+                return NextResponse.json({ success: false, error: "Erro ao buscar lote" }, { status: tRes.status });
             }
 
-            console.log(`[Transfeera] ✅ ${allTransfers.length} transferências recuperadas no total.`);
-            return NextResponse.json({ success: true, transfers: allTransfers });
+            const tPayload = await tRes.json();
+
+            // Garante que é um array, independentemente do formato (data ou raiz)
+            const list = Array.isArray(tPayload.data) ? tPayload.data : (Array.isArray(tPayload) ? tPayload : []);
+
+            console.log(`[Transfeera] ✅ ${list.length} transferências recuperadas do lote ${batchId} (V2).`);
+            return NextResponse.json({ success: true, transfers: list });
         }
 
         return NextResponse.json({ error: "Invalid action" }, { status: 400 });
