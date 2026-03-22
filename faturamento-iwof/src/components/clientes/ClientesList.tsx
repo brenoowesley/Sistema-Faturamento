@@ -108,7 +108,7 @@ const EMPTY_FORM: ClienteForm = {
     nome_conta_azul: "",
     ciclo_faturamento_id: "",
     tempo_pagamento_dias: 30,
-    boleto_unificado: false,
+    boleto_unificado: true,
     emails_faturamento: "",
     status: true,
     loja_mae_id: "",
