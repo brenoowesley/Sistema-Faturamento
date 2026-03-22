@@ -301,8 +301,8 @@ export async function POST(req: NextRequest) {
             let currentPage = 1;
 
             while (true) {
-                // Rota oficial com paginação para puxar grandes volumes
-                const url = `${baseUrl}/batch/${batchId}/transfer?page=${currentPage}&per_page=100`;
+                // Rota oficial com paginação (sem o per_page que é bloqueado pela API)
+                const url = `${baseUrl}/batch/${batchId}/transfer?page=${currentPage}`;
                 
                 const tRes = await fetch(url, {
                     method: "GET",
@@ -316,20 +316,20 @@ export async function POST(req: NextRequest) {
                 if (!tRes.ok) {
                     const errText = await tRes.text();
                     console.error(`[Transfeera] ❌ Erro na requisição da página ${currentPage}:`, errText);
-                    break; // Interrompe o loop em caso de erro, mas salva o que já foi resgatado
+                    
+                    // Se a API disser que "page" também não é permitido, significa que ela devolve tudo de uma vez.
+                    // Nesse caso, interrompemos o loop.
+                    break; 
                 }
 
                 const tPayload = await tRes.json();
                 
-                // Debug temporário para inspecionar o formato exato da resposta
                 if (currentPage === 1) {
                     console.log(`[Transfeera] 🔍 Payload bruto (pág 1):`, JSON.stringify(tPayload).substring(0, 300));
                 }
 
-                // Extrai o array (suporta o retorno direto ou encapsulado em "data")
                 const list = Array.isArray(tPayload) ? tPayload : (tPayload.data || []);
                 
-                // Condição de parada: se a página vier vazia, esgotamos os itens do lote
                 if (list.length === 0) {
                     break;
                 }
