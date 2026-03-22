@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
-import { Plus, Search, ChevronLeft, ChevronRight, Pencil, Trash2, Users, UserCheck, UserX, Clock, Download, ExternalLink } from "lucide-react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { Plus, Search, ChevronLeft, ChevronRight, Pencil, Trash2, Users, UserCheck, UserX, Clock, Download, ExternalLink, Filter, X } from "lucide-react";
 import Modal from "@/components/Modal";
 import { createClient } from "@/lib/supabase/client";
 import * as XLSX from "xlsx";
@@ -126,15 +126,33 @@ export default function ClientesList() {
 function ClientesListContent() {
     const supabase = createClient();
     const searchParams = useSearchParams();
+    const router = useRouter();
     const initialSearch = searchParams.get("q") || "";
 
     const [clientes, setClientes] = useState<Cliente[]>([]);
     const [ciclos, setCiclos] = useState<Ciclo[]>([]);
+    const [ufs, setUfs] = useState<string[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState(initialSearch);
     const [page, setPage] = useState(0);
     const [total, setTotal] = useState(0);
     const [pageSize, setPageSize] = useState<number>(25);
+
+    /* advanced filters (URL-synced) */
+    const [filterUf, setFilterUf] = useState(searchParams.get("uf") || "");
+    const [filterCiclo, setFilterCiclo] = useState(searchParams.get("ciclo") || "");
+    type BoletoFilter = "" | "sim" | "nao";
+    const [filterBoleto, setFilterBoleto] = useState<BoletoFilter>((searchParams.get("boleto") as BoletoFilter) || "");
+
+    /* URL sync helper */
+    const syncFiltersToUrl = useCallback((overrides: Record<string, string> = {}) => {
+        const params = new URLSearchParams();
+        const vals: Record<string, string> = {
+            q: search, uf: filterUf, ciclo: filterCiclo, boleto: filterBoleto, ...overrides
+        };
+        Object.entries(vals).forEach(([k, v]) => { if (v) params.set(k, v); });
+        router.replace(`?${params.toString()}`, { scroll: false });
+    }, [search, filterUf, filterCiclo, filterBoleto, router]);
 
     /* modal state */
     const [modalOpen, setModalOpen] = useState(false);
@@ -151,7 +169,7 @@ function ClientesListContent() {
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("todos");
     const [counts, setCounts] = useState({ todos: 0, ativos: 0, inativos: 0, pendentes: 0 });
 
-    /* fetch ciclos */
+    /* fetch ciclos + distinct UFs */
     useEffect(() => {
         supabase
             .from("ciclos_faturamento")
@@ -159,6 +177,17 @@ function ClientesListContent() {
             .order("nome")
             .then(({ data }) => {
                 if (data) setCiclos(data);
+            });
+        supabase
+            .from("clientes")
+            .select("estado")
+            .not("estado", "is", null)
+            .neq("estado", "")
+            .then(({ data }) => {
+                if (data) {
+                    const unique = [...new Set(data.map((d: any) => d.estado?.toUpperCase()).filter(Boolean))];
+                    setUfs(unique.sort());
+                }
             });
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
@@ -203,6 +232,12 @@ function ClientesListContent() {
             );
         }
 
+        /* apply advanced filters */
+        if (filterUf)    query = query.eq("estado", filterUf);
+        if (filterCiclo) query = query.eq("ciclo_faturamento_id", filterCiclo);
+        if (filterBoleto === "sim")  query = query.eq("boleto_unificado", true);
+        if (filterBoleto === "nao")  query = query.eq("boleto_unificado", false);
+
         /* apply status filter */
         if (statusFilter === "ativos") {
             query = query
@@ -216,8 +251,6 @@ function ClientesListContent() {
             query = query.eq("status", false);
         } else if (statusFilter === "pendentes") {
             query = query.eq("status", true);
-            // pendentes = ativos but missing some operational data
-            // We use or() to catch rows missing any operational field
             query = query.or(
                 "nome_conta_azul.is.null,nome_conta_azul.eq.,ciclo_faturamento_id.is.null,email_contato.is.null,email_contato.eq."
             );
@@ -228,7 +261,7 @@ function ClientesListContent() {
         setTotal(count ?? 0);
         setLoading(false);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [page, search, statusFilter, pageSize]);
+    }, [page, search, statusFilter, pageSize, filterUf, filterCiclo, filterBoleto]);
 
     useEffect(() => {
         fetchClientes();
@@ -371,6 +404,12 @@ function ClientesListContent() {
                 `razao_social.ilike.%${search}%,cnpj.ilike.%${search}%,nome_fantasia.ilike.%${search}%,nome.ilike.%${search}%`
             );
         }
+        /* apply advanced filters to export too */
+        if (filterUf)    query = query.eq("estado", filterUf);
+        if (filterCiclo) query = query.eq("ciclo_faturamento_id", filterCiclo);
+        if (filterBoleto === "sim")  query = query.eq("boleto_unificado", true);
+        if (filterBoleto === "nao")  query = query.eq("boleto_unificado", false);
+
         if (statusFilter === "ativos") {
             query = query.eq("status", true)
                 .not("nome_conta_azul", "is", null).neq("nome_conta_azul", "")
@@ -450,6 +489,53 @@ function ClientesListContent() {
                 ))}
             </div>
 
+            {/* Advanced Filters */}
+            <div className="card" style={{ padding: '12px 16px', marginBottom: 12 }}>
+                <div className="flex items-center gap-3 flex-wrap">
+                    <Filter size={14} style={{ color: 'var(--fg-dim)', flexShrink: 0 }} />
+                    <select
+                        className="input text-sm"
+                        style={{ width: 130, paddingLeft: 10 }}
+                        value={filterUf}
+                        onChange={(e) => { setFilterUf(e.target.value); setPage(0); syncFiltersToUrl({ uf: e.target.value }); }}
+                    >
+                        <option value="">Todos UFs</option>
+                        {ufs.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
+                    </select>
+                    <select
+                        className="input text-sm"
+                        style={{ width: 170, paddingLeft: 10 }}
+                        value={filterCiclo}
+                        onChange={(e) => { setFilterCiclo(e.target.value); setPage(0); syncFiltersToUrl({ ciclo: e.target.value }); }}
+                    >
+                        <option value="">Todos Ciclos</option>
+                        {ciclos.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                    </select>
+                    <select
+                        className="input text-sm"
+                        style={{ width: 160, paddingLeft: 10 }}
+                        value={filterBoleto}
+                        onChange={(e) => { setFilterBoleto(e.target.value as BoletoFilter); setPage(0); syncFiltersToUrl({ boleto: e.target.value }); }}
+                    >
+                        <option value="">Boleto: Todos</option>
+                        <option value="sim">Boleto Unificado</option>
+                        <option value="nao">Boleto Separado</option>
+                    </select>
+                    {(filterUf || filterCiclo || filterBoleto) && (
+                        <button
+                            className="btn btn-ghost text-xs"
+                            style={{ padding: '4px 10px', color: 'var(--danger)' }}
+                            onClick={() => {
+                                setFilterUf(""); setFilterCiclo(""); setFilterBoleto(""); setPage(0);
+                                syncFiltersToUrl({ uf: "", ciclo: "", boleto: "" });
+                            }}
+                        >
+                            <X size={12} /> Limpar Filtros
+                        </button>
+                    )}
+                </div>
+            </div>
+
             {/* Toolbar */}
             <div className="table-toolbar">
                 <div className="input-wrapper" style={{ maxWidth: 360 }}>
@@ -461,6 +547,7 @@ function ClientesListContent() {
                         onChange={(e) => {
                             setSearch(e.target.value);
                             setPage(0);
+                            syncFiltersToUrl({ q: e.target.value });
                         }}
                     />
                 </div>
@@ -549,9 +636,39 @@ function ClientesListContent() {
                                         </span>
                                     </td>
                                     <td>
-                                        <span className="badge badge-info">
-                                            {c.ciclos_faturamento?.nome ?? "—"}
-                                        </span>
+                                        <div className="flex items-center gap-1 flex-wrap">
+                                            {(() => {
+                                                const cicloNome = c.ciclos_faturamento?.nome ?? "—";
+                                                const isNordestao = cicloNome.toUpperCase() === "NORDESTÃO";
+                                                return (
+                                                    <span
+                                                        className={isNordestao ? "" : "badge badge-info"}
+                                                        style={isNordestao ? {
+                                                            background: 'rgba(245,158,11,0.15)',
+                                                            color: '#f59e0b',
+                                                            border: '1px solid rgba(245,158,11,0.3)',
+                                                            borderRadius: 20,
+                                                            padding: '2px 10px',
+                                                            fontSize: 11,
+                                                            fontWeight: 700,
+                                                        } : {}}
+                                                    >
+                                                        {cicloNome}
+                                                    </span>
+                                                );
+                                            })()}
+                                            {c.boleto_unificado && (
+                                                <span style={{
+                                                    background: 'rgba(33,118,255,0.1)',
+                                                    color: 'var(--accent)',
+                                                    border: '1px solid rgba(33,118,255,0.2)',
+                                                    borderRadius: 20,
+                                                    padding: '1px 7px',
+                                                    fontSize: 10,
+                                                    fontWeight: 600,
+                                                }}>Unificado</span>
+                                            )}
+                                        </div>
                                     </td>
                                     <td>{c.tempo_pagamento_dias} dias</td>
                                     <td>

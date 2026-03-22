@@ -265,6 +265,11 @@ export async function POST(req: NextRequest) {
                 valor_nf_emitida: formatarParaGCP(valorNF),
                 irrf_presumido: formatarParaGCP(valorIRRF),
                 valor_liquido_boleto: formatarParaGCP(finalLiquidoBoletoGCP),
+                // NORDESTÃO: No PDF, o total exibe bruto + acréscimos (descontos NÃO subtraídos).
+                // Para os demais ciclos, usa o valor líquido padrão do boleto.
+                valor_total_fatura_pdf: isNordestao
+                    ? formatarParaGCP(numBruto + numAcrescimos)
+                    : formatarParaGCP(finalLiquidoBoletoGCP),
                 valor_nc_final: formatarParaGCP(valorNC),
                 data_competencia: cons.data_competencia || lote.data_competencia,
                 periodo_custom: periodoCustom, // Injeta o período preciso para o PDF
@@ -360,7 +365,9 @@ export async function POST(req: NextRequest) {
                                 "NF": financeiroPayload.valor_nf_emitida,
                                 "NC": financeiroPayload.valor_nc_final,
                                 "PERIODO": financeiroPayload.periodo_custom,
-                                "boleto_unificado": financeiroPayload.boleto_unificado
+                                "boleto_unificado": financeiroPayload.boleto_unificado,
+                                "VALOR_TOTAL_FATURA_PDF": financeiroPayload.valor_total_fatura_pdf,
+                                "exibir_aviso_desconto_informativo": isNordestao
                             },
                             lista_acrescimos: lista_acrescimos,
                             lista_descontos: lista_descontos,
@@ -442,7 +449,9 @@ export async function POST(req: NextRequest) {
                             "NF": financeiroPayload.valor_nf_emitida,
                             "NC": financeiroPayload.valor_nc_final,
                             "PERIODO": financeiroPayload.periodo_custom,
-                            "boleto_unificado": financeiroPayload.boleto_unificado
+                            "boleto_unificado": financeiroPayload.boleto_unificado,
+                            "VALOR_TOTAL_FATURA_PDF": financeiroPayload.valor_total_fatura_pdf,
+                            "exibir_aviso_desconto_informativo": isNordestao
                         },
                         lista_acrescimos: lista_acrescimos,
                         lista_descontos: lista_descontos,
