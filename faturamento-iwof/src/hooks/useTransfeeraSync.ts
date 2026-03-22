@@ -15,6 +15,10 @@ export type TransfeeraStatus =
 export interface SyncItem {
     id: string;
     transfeera_id?: string | null;
+    cpf_favorecido?: string;
+    valor_real?: number;
+    valor?: number;
+    chave_pix?: string; // Adicionado para o match triplo
 }
 
 // Normalização do Status da Transfeera para nosso formato interno
@@ -88,26 +92,43 @@ export function useTransfeeraSync() {
                     const updatePromises = [];
 
                     for (const remoteTransfer of data.transfers) {
-                        // Cruzamento rigoroso por ID 
-                        const itemLocal = itensLocais.find(
-                            (item) => item.id && remoteTransfer.integration_id && 
-                                      String(item.id).toLowerCase() === String(remoteTransfer.integration_id).toLowerCase()
-                        );
+                        // 1. O saque pertence a este lote?
+                        const remoteBatchId = String(remoteTransfer.Batch?.id || "");
+                        if (remoteBatchId !== String(batchId)) continue; // Se não for do lote atual, descarta.
+
+                        // 2. Busca o item local que faz o Match Triplo (Lote + Valor + Chave/CPF)
+                        const itemLocal = itensLocais.find((item) => {
+                            // Validação de Valor
+                            const localValue = Number(item.valor_real || item.valor || 0);
+                            const remoteValue = Number(remoteTransfer.value || 0);
+                            if (localValue !== remoteValue) return false;
+
+                            // Limpeza de chaves para comparação (remove espaços, formatações)
+                            const remotePixKey = String(remoteTransfer.DestinationBankAccount?.pix_key || "").replace(/[^a-zA-Z0-9@.+]/g, "").toLowerCase();
+                            const localPixKey = String(item.chave_pix || "").replace(/[^a-zA-Z0-9@.+]/g, "").toLowerCase();
+                            const localCpf = String(item.cpf_favorecido || "").replace(/\D/g, "");
+
+                            // O match ocorre se a chave PIX bater exatamente OU se o CPF estiver embutido na chave (caso de chaves que são o próprio CPF/Telefone)
+                            return (remotePixKey === localPixKey) || (remotePixKey === localCpf) || (remotePixKey.includes(localCpf));
+                        });
 
                         if (!itemLocal) continue;
 
+                        console.log(`🔍 [MATCH TRIPLO SUCESSO] Saque de R$ ${remoteTransfer.value} pareado com o ID: ${itemLocal.id}`);
+
                         const normalizedStatus = normalizeTransfeeraStatus(remoteTransfer.status);
-                        newStatuses[itemLocal.id.toLowerCase()] = normalizedStatus;
-
-                        // Preparar update para o Supabase
-                        const payload: any = { status_item: normalizedStatus };
-
-                        if (remoteTransfer.id) {
-                            payload.transfeera_transfer_id = String(remoteTransfer.id);
-                        }
                         
-                        // Se a Transfeera já gerou o link do comprovante, salvamos no banco
-                        const comprovanteLink = remoteTransfer.bank_receipt_url || remoteTransfer.receipt_url;
+                        // Atualiza o dicionário de status da interface
+                        newStatuses[itemLocal.id] = normalizedStatus;
+
+                        // Prepara os dados para salvar no Supabase
+                        const payload: any = { 
+                            status_item: normalizedStatus,
+                            transfeera_transfer_id: String(remoteTransfer.id)
+                        };
+                        
+                        // Extrai o comprovante caso já exista
+                        const comprovanteLink = remoteTransfer.bank_receipt_url || remoteTransfer.receipt_url || remoteTransfer.comprovante_url;
                         if (comprovanteLink) {
                             payload.comprovante_url = comprovanteLink;
                         }
@@ -124,12 +145,13 @@ export function useTransfeeraSync() {
                         const results = await Promise.all(updatePromises);
                         const errors = results.filter(r => r.error);
                         if (errors.length > 0) {
-                            console.error(`[useTransfeeraSync] ❌ Falha ao salvar ${errors.length} atualizações no Supabase:`, errors);
+                            console.error(`[useTransfeeraSync] ❌ Falha ao salvar no Supabase:`, errors);
                         } else {
-                            console.log(`[useTransfeeraSync] ✅ ${updatePromises.length} itens atualizados com sucesso no banco.`);
+                            console.log(`[useTransfeeraSync] ✅ ${updatePromises.length} itens salvos com comprovantes e status atualizados.`);
                         }
                     }
 
+                    // Renderiza as cores na tela instantaneamente
                     setStatuses((prev) => ({ ...prev, ...newStatuses }));
                 } else {
                     console.log(`[useTransfeeraSync] ⚠️ API respondeu com sucesso mas sem transfers.`);

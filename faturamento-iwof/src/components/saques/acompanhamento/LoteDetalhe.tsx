@@ -64,7 +64,10 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
 
         const syncItems = approvedItems.map(item => ({
             id: item.id,
-            transfeera_id: item.transfeera_transfer_id || null
+            transfeera_id: item.transfeera_transfer_id || null,
+            cpf_favorecido: item.cpf_favorecido,
+            valor: item.valor,
+            chave_pix: item.chave_pix
         }));
 
         await syncBatch(lote?.transfeera_batch_id || null, syncItems);
