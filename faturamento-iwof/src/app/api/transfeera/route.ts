@@ -289,20 +289,32 @@ export async function POST(req: NextRequest) {
         // ═══════════════════════════════════════════════════════════════════════
         // ACTION: status_by_batch_id — Rastreio por Lote em vez de iteração
         // ═══════════════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════════
+        // ACTION: status_by_batch_id — Bypass Global via Data
+        // ═══════════════════════════════════════════════════════════════════════
         if (action === "status_by_batch_id") {
             const { batchId } = body;
             if (!batchId) {
                 return NextResponse.json({ error: "batchId é obrigatório" }, { status: 400 });
             }
 
-            console.log(`[Transfeera] ▶ Buscando transferências do lote ${batchId} na rota oficial...`);
+            // A Transfeera oculta itens da rota de Lotes quando criados via auto_close com itens embutidos.
+            // Solução definitiva: Buscar na rota global de transferências filtrando pela data recente.
+            const endDateObj = new Date();
+            const initialDateObj = new Date();
+            initialDateObj.setDate(endDateObj.getDate() - 15); // Puxa os últimos 15 dias de movimentação
+
+            const initialDate = initialDateObj.toISOString().split('T')[0];
+            const endDate = endDateObj.toISOString().split('T')[0];
+
+            console.log(`[Transfeera] ▶ Contorno ativado: Buscando transferências globais entre ${initialDate} e ${endDate}...`);
 
             let allTransfers: any[] = [];
             let currentPage = 1;
+            let hasMore = true;
 
-            while (true) {
-                // Rota oficial com paginação (sem o per_page que é bloqueado pela API)
-                const url = `${baseUrl}/batch/${batchId}/transfer?page=${currentPage}`;
+            while (hasMore) {
+                const url = `${baseUrl}/transfer?initialDate=${initialDate}&endDate=${endDate}&page=${currentPage}`;
                 
                 const tRes = await fetch(url, {
                     method: "GET",
@@ -314,31 +326,28 @@ export async function POST(req: NextRequest) {
                 });
 
                 if (!tRes.ok) {
-                    const errText = await tRes.text();
-                    console.error(`[Transfeera] ❌ Erro na requisição da página ${currentPage}:`, errText);
-                    
-                    // Se a API disser que "page" também não é permitido, significa que ela devolve tudo de uma vez.
-                    // Nesse caso, interrompemos o loop.
-                    break; 
-                }
-
-                const tPayload = await tRes.json();
-                
-                if (currentPage === 1) {
-                    console.log(`[Transfeera] 🔍 Payload bruto (pág 1):`, JSON.stringify(tPayload).substring(0, 300));
-                }
-
-                const list = Array.isArray(tPayload) ? tPayload : (tPayload.data || []);
-                
-                if (list.length === 0) {
+                    console.error(`[Transfeera] ❌ Erro na requisição global (pág ${currentPage}):`, await tRes.text());
                     break;
                 }
 
-                allTransfers.push(...list);
-                currentPage++;
+                const tPayload = await tRes.json();
+                const list = Array.isArray(tPayload.data) ? tPayload.data : (Array.isArray(tPayload) ? tPayload : []);
+                
+                if (list.length > 0) {
+                    allTransfers.push(...list);
+                }
+
+                // Verifica paginação usando o metadata oficial
+                if (tPayload.metadata && tPayload.metadata.pagination) {
+                    const { itemsPerPage, totalItems } = tPayload.metadata.pagination;
+                    hasMore = currentPage < Math.ceil(totalItems / itemsPerPage);
+                    currentPage++;
+                } else {
+                    hasMore = false;
+                }
             }
 
-            console.log(`[Transfeera] ✅ ${allTransfers.length} transferências recuperadas do lote ${batchId}.`);
+            console.log(`[Transfeera] ✅ ${allTransfers.length} transferências globais recuperadas. O Frontend fará o match por ID.`);
             return NextResponse.json({ success: true, transfers: allTransfers });
         }
 
