@@ -278,6 +278,48 @@ export default function AjustesPage() {
         repasseProfissional: false,
     });
 
+    // Filtros
+    const [filterDataInicio, setFilterDataInicio] = useState("");
+    const [filterDataFim, setFilterDataFim] = useState("");
+    const [filterClienteId, setFilterClienteId] = useState("");
+
+    const applyFilters = useCallback((lista: Ajuste[]) => {
+        return lista.filter(item => {
+            if (filterClienteId && item.cliente_id !== filterClienteId) return false;
+            if (filterDataInicio && item.data_ocorrencia < filterDataInicio) return false;
+            if (filterDataFim && item.data_ocorrencia > filterDataFim) return false;
+            return true;
+        });
+    }, [filterClienteId, filterDataInicio, filterDataFim]);
+
+    const handleExportXLSX = () => {
+        const targetLista = activeTab === "descontos" ? descontosPendentes 
+                          : activeTab === "acrescimos" ? acrescimosPendentes 
+                          : historico;
+                          
+        if (targetLista.length === 0) {
+            alert("Nenhum dado para exportar com os filtros atuais.");
+            return;
+        }
+
+        const exportData = targetLista.map(item => ({
+            "Nome do usuário": item.nome_profissional || "-",
+            "Loja": item.clientes?.nome_conta_azul || item.clientes?.razao_social || "-",
+            "Valor": item.valor,
+            "Data da aplicação": item.status_aplicacao && item.data_aplicacao ? fmtDate(item.data_aplicacao) : "A aplicar (Pendente)",
+            "Data da ocorrência": fmtDate(item.data_ocorrencia),
+            "Tipo": item.tipo,
+            "Motivo": item.motivo || "-",
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Ajustes");
+        const today = new Date().toISOString().split("T")[0];
+        const tabName = activeTab.charAt(0).toUpperCase() + activeTab.slice(1);
+        XLSX.writeFile(wb, `Relatorio_Ajustes_${tabName}_${today}.xlsx`);
+    };
+
     const fetchAjustes = useCallback(async () => {
         setLoading(true);
         const { data, error } = await supabase
@@ -318,12 +360,13 @@ export default function AjustesPage() {
             motivo: formData.motivo,
             data_ocorrencia: formData.data,
             observacao_interna: formData.observacaoInterna,
-            repasse_profissional: formData.repasseProfissional,
-            status_aplicacao: false
+            repasse_profissional: formData.repasseProfissional
         };
 
         if (editingId) {
             payload.id = editingId;
+        } else {
+            payload.status_aplicacao = false;
         }
 
         const { error } = await supabase.from("ajustes_faturamento").upsert(payload, {
@@ -352,12 +395,13 @@ export default function AjustesPage() {
             motivo: formData.motivo,
             data_ocorrencia: formData.data,
             observacao_interna: formData.observacaoInterna,
-            repasse_profissional: formData.repasseProfissional,
-            status_aplicacao: false
+            repasse_profissional: formData.repasseProfissional
         };
 
         if (editingId) {
             payload.id = editingId;
+        } else {
+            payload.status_aplicacao = false;
         }
 
         const { error } = await supabase.from("ajustes_faturamento").upsert(payload);
@@ -596,9 +640,9 @@ export default function AjustesPage() {
     };
 
     // Filtered data
-    const descontosPendentes = ajustes.filter(a => a.tipo === "DESCONTO" && !a.status_aplicacao);
-    const acrescimosPendentes = ajustes.filter(a => a.tipo === "ACRESCIMO" && !a.status_aplicacao);
-    const historico = ajustes.filter(a => a.status_aplicacao);
+    const descontosPendentes = applyFilters(ajustes.filter(a => a.tipo === "DESCONTO" && !a.status_aplicacao));
+    const acrescimosPendentes = applyFilters(ajustes.filter(a => a.tipo === "ACRESCIMO" && !a.status_aplicacao));
+    const historico = applyFilters(ajustes.filter(a => a.status_aplicacao));
 
     const totalDescontos = descontosPendentes.reduce((acc, curr) => acc + curr.valor, 0);
     const totalAcrescimos = acrescimosPendentes.reduce((acc, curr) => acc + curr.valor, 0);
@@ -632,6 +676,56 @@ export default function AjustesPage() {
                             className="btn btn-primary bg-emerald-600 hover:bg-emerald-700 border-none flex items-center gap-2 disabled:opacity-50"
                         >
                             {isSaving ? <span className="loading loading-spinner loading-xs"></span> : <Plus size={18} />} Novo Acréscimo
+                        </button>
+                    </div>
+                </div>
+
+                {/* Filtros Container */}
+                <div className="bg-[var(--bg-card)] p-4 rounded-xl border border-[var(--border)] shadow-sm flex flex-col md:flex-row items-end gap-4 justify-between relative z-10">
+                    <div className="flex flex-1 flex-col md:flex-row gap-4 w-full">
+                        <div className="w-full md:w-64">
+                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-1.5 block">Empresa / Loja</label>
+                            <SearchableSelect
+                                options={clientes}
+                                value={filterClienteId}
+                                placeholder="Todas as lojas..."
+                                onChange={(client) => setFilterClienteId(client?.id || "")}
+                            />
+                        </div>
+                        <div className="w-full md:w-36">
+                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-1.5 block">Data Inicial</label>
+                            <input
+                                type="date"
+                                className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-[var(--fg-dim)] placeholder-[var(--fg-dim)] p-2.5 rounded-lg text-sm focus:border-[var(--primary)] outline-none transition-colors"
+                                value={filterDataInicio}
+                                onFocus={(e) => (e.target as any).showPicker?.()}
+                                onChange={e => setFilterDataInicio(e.target.value)}
+                            />
+                        </div>
+                        <div className="w-full md:w-36">
+                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-1.5 block">Data Final</label>
+                            <input
+                                type="date"
+                                className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-[var(--fg-dim)] placeholder-[var(--fg-dim)] p-2.5 rounded-lg text-sm focus:border-[var(--primary)] outline-none transition-colors"
+                                value={filterDataFim}
+                                onFocus={(e) => (e.target as any).showPicker?.()}
+                                onChange={e => setFilterDataFim(e.target.value)}
+                            />
+                        </div>
+                    </div>
+                    <div className="flex gap-2 w-full md:w-auto h-11">
+                        <button
+                            onClick={() => { setFilterClienteId(""); setFilterDataInicio(""); setFilterDataFim(""); }}
+                            title="Limpar filtros"
+                            className="bg-[var(--bg-main)] hover:bg-white/5 border border-[var(--border)] text-[var(--fg-dim)] hover:text-white flex items-center justify-center rounded-lg px-4 transition-colors font-medium text-sm flex-1 md:flex-none"
+                        >
+                            <X size={16} className="mr-2" /> Limpar
+                        </button>
+                        <button
+                            onClick={handleExportXLSX}
+                            className="bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-500 border border-emerald-600/30 font-bold flex items-center justify-center rounded-lg px-4 transition-colors text-sm flex-1 md:flex-none shadow-sm"
+                        >
+                            <Upload size={16} className="mr-2 rotate-180" /> Exportar XLSX
                         </button>
                     </div>
                 </div>
@@ -692,9 +786,9 @@ export default function AjustesPage() {
                                                 )}
                                             </div>
                                         </div>
-                                        <div className="table-container">
+                                        <div className="table-container max-h-[500px] overflow-y-auto relative">
                                             <table className="w-full">
-                                                <thead>
+                                                <thead className="sticky top-0 bg-[var(--bg-card)] shadow-sm z-10">
                                                     <tr>
                                                         <th className="w-10">
                                                             <input
@@ -752,7 +846,7 @@ export default function AjustesPage() {
                                                     ))}
                                                     {descontosPendentes.length === 0 && (
                                                         <tr>
-                                                            <td colSpan={6} className="text-center py-10 text-[var(--fg-dim)]">Nenhum desconto pendente.</td>
+                                                            <td colSpan={6} className="text-center py-10 text-[var(--fg-dim)]">Nenhum desconto encontrado com os filtros atuais.</td>
                                                         </tr>
                                                     )}
                                                 </tbody>
@@ -786,9 +880,9 @@ export default function AjustesPage() {
                                                 )}
                                             </div>
                                         </div>
-                                        <div className="table-container">
+                                        <div className="table-container max-h-[500px] overflow-y-auto relative">
                                             <table className="w-full">
-                                                <thead>
+                                                <thead className="sticky top-0 bg-[var(--bg-card)] shadow-sm z-10">
                                                     <tr>
                                                         <th className="w-10">
                                                             <input
@@ -846,7 +940,7 @@ export default function AjustesPage() {
                                                     ))}
                                                     {acrescimosPendentes.length === 0 && (
                                                         <tr>
-                                                            <td colSpan={6} className="text-center py-10 text-[var(--fg-dim)]">Nenhum acréscimo pendente.</td>
+                                                            <td colSpan={6} className="text-center py-10 text-[var(--fg-dim)]">Nenhum acréscimo encontrado com os filtros atuais.</td>
                                                         </tr>
                                                     )}
                                                 </tbody>
@@ -869,9 +963,9 @@ export default function AjustesPage() {
                                                 </button>
                                             )}
                                         </div>
-                                        <div className="table-container">
+                                        <div className="table-container max-h-[500px] overflow-y-auto relative">
                                             <table className="w-full">
-                                                <thead>
+                                                <thead className="sticky top-0 bg-[var(--bg-card)] shadow-sm z-10">
                                                     <tr>
                                                         <th className="w-10">
                                                             <input
@@ -923,7 +1017,7 @@ export default function AjustesPage() {
                                                     ))}
                                                     {historico.length === 0 && (
                                                         <tr>
-                                                            <td colSpan={7} className="text-center py-10 text-[var(--fg-dim)]">Nenhum registro no histórico.</td>
+                                                            <td colSpan={7} className="text-center py-10 text-[var(--fg-dim)]">Nenhum registro encontrado com os filtros atuais.</td>
                                                         </tr>
                                                     )}
                                                 </tbody>

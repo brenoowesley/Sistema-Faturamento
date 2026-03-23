@@ -15,6 +15,11 @@ import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import JSZip from "jszip";
 import { XMLParser } from "fast-xml-parser";
+import * as pdfjsLib from "pdfjs-dist";
+
+if (typeof window !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '/workers/pdf.worker.min.mjs';
+}
 import {
     Upload,
     FileSpreadsheet,
@@ -846,10 +851,55 @@ export default function CentralLancamentos() {
                 const fileName = pdf.name.split('/').pop() || pdf.name;
                 const cleanName = fileName.replace(/\.pdf$/i, "").toUpperCase();
                 
+                // OCR: Read PDF content to extract CNPJ and NF Number for robust matching
+                let pdfCnpj = "";
+                let pdfNf = "";
+                try {
+                    const arrayBuffer = await pdf.async("arraybuffer");
+                    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+                    const pdfDoc = await loadingTask.promise;
+                    let fullText = "";
+
+                    for (let p = 1; p <= pdfDoc.numPages; p++) {
+                        const page = await pdfDoc.getPage(p);
+                        const textContent = await page.getTextContent();
+                        const pageText = textContent.items.map((item: any) => item.str).join(" ");
+                        fullText += pageText + " ";
+                    }
+
+                    // 1. Extrair CNPJ do Tomador
+                    const cnpjMatch = fullText.match(/TOMADOR[\s\S]*?([0-9]{2}\.[0-9]{3}\.[0-9]{3}\/[0-9]{4}-[0-9]{2})/i);
+                    if (cnpjMatch) {
+                        pdfCnpj = cnpjMatch[1].replace(/\D/g, '').replace(/^0+/, '');
+                    } else {
+                        // Backup genérico para CNPJ se TOMADOR não for achado nitidamente
+                        const genericCnpj = fullText.match(/([0-9]{2}\.[0-9]{3}\.[0-9]{3}\/[0-9]{4}-[0-9]{2})/g);
+                        if (genericCnpj && genericCnpj.length > 1) {
+                            pdfCnpj = genericCnpj[1].replace(/\D/g, '').replace(/^0+/, ''); // Geralmente o segundo CNPJ é o tomador
+                        }
+                    }
+
+                    // 2. Extrair Número NF
+                    const nfRegex = /Número da NFS-e[\s\S]*?(\d+)/i;
+                    const nfMatch = fullText.match(nfRegex);
+                    if (nfMatch) pdfNf = nfMatch[1];
+                } catch (err) {
+                    console.error("Erro no OCR do PDF:", fileName, err);
+                }
+
                 const matchedLanc = lancamentos.find(l => {
+                    const lCnpj = l.cnpj ? l.cnpj.replace(/\D/g, '').replace(/^0+/, '') : "";
                     const nfNum = l.numeroNFGerada?.toUpperCase();
                     const pedNum = l.pedido.toUpperCase();
-                    return (nfNum && cleanName.includes(nfNum)) || cleanName.includes(pedNum) || cleanName === l.id.toUpperCase();
+                    
+                    // Condição 1: CNPJ extraído do PDF bate com o CNPJ da linha (Match Forte)
+                    if (pdfCnpj && lCnpj && pdfCnpj === lCnpj) return true;
+
+                    // Condição 2: Nome do arquivo ou OCR contêm a NF (Match XML)
+                    if (nfNum && (cleanName.includes(nfNum) || pdfNf.includes(nfNum))) return true;
+
+                    // Condição 3: Nome do arquivo contém o número do pedido ou ID
+                    return cleanName.includes(pedNum) || cleanName === l.id.toUpperCase();
                 });
 
                 if (matchedLanc) {
