@@ -339,15 +339,24 @@ export default function FechamentoLote({
             const baseVal = a.originalValorIwof ?? a.valorIwof;
             const finalVal = a.status === "CORREÇÃO" ? (a.suggestedValorIwof ?? a.valorIwof) : (a.manualValue ?? a.valorIwof);
 
-            // Passo 1: acumula bruto puro de horas
+            const isNordestao = String(lojaEntry.ciclo || "").toUpperCase().includes('NORDESTÃO');
+            // Passo 1: acumula bruto puro
             lojaEntry.valorBruto += baseVal;
-            // Passo 2: acumula base faturável (bruto +/- ajustes)
-            lojaEntry.valorBaseFaturavel += finalVal;
 
             if (finalVal > baseVal) {
+                // Teve Acréscimo
                 lojaEntry.valorAcrescimos += (finalVal - baseVal);
+                lojaEntry.valorBaseFaturavel += finalVal;
             } else if (finalVal < baseVal) {
-                lojaEntry.valorDescontos += (baseVal - finalVal);
+                // Teve Desconto
+                lojaEntry.valorDescontos += (baseVal - finalVal); // Registra para exibição
+                if (isNordestao) {
+                    lojaEntry.valorBaseFaturavel += baseVal; // Ignora o desconto na matemática
+                } else {
+                    lojaEntry.valorBaseFaturavel += finalVal; // Aplica o desconto normalmente
+                }
+            } else {
+                lojaEntry.valorBaseFaturavel += baseVal;
             }
         }
 
@@ -363,8 +372,11 @@ export default function FechamentoLote({
                     lojaEntry.valorAcrescimos += Number(aj.valor);
                     lojaEntry.valorBaseFaturavel += Number(aj.valor);
                 } else if (aj.tipo === "DESCONTO") {
-                    lojaEntry.valorDescontos += Number(aj.valor);
-                    lojaEntry.valorBaseFaturavel -= Number(aj.valor);
+                    lojaEntry.valorDescontos += Number(aj.valor); // Registra para exibição
+                    const isNordestao = String(lojaEntry.ciclo || "").toUpperCase().includes('NORDESTÃO');
+                    if (!isNordestao) {
+                        lojaEntry.valorBaseFaturavel -= Number(aj.valor); // Só subtrai se NÃO for Nordestão
+                    }
                 }
                 injectedAjustes.add(aj.id);
             }
@@ -597,10 +609,13 @@ export default function FechamentoLote({
                     ajustesMap.delete(r.id);
                 }
 
+                const isNordestao = String(r.ciclo || "").toUpperCase().includes('NORDESTÃO');
+                const descontosMatematicos = isNordestao ? 0 : finalDescontos;
+
                 const totais = calcularTotaisFaturamento(
                     r.valorBruto,
                     finalAcrescimos,
-                    finalDescontos,
+                    descontosMatematicos,
                     r.descontoIR || 0,
                     r.statusNF === 'EMITIDA',
                     r.boletoUnificado ?? true
@@ -998,8 +1013,11 @@ export default function FechamentoLote({
     // Painel de cascata: agrega o pipeline matemático de todos os reports do lote
     const cascataTotais = matchFiles.reports.reduce(
         (acc, r) => {
+            const isNordestao = String(r.ciclo || "").toUpperCase().includes('NORDESTÃO');
+            const descontosMatematicos = isNordestao ? 0 : (r.valorDescontos || 0);
+
             const t = calcularTotaisFaturamento(
-                r.valorBruto, r.valorAcrescimos, r.valorDescontos,
+                r.valorBruto, r.valorAcrescimos, descontosMatematicos,
                 r.descontoIR || 0, r.statusNF === 'EMITIDA',
                 r.boletoUnificado ?? true
             );
@@ -1551,7 +1569,10 @@ export default function FechamentoLote({
                                         {/* Boleto Final = pós ajustes − IRRF */}
                                         <td className="py-3 px-3 text-right">
                                             {(() => {
-                                                const totais = calcularTotaisFaturamento(r.valorBruto, r.valorAcrescimos, r.valorDescontos, r.descontoIR || 0, r.statusNF === 'EMITIDA', r.boletoUnificado ?? true);
+                                                const isNordestao = String(r.ciclo || "").toUpperCase().includes('NORDESTÃO');
+                                                const descontosMatematicos = isNordestao ? 0 : (r.valorDescontos || 0);
+
+                                                const totais = calcularTotaisFaturamento(r.valorBruto, r.valorAcrescimos, descontosMatematicos, r.descontoIR || 0, r.statusNF === 'EMITIDA', r.boletoUnificado ?? true);
                                                 if (!r.boletoUnificado && totais.valorNF > 0 && totais.valorNC > 0) {
                                                     return (
                                                         <div className="flex flex-col items-end gap-1">
