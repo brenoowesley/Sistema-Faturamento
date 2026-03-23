@@ -54,6 +54,7 @@ export interface LancamentoParcial {
     lojaIdentificadaId?: string;
     lojaNomeSugerido?: string;
     cnpj?: string;
+    periodo_servico?: string;
     // Campos preenchidos pelo XML:
     numeroNFGerada?: string;
     irrf?: number;
@@ -87,7 +88,7 @@ interface ClienteDB_LP {
     status: boolean;
 }
 
-type StepLP = "upload" | "matching" | "xml" | "preview";
+type StepLP = "upload" | "matching" | "xml" | "zip" | "preview";
 
 /* ================================================================
    HELPERS EXCLUSIVOS — LANÇAMENTOS PARCIAIS
@@ -269,7 +270,27 @@ function parsearPlanilha_LP(rawRows: Record<string, string>[]): {
         }
 
         // Extrair nome da loja via regex se não houver coluna explícita
-        const lojaNome = lojaRaw || extrairNomeLoja_LP(descricao);
+        let lojaNome = lojaRaw;
+        let periodo_servico = "";
+
+        // Regex para extrair período: 02/03/2026 à 09/03/2026
+        const regexPeriodo = /(\d{2}\/\d{2}\/\d{4}\s*à\s*\d{2}\/\d{2}\/\d{4})/i;
+        const matchPeriodo = descricao.match(regexPeriodo);
+        if (matchPeriodo) {
+            periodo_servico = matchPeriodo[0];
+        }
+
+        if (!lojaNome) {
+            // Limpeza da descrição para extrair a loja
+            let cleanLoja = descricao
+                .replace("Serviço de mão de obra", "")
+                .replace(regexPeriodo, "")
+                .replace(/\bloja\b/gi, "")
+                .replace(/\s{2,}/g, " ")
+                .trim();
+            
+            lojaNome = extrairNomeLoja_LP(cleanLoja) || cleanLoja;
+        }
 
         dados.push({
             id: gerarId_LP(),
@@ -279,6 +300,7 @@ function parsearPlanilha_LP(rawRows: Record<string, string>[]): {
             valor,
             lojaNomeSugerido: lojaNome || undefined,
             cnpj: cnpjRaw || undefined,
+            periodo_servico: periodo_servico || undefined,
         });
     });
 
@@ -305,6 +327,8 @@ export default function CentralLancamentos() {
     const [loadingClientes, setLoadingClientes] = useState(false);
     const [xmlProcessing, setXmlProcessing] = useState(false);
     const [xmlLoaded, setXmlLoaded] = useState(false);
+    const [zipProcessing, setZipProcessing] = useState(false);
+    const [uploadLogs, setUploadLogs] = useState<{ nomeArquivo: string, status: 'pendente' | 'sucesso' | 'erro', mensagem: string }[]>([]);
     const [exportando, setExportando] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [preFilterEmpresa, setPreFilterEmpresa] = useState("");
@@ -772,8 +796,88 @@ export default function CentralLancamentos() {
         setFileName("");
         setClientes([]);
         setXmlLoaded(false);
+        setUploadLogs([]);
         setSearchTerm("");
     };
+
+    const uploadToDrive = async (fileBase64: string, fileName: string, lanc: LancamentoParcial) => {
+        try {
+            const clienteNome = lanc.nomeContaAzulMatch || lanc.razaoSocialMatch || lanc.lojaNomeSugerido || "Indefinido";
+            const res = await fetch('/api/lancamentos-parciais/upload-nfs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    fileBase64,
+                    fileName,
+                    nomeCliente: clienteNome,
+                })
+            });
+            return await res.json();
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
+    };
+
+    const onDropZip = useCallback(async (acceptedFiles: File[]) => {
+        if (acceptedFiles.length === 0) return;
+        const file = acceptedFiles[0];
+        setZipProcessing(true);
+        setUploadLogs([]);
+
+        try {
+            const zip = await JSZip.loadAsync(file);
+            const pdfFiles = Object.values(zip.files).filter(f => !f.dir && f.name.toLowerCase().endsWith('.pdf'));
+
+            if (pdfFiles.length === 0) {
+                alert("Nenhum PDF encontrado no ZIP.");
+                setZipProcessing(false);
+                return;
+            }
+
+            const initialLogs = pdfFiles.map(f => ({
+                nomeArquivo: f.name.split('/').pop() || f.name,
+                status: 'pendente' as const,
+                mensagem: 'Aguardando matching...'
+            }));
+            setUploadLogs(initialLogs);
+
+            for (let i = 0; i < pdfFiles.length; i++) {
+                const pdf = pdfFiles[i];
+                const fileName = pdf.name.split('/').pop() || pdf.name;
+                const cleanName = fileName.replace(/\.pdf$/i, "").toUpperCase();
+                
+                const matchedLanc = lancamentos.find(l => {
+                    const nfNum = l.numeroNFGerada?.toUpperCase();
+                    const pedNum = l.pedido.toUpperCase();
+                    return (nfNum && cleanName.includes(nfNum)) || cleanName.includes(pedNum) || cleanName === l.id.toUpperCase();
+                });
+
+                if (matchedLanc) {
+                    setUploadLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: 'pendente', mensagem: 'Enviando ao Drive...' } : log));
+                    const content = await pdf.async("base64");
+                    const res = await uploadToDrive(content, fileName, matchedLanc);
+                    if (res.success) {
+                        setUploadLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: 'sucesso', mensagem: 'Sincronizado' } : log));
+                    } else {
+                        setUploadLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: 'erro', mensagem: res.error } : log));
+                    }
+                } else {
+                    setUploadLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: 'erro', mensagem: 'Não encontrado na tabela' } : log));
+                }
+            }
+        } catch (err) {
+            console.error("Erro ZIP:", err);
+            alert("Erro ao processar ZIP.");
+        } finally {
+            setZipProcessing(false);
+        }
+    }, [lancamentos]);
+
+    const dzZip = useDropzone({
+        onDrop: onDropZip,
+        accept: { 'application/zip': ['.zip'] },
+        multiple: false
+    });
 
     /* ================================================================
        FILTERED DATA
@@ -808,25 +912,27 @@ export default function CentralLancamentos() {
     const steps: { key: StepLP; label: string; num: number }[] = [
         { key: "upload", label: "Upload", num: 1 },
         { key: "matching", label: "Matching", num: 2 },
-        { key: "xml", label: "XML (Opcional)", num: 3 },
-        { key: "preview", label: "Preview & Export", num: 4 },
+        { key: "xml", label: "XML", num: 3 },
+        { key: "zip", label: "PDFs", num: 4 },
+        { key: "preview", label: "Finalizar", num: 5 },
     ];
 
     const canGoToXml = step === "matching" && lancamentos.length > 0;
-    const canGoToPreview = (step === "xml" || step === "matching") && lancamentos.length > 0;
+    const canGoToPreview = (step === "xml" || step === "matching" || step === "zip") && lancamentos.length > 0;
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
 
             {/* ── STEPPER ── */}
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 {steps.map((s, i) => (
-                    <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <button
                             onClick={() => {
                                 if (s.key === "upload") return;
                                 if (s.key === "matching" && lancamentos.length > 0) setStep("matching");
                                 if (s.key === "xml" && canGoToXml) setStep("xml");
+                                if (s.key === "zip" && lancamentos.length > 0) setStep("zip");
                                 if (s.key === "preview" && canGoToPreview) setStep("preview");
                             }}
                             style={{
@@ -834,18 +940,16 @@ export default function CentralLancamentos() {
                                 borderRadius: 8, border: "1px solid",
                                 borderColor: step === s.key ? "var(--accent)" : "var(--border)",
                                 background: step === s.key ? "rgba(129,140,248,0.1)" : "transparent",
-                                color: step === s.key ? "var(--accent)" : "var(--fg-dim)",
-                                fontSize: 13, fontWeight: step === s.key ? 700 : 500, cursor: "pointer",
-                                transition: "all 0.2s",
+                                cursor: "pointer", transition: "all 0.2s"
                             }}
                         >
                             <span style={{
-                                width: 22, height: 22, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
-                                fontSize: 11, fontWeight: 700,
+                                width: 22, height: 22, borderRadius: "50%",
                                 background: step === s.key ? "var(--accent)" : "var(--border)",
                                 color: step === s.key ? "#fff" : "var(--fg-dim)",
+                                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700
                             }}>{s.num}</span>
-                            {s.label}
+                            <span style={{ fontSize: 13, fontWeight: step === s.key ? 600 : 400, color: step === s.key ? "#fff" : "var(--fg-dim)" }}>{s.label}</span>
                         </button>
                         {i < steps.length - 1 && <ChevronRight size={14} style={{ color: "var(--border-light)" }} />}
                     </div>
@@ -1042,6 +1146,7 @@ export default function CentralLancamentos() {
                                     <th>Pedido</th>
                                     <th>Tipo</th>
                                     <th>Descrição</th>
+                                    <th>Período</th>
                                     <th style={{ textAlign: "right" }}>Valor</th>
                                     <th>Loja Sugerida</th>
                                     <th>Match</th>
@@ -1062,6 +1167,9 @@ export default function CentralLancamentos() {
                                         </td>
                                         <td style={{ maxWidth: 250 }}>
                                             <EditableCell value={l.descricao} onSave={v => handleFieldChange(l.id, "descricao", v)} maxW={240} />
+                                        </td>
+                                        <td style={{ fontSize: 11, color: "var(--fg-muted)" }}>
+                                            {l.periodo_servico || "—"}
                                         </td>
                                         <td style={{ textAlign: "right" }}>
                                             <EditableCell value={fmtBRL_LP(l.valor)} onSave={v => handleFieldChange(l.id, "valor", v)} align="right" bold />
@@ -1107,9 +1215,11 @@ export default function CentralLancamentos() {
                 <div className="card">
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
                         <h2 style={{ fontSize: 16, fontWeight: 600, color: "#fff", margin: 0 }}>Enriquecimento via XML (Opcional)</h2>
-                        <button onClick={() => setStep("preview")} className="btn btn-primary" style={{ padding: "8px 16px", fontSize: 12 }}>
-                            {xmlLoaded ? "Continuar" : "Pular"} para Preview <ChevronRight size={14} />
-                        </button>
+                        <div style={{ display: "flex", gap: 10 }}>
+                            <button onClick={() => setStep("zip")} className="btn btn-primary" style={{ padding: "8px 16px", fontSize: 12 }}>
+                                {xmlLoaded ? "Continuar" : "Pular"} para PDFs <ChevronRight size={14} />
+                            </button>
+                        </div>
                     </div>
                     <p style={{ fontSize: 13, color: "var(--fg-muted)", marginBottom: 16 }}>
                         Faça o upload de um ZIP com os XMLs de retorno das NFs emitidas para preencher automaticamente o número da NF e o IRRF.
@@ -1128,7 +1238,67 @@ export default function CentralLancamentos() {
                 </div>
             )}
 
-            {/* ──────── STEP 4: PREVIEW & EXPORT ──────── */}
+            {/* ──────── STEP 4: ZIP / PDF UPLOAD ──────── */}
+            {step === "zip" && (
+                <div className="card">
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                        <h2 style={{ fontSize: 16, fontWeight: 600, color: "#fff", margin: 0 }}>Upload de PDFs (ZIP)</h2>
+                        <button onClick={() => setStep("preview")} className="btn btn-primary" style={{ padding: "8px 16px", fontSize: 12 }}>
+                            Continuar para Preview <ChevronRight size={14} />
+                        </button>
+                    </div>
+                    
+                    <p style={{ fontSize: 13, color: "var(--fg-muted)", marginBottom: 16 }}>
+                        Arraste um arquivo .zip contendo os PDFs das faturas. O sistema tentará cruzar o nome do arquivo com o número da NF ou ID do pedido.
+                    </p>
+
+                    <div {...dzZip.getRootProps()} className={`dropzone ${dzZip.isDragActive ? "dropzone-active" : ""}`}>
+                        <input {...dzZip.getInputProps()} />
+                        {zipProcessing ? (
+                            <>
+                                <Loader2 size={36} className="dropzone-icon" style={{ animation: "spin 1s linear infinite" }} />
+                                <p className="dropzone-text">Processando e sincronizando PDFs…</p>
+                            </>
+                        ) : (
+                            <>
+                                <FileArchive size={36} className="dropzone-icon" />
+                                <p className="dropzone-text">Clique ou arraste o <strong style={{ color: "var(--accent)" }}>ZIP de PDFs</strong> aqui</p>
+                            </>
+                        )}
+                    </div>
+
+                    {uploadLogs.length > 0 && (
+                        <div style={{ marginTop: 24 }}>
+                            <h3 style={{ fontSize: 11, fontWeight: 700, color: "var(--fg-dim)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Log de Sincronização (Faturamento - Drive)</h3>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 300, overflowY: "auto", paddingRight: 4 }}>
+                                {uploadLogs.map((log, i) => (
+                                    <div key={i} style={{ 
+                                        display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", 
+                                        background: "rgba(15,23,42,0.3)", borderRadius: 6, border: "1px solid var(--border)"
+                                    }}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1 }}>
+                                            <FileText size={14} style={{ color: "var(--fg-muted)" }} />
+                                            <span style={{ fontSize: 12, color: "#fff", fontWeight: 500 }}>{log.nomeArquivo}</span>
+                                        </div>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                            <span style={{ 
+                                                fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
+                                                background: log.status === 'sucesso' ? 'rgba(34,197,94,0.1)' : log.status === 'erro' ? 'rgba(239,68,68,0.1)' : 'rgba(129,140,248,0.1)',
+                                                color: log.status === 'sucesso' ? 'var(--success)' : log.status === 'erro' ? 'var(--danger)' : 'var(--accent)'
+                                            }}>
+                                                {log.status.toUpperCase()}
+                                            </span>
+                                            <span style={{ fontSize: 11, color: "var(--fg-muted)" }}>{log.mensagem}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* ──────── STEP 5: PREVIEW & EXPORT ──────── */}
             {step === "preview" && (
                 <>
                     <div className="card" style={{ padding: 0, overflow: "hidden" }}>
@@ -1183,6 +1353,7 @@ export default function CentralLancamentos() {
                                         <th>Pedido</th>
                                         <th>Tipo</th>
                                         <th>Loja</th>
+                                        <th>Período</th>
                                         <th>CNPJ</th>
                                         <th>NF Gerada</th>
                                         <th style={{ textAlign: "right" }}>Valor</th>
@@ -1220,6 +1391,9 @@ export default function CentralLancamentos() {
                                                         ) : (
                                                             <EditableCell value={l.lojaNomeSugerido || ""} onSave={v => handleFieldChange(l.id, "lojaNomeSugerido", v)} placeholder="Nome loja" />
                                                         )}
+                                                    </td>
+                                                    <td style={{ fontSize: 11, color: "var(--fg-dim)" }}>
+                                                        {l.periodo_servico || "—"}
                                                     </td>
                                                     <td>
                                                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
