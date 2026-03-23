@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef, useEffect } from "react";
-import { ArrowLeft, CheckCircle2, ShieldCheck, FileText, UploadCloud, CloudLightning, Mail, AlertTriangle, Info, FileStack, X, FileArchive, Search, Send, FileCode2, Lock, Save } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ShieldCheck, FileText, UploadCloud, CloudLightning, Mail, AlertTriangle, Info, FileStack, X, FileArchive, Search, Send, FileCode2, Lock, Save, Eye } from "lucide-react";
 import { Agendamento, FinancialSummary } from "../types";
 import { fmtCurrency, normalizarNome, calcularTotaisFaturamento } from "../utils";
 import JSZip from "jszip";
@@ -71,6 +71,7 @@ export default function FechamentoLote({
 
     // MODAL STATE
     const [activeModal, setActiveModal] = useState<string | null>(null);
+    const [emailAssunto, setEmailAssunto] = useState("");
     const [filterStatus, setFilterStatus] = useState<string>("TODAS");
     const [dbConsolidados, setDbConsolidados] = useState<Record<string, string>>({}); // uniqueKey -> consolidadoId
     const [existingConsolidados, setExistingConsolidados] = useState<any[]>([]);
@@ -944,7 +945,10 @@ export default function FechamentoLote({
             let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
             if (!targetLoteId) throw new Error("Lote não encontrado. Processe uma das etapas anteriores primeiro.");
 
-            const payload = { loteId: targetLoteId };
+            const [ano, mes] = (periodoInicio || "").split("-");
+            const finalAssunto = emailAssunto.trim() || `Faturamento iWof - ${mes}/${ano}`;
+
+            const payload = { loteId: targetLoteId, assunto: finalAssunto };
             const res = await fetch("/api/faturamento/disparar-emails", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -1091,16 +1095,81 @@ export default function FechamentoLote({
             {/* Modal: EMAILS */}
             {activeModal === "emails" && (
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-                    <div className="bg-[var(--bg-card)] border border-[var(--border)] p-6 rounded-2xl max-w-md w-full shadow-2xl">
-                        <h3 className="text-xl font-bold text-[var(--danger)] mb-2">Atenção Crítica</h3>
+                    <div className="bg-[var(--bg-card)] border border-[var(--border)] p-6 rounded-2xl max-w-4xl w-full shadow-2xl max-h-[90vh] overflow-y-auto">
+                        <div className="flex items-center gap-3 mb-2">
+                            <Mail className="text-blue-500" size={28} />
+                            <h3 className="text-2xl font-black text-[var(--fg)]">Disparo de Faturamento</h3>
+                        </div>
                         <p className="text-sm text-[var(--fg-dim)] mb-6">
-                            Esta ação enviará os e-mails com Boletos, NFs, NCs e HCs consolidados no Lote para todos os e-mails financeiros dos clientes. <br /><br /><strong>Tem certeza absoluta que deseja FINALIZAR O CICLO?</strong>
+                            Configure o envio em lote de e-mails para os <strong>{matchFiles.reports.length} clientes</strong> processados neste ciclo.
                         </p>
 
-                        <div className="flex gap-4 mt-6">
-                            <button className="flex-1 btn btn-ghost" onClick={() => setActiveModal(null)}>Cancelar</button>
-                            <button className="flex-1 btn btn-primary bg-[var(--danger)] hover:bg-red-600 border-none text-white font-bold" onClick={handleDispararEmails} disabled={loadingMap["emailsSuccess"] || (!actionState.boletosSuccess && !actionState.nfsSuccess)}>
-                                {loadingMap["emailsSuccess"] ? "Enviando E-mails..." : "CONFIRMAR DISPARO"}
+                        <div className="space-y-5">
+                            <div className="form-control w-full">
+                                <label className="label"><span className="label-text font-bold text-[var(--fg)]">Assunto do E-mail</span></label>
+                                <input 
+                                    type="text" 
+                                    placeholder={`Ex: Faturamento iWof - ${(periodoInicio||"").split("-")[1]}/${(periodoInicio||"").split("-")[0]}`}
+                                    className="input input-bordered w-full bg-[var(--bg-sidebar)] focus:border-blue-500 text-[var(--fg)]"
+                                    value={emailAssunto} 
+                                    onChange={e => setEmailAssunto(e.target.value)} 
+                                />
+                                <span className="text-[10px] text-[var(--fg-dim)] mt-1">Se deixado em branco, o padrão "Faturamento iWof - MM/YYYY" será usado.</span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-6">
+                                {/* Lista de Destinatários */}
+                                <div className="border border-[var(--border)] rounded-xl p-4 bg-[var(--bg-sidebar)] flex flex-col h-64">
+                                    <h4 className="font-bold text-sm mb-3 text-[var(--fg)]">Destinatários Verificados</h4>
+                                    <div className="text-[11px] text-[var(--fg-dim)] overflow-y-auto flex-1 space-y-2 pr-2 custom-scrollbar">
+                                        {matchFiles.reports.map(r => (
+                                            <div key={r.id} className="flex flex-col border-b border-[var(--border)] pb-2 last:border-0 relative">
+                                                <span className="font-bold text-[var(--fg)] truncate w-full pr-6" title={r.nome}>{r.nome}</span>
+                                                <span className="truncate w-full text-blue-400 font-mono mt-0.5 text-[9px] uppercase tracking-widest">E-mails serão obtidos do banco</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Preview do E-mail */}
+                                <div className="border border-[var(--border)] rounded-xl p-4 bg-white text-black flex flex-col h-64 shadow-inner">
+                                    <h4 className="font-bold text-sm mb-3 text-gray-800 flex items-center gap-2">
+                                        <Eye size={16} /> Preview do Layout
+                                    </h4>
+                                    <div className="text-[10px] overflow-y-auto flex-1 bg-gray-50 border border-gray-200 p-4 rounded-lg custom-scrollbar">
+                                        <div style={{ fontFamily: "Arial, sans-serif" }}>
+                                            <div style={{ backgroundColor: "#0056b3", padding: "10px", textAlign: "center", borderRadius: "5px 5px 0 0" }}>
+                                                <h4 style={{ color: "#fff", margin: 0 }}>Faturamento Mensal iWof</h4>
+                                            </div>
+                                            <div style={{ padding: "15px", border: "1px solid #eee", borderTop: "none", borderRadius: "0 0 5px 5px" }}>
+                                                <h3 style={{ color: "#333", marginTop: 0 }}>Olá, equipe da [Empresa Cliente]!</h3>
+                                                <p style={{ color: "#555" }}>O faturamento referente a este ciclo já se encontra disponível...</p>
+                                                
+                                                <div style={{ backgroundColor: "#f8f9fa", padding: "10px", borderLeft: "3px solid #0056b3", margin: "10px 0" }}>
+                                                    <strong>Valor Bruto dos Serviços:</strong> R$ X.XXX,XX<br/>
+                                                    <strong style={{ color: "#28a745" }}>Valor Líquido do Boleto:</strong> R$ X.XXX,XX
+                                                </div>
+
+                                                <p style={{ color: "#555" }}>Os documentos fiscais já processados estão anexados a este e-mail.</p>
+                                                
+                                                <div style={{ marginTop: "15px", paddingTop: "10px", borderTop: "1px dashed #ccc", color: "#888", display: "flex", gap: "10px" }}>
+                                                    <span>📎 Fatura_01.pdf</span>
+                                                    <span>📎 Boleto.pdf</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-4 mt-8 pt-6 border-t border-[var(--border)]">
+                            <button className="flex-1 btn btn-ghost" onClick={() => setActiveModal(null)} disabled={loadingMap["emailsSuccess"]}>Cancelar</button>
+                            <button className="flex-[2] btn btn-primary bg-blue-600 hover:bg-blue-700 border-none text-white font-bold gap-3 shadow-lg shadow-blue-500/30" 
+                                onClick={handleDispararEmails} 
+                                disabled={loadingMap["emailsSuccess"] || (!actionState.boletosSuccess && !actionState.nfsSuccess)}>
+                                {loadingMap["emailsSuccess"] ? <span className="loading loading-spinner loading-sm"></span> : <Send size={20} />}
+                                {loadingMap["emailsSuccess"] ? "Processando Envios no Servidor..." : "CONFIRMAR DISPARO EM LOTE"}
                             </button>
                         </div>
                     </div>
