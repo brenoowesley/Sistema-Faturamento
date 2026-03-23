@@ -224,11 +224,13 @@ export async function POST(req: NextRequest) {
             const numAcrescimos = Number(cons.acrescimos || 0);
             const numDescontos = Number(cons.descontos || 0);
 
-            const valorBase = numBruto + numAcrescimos - numDescontos;
-            const valorNC = valorBase * 0.885;
-            const valorNF = valorBase * 0.115;
+            const valorBaseNormal = numBruto + numAcrescimos - numDescontos;
+            const valorBaseFatura = isNordestao ? (numBruto + numAcrescimos) : valorBaseNormal;
+
+            const valorNC = valorBaseFatura * 0.885;
+            const valorNF = valorBaseFatura * 0.115;
             const valorIRRF = Number(cons.valor_ir_xml || 0);
-            const valorLiquido = valorBase - valorIRRF;
+            const valorLiquido = valorBaseNormal - valorIRRF;
 
             const boletoUnificado = cliente.boleto_unificado ?? true;
             const finalLiquidoBoletoGCP = boletoUnificado === false ? (valorNF - valorIRRF) : valorLiquido;
@@ -321,7 +323,7 @@ export async function POST(req: NextRequest) {
             const totalAcrescimo = listaAcrescimosOriginal.reduce((acc: number, curr: any) => acc + Number(curr.valor || 0), 0);
             const totalDesconto = listaDescontosOriginal.reduce((acc: number, curr: any) => acc + Number(curr.valor || 0), 0);
 
-            const temValor = valorBase >= 0; // Garantir validacao 0 inclusive
+            const temValor = valorBaseNormal >= 0; // Garantir validacao 0 inclusive
 
             if (temValor) {
                 // ==========================================

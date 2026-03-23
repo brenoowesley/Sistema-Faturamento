@@ -610,16 +610,26 @@ export default function FechamentoLote({
                 }
 
                 const isNordestao = String(r.ciclo || "").toUpperCase().includes('NORDESTÃO');
-                const descontosMatematicos = isNordestao ? 0 : finalDescontos;
 
+                // Passamos o finalDescontos REAL para que o totais.valorLiquido (Boleto) seja abatido
                 const totais = calcularTotaisFaturamento(
                     r.valorBruto,
                     finalAcrescimos,
-                    descontosMatematicos,
+                    finalDescontos,
                     r.descontoIR || 0,
                     r.statusNF === 'EMITIDA',
                     r.boletoUnificado ?? true
                 );
+
+                // REGRA NORDESTÃO: O Boleto foi abatido acima. Agora restauramos o valor CHEIO apenas para a Fatura
+                if (isNordestao) {
+                    const valorFaturaCheia = r.valorBruto + finalAcrescimos;
+                    if (r.statusNF === 'EMITIDA') {
+                        totais.valorNF = valorFaturaCheia;
+                    } else {
+                        totais.valorNC = valorFaturaCheia;
+                    }
+                }
 
                 const basePayload = {
                     lote_id: currentLoteId,
@@ -1013,17 +1023,22 @@ export default function FechamentoLote({
     // Painel de cascata: agrega o pipeline matemático de todos os reports do lote
     const cascataTotais = matchFiles.reports.reduce(
         (acc, r) => {
-            const isNordestao = String(r.ciclo || "").toUpperCase().includes('NORDESTÃO');
-            const descontosMatematicos = isNordestao ? 0 : (r.valorDescontos || 0);
-
             const t = calcularTotaisFaturamento(
-                r.valorBruto, r.valorAcrescimos, descontosMatematicos,
+                r.valorBruto, r.valorAcrescimos, r.valorDescontos, // Usa desconto real
                 r.descontoIR || 0, r.statusNF === 'EMITIDA',
                 r.boletoUnificado ?? true
             );
+            
+            const isNordestao = String(r.ciclo || "").toUpperCase().includes('NORDESTÃO');
+            if (isNordestao) {
+                const valorFaturaCheia = r.valorBruto + r.valorAcrescimos;
+                if (r.statusNF === 'EMITIDA') t.valorNF = valorFaturaCheia;
+                else t.valorNC = valorFaturaCheia;
+            }
+
             acc.bruto += t.valorBruto;
             acc.ajustes += (r.valorAcrescimos - r.valorDescontos);
-            acc.base += t.valorBaseFaturavel;
+            acc.base += r.valorBaseFaturavel; 
             acc.nf += t.valorNF;
             acc.nc += t.valorNC;
             acc.irrf += t.irrf;
@@ -1569,10 +1584,14 @@ export default function FechamentoLote({
                                         {/* Boleto Final = pós ajustes − IRRF */}
                                         <td className="py-3 px-3 text-right">
                                             {(() => {
-                                                const isNordestao = String(r.ciclo || "").toUpperCase().includes('NORDESTÃO');
-                                                const descontosMatematicos = isNordestao ? 0 : (r.valorDescontos || 0);
-
-                                                const totais = calcularTotaisFaturamento(r.valorBruto, r.valorAcrescimos, descontosMatematicos, r.descontoIR || 0, r.statusNF === 'EMITIDA', r.boletoUnificado ?? true);
+                                                const totais = calcularTotaisFaturamento(
+                                                    r.valorBruto,
+                                                    r.valorAcrescimos,
+                                                    r.valorDescontos, // Passa o desconto real para renderizar o boleto reduzido
+                                                    r.descontoIR || 0,
+                                                    r.statusNF === 'EMITIDA',
+                                                    r.boletoUnificado ?? true
+                                                );
                                                 if (!r.boletoUnificado && totais.valorNF > 0 && totais.valorNC > 0) {
                                                     return (
                                                         <div className="flex flex-col items-end gap-1">

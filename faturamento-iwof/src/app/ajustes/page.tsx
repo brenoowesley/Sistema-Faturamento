@@ -282,34 +282,65 @@ export default function AjustesPage() {
     const [filterDataInicio, setFilterDataInicio] = useState("");
     const [filterDataFim, setFilterDataFim] = useState("");
     const [filterClienteId, setFilterClienteId] = useState("");
+    const [filterSearchText, setFilterSearchText] = useState("");
+    const [filterDateType, setFilterDateType] = useState<"ocorrencia" | "aplicacao">("aplicacao");
 
     const applyFilters = useCallback((lista: Ajuste[]) => {
         return lista.filter(item => {
             if (filterClienteId && item.cliente_id !== filterClienteId) return false;
-            if (filterDataInicio && item.data_ocorrencia < filterDataInicio) return false;
-            if (filterDataFim && item.data_ocorrencia > filterDataFim) return false;
+            
+            // Filtro por termo de busca (Razão Social / Nome Fantasia / CNPJ)
+            if (filterSearchText) {
+                const search = filterSearchText.toLowerCase();
+                const match = (item.clientes?.nome_conta_azul || "").toLowerCase().includes(search) ||
+                              (item.clientes?.razao_social || "").toLowerCase().includes(search) ||
+                              (item.clientes?.cnpj || "").includes(search) ||
+                              (item.nome_profissional || "").toLowerCase().includes(search);
+                if (!match) return false;
+            }
+
+            // Filtro por Data (Ocorrência ou Aplicação)
+            const dateToCompare = filterDateType === "aplicacao" ? item.data_aplicacao : item.data_ocorrencia;
+            if (filterDataInicio || filterDataFim) {
+                if (!dateToCompare) return false; // Se está filtrando por data e o item não tem a data selecionada
+                const dateOnly = dateToCompare.split("T")[0];
+                if (filterDataInicio && dateOnly < filterDataInicio) return false;
+                if (filterDataFim && dateOnly > filterDataFim) return false;
+            }
+
             return true;
         });
-    }, [filterClienteId, filterDataInicio, filterDataFim]);
+    }, [filterClienteId, filterDataInicio, filterDataFim, filterSearchText, filterDateType]);
 
     const handleExportXLSX = () => {
         const targetLista = activeTab === "descontos" ? descontosPendentes 
                           : activeTab === "acrescimos" ? acrescimosPendentes 
                           : historico;
                           
-        if (targetLista.length === 0) {
-            alert("Nenhum dado para exportar com os filtros atuais.");
+        // Se houver seleção manual (Checkboxes), exporta apenas os selecionados.
+        // Caso contrário, exporta a lista filtrada da aba ativa.
+        const dataToExport = selectedIds.size > 0 
+            ? targetLista.filter(item => selectedIds.has(item.id))
+            : targetLista;
+                          
+        if (dataToExport.length === 0) {
+            alert("Nenhum dado para exportar com os filtros ou seleção atual.");
             return;
         }
 
-        const exportData = targetLista.map(item => ({
-            "Nome do usuário": item.nome_profissional || "-",
-            "Loja": item.clientes?.nome_conta_azul || item.clientes?.razao_social || "-",
+        const exportData = dataToExport.map(item => ({
+            "Profissional": item.nome_profissional || "-",
+            "Empresa (Conta Azul)": item.clientes?.nome_conta_azul || "-",
+            "Razão Social": item.clientes?.razao_social || "-",
+            "CNPJ": item.clientes?.cnpj || "-",
             "Valor": item.valor,
-            "Data da aplicação": item.status_aplicacao && item.data_aplicacao ? fmtDate(item.data_aplicacao) : "A aplicar (Pendente)",
+            "Status": item.status_aplicacao ? "Aplicado" : "Pendente",
+            "Data da aplicação": item.data_aplicacao ? fmtDate(item.data_aplicacao) : "-",
             "Data da ocorrência": fmtDate(item.data_ocorrencia),
             "Tipo": item.tipo,
             "Motivo": item.motivo || "-",
+            "Obs Interna": item.observacao_interna || "-",
+            "Lote": item.lote_aplicado_id || "-"
         }));
 
         const ws = XLSX.utils.json_to_sheet(exportData);
@@ -681,10 +712,29 @@ export default function AjustesPage() {
                 </div>
 
                 {/* Filtros Container */}
-                <div className="bg-[var(--bg-card)] p-4 rounded-xl border border-[var(--border)] shadow-sm flex flex-col md:flex-row items-end gap-4 justify-between relative z-10">
-                    <div className="flex flex-1 flex-col md:flex-row gap-4 w-full">
-                        <div className="w-full md:w-64">
-                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-1.5 block">Empresa / Loja</label>
+                <div className="bg-[var(--bg-card)] p-5 rounded-2xl border border-[var(--border)] shadow-xl flex flex-col gap-6 relative z-10">
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                        
+                        {/* Busca Texto */}
+                        <div className="md:col-span-3">
+                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block flex items-center gap-2">
+                                <Search size={12} /> Busca Rápida
+                            </label>
+                            <div className="relative">
+                                <Search className="absolute left-3 top-3 text-[var(--fg-dim)]" size={14} />
+                                <input
+                                    type="text"
+                                    className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white pl-9 pr-4 py-2.5 rounded-xl text-sm focus:border-[var(--primary)] outline-none transition-all placeholder:text-[var(--fg-dim)]/50"
+                                    placeholder="Razão, Profissional, CNPJ..."
+                                    value={filterSearchText}
+                                    onChange={e => setFilterSearchText(e.target.value)}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Dropdown de Clientes */}
+                        <div className="md:col-span-3">
+                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Filtrar por Loja</label>
                             <SearchableSelect
                                 options={clientes}
                                 value={filterClienteId}
@@ -692,41 +742,71 @@ export default function AjustesPage() {
                                 onChange={(client) => setFilterClienteId(client?.id || "")}
                             />
                         </div>
-                        <div className="w-full md:w-36">
-                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-1.5 block">Data Inicial</label>
+
+                        {/* Tipo de Filtro de Data */}
+                        <div className="md:col-span-2">
+                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Filtrar por</label>
+                            <select
+                                className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white p-2.5 rounded-xl text-sm focus:border-[var(--primary)] outline-none appearance-none cursor-pointer"
+                                value={filterDateType}
+                                onChange={e => setFilterDateType(e.target.value as any)}
+                            >
+                                <option value="aplicacao">📅 Data de Aplicação</option>
+                                <option value="ocorrencia">⏲️ Data de Ocorrência</option>
+                            </select>
+                        </div>
+
+                        {/* Data Inicial */}
+                        <div className="md:col-span-2">
+                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Início</label>
                             <input
                                 type="date"
-                                className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-[var(--fg-dim)] placeholder-[var(--fg-dim)] p-2.5 rounded-lg text-sm focus:border-[var(--primary)] outline-none transition-colors"
+                                className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white p-2.5 rounded-xl text-sm focus:border-[var(--primary)] outline-none transition-all"
                                 value={filterDataInicio}
                                 onFocus={(e) => (e.target as any).showPicker?.()}
                                 onChange={e => setFilterDataInicio(e.target.value)}
                             />
                         </div>
-                        <div className="w-full md:w-36">
-                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-1.5 block">Data Final</label>
+
+                        {/* Data Final */}
+                        <div className="md:col-span-2">
+                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Fim</label>
                             <input
                                 type="date"
-                                className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-[var(--fg-dim)] placeholder-[var(--fg-dim)] p-2.5 rounded-lg text-sm focus:border-[var(--primary)] outline-none transition-colors"
+                                className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white p-2.5 rounded-xl text-sm focus:border-[var(--primary)] outline-none transition-all"
                                 value={filterDataFim}
                                 onFocus={(e) => (e.target as any).showPicker?.()}
                                 onChange={e => setFilterDataFim(e.target.value)}
                             />
                         </div>
                     </div>
-                    <div className="flex gap-2 w-full md:w-auto h-11">
-                        <button
-                            onClick={() => { setFilterClienteId(""); setFilterDataInicio(""); setFilterDataFim(""); }}
-                            title="Limpar filtros"
-                            className="bg-[var(--bg-main)] hover:bg-white/5 border border-[var(--border)] text-[var(--fg-dim)] hover:text-white flex items-center justify-center rounded-lg px-4 transition-colors font-medium text-sm flex-1 md:flex-none"
-                        >
-                            <X size={16} className="mr-2" /> Limpar
-                        </button>
-                        <button
-                            onClick={handleExportXLSX}
-                            className="bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-500 border border-emerald-600/30 font-bold flex items-center justify-center rounded-lg px-4 transition-colors text-sm flex-1 md:flex-none shadow-sm"
-                        >
-                            <Upload size={16} className="mr-2 rotate-180" /> Exportar XLSX
-                        </button>
+
+                    <div className="flex justify-between items-center border-t border-[var(--border)] pt-4 mt-2">
+                        <div className="flex gap-2">
+                            <span className="bg-[var(--bg-main)] px-3 py-1.5 rounded-lg border border-[var(--border)] text-[10px] font-bold text-[var(--fg-dim)] uppercase tracking-wider">
+                                {descontosPendentes.length + acrescimosPendentes.length + historico.length} registros encontrados
+                            </span>
+                            {selectedIds.size > 0 && (
+                                <span className="bg-[var(--primary)]/20 px-3 py-1.5 rounded-lg border border-[var(--primary)]/30 text-[10px] font-bold text-[var(--primary)] uppercase tracking-wider animate-pulse">
+                                    {selectedIds.size} selecionados
+                                </span>
+                            )}
+                        </div>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => { setFilterClienteId(""); setFilterDataInicio(""); setFilterDataFim(""); setFilterSearchText(""); setFilterDateType("aplicacao"); setSelectedIds(new Set()); }}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-[var(--fg-dim)] hover:text-white transition-colors"
+                            >
+                                <X size={16} /> Limpar Filtros
+                            </button>
+                            <button
+                                onClick={handleExportXLSX}
+                                className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/20 transition-all border border-emerald-500/20"
+                            >
+                                <Upload size={16} className="rotate-180" /> 
+                                {selectedIds.size > 0 ? `Exportar Seleção (${selectedIds.size})` : "Exportar Relatório XLSX"}
+                            </button>
+                        </div>
                     </div>
                 </div>
 
