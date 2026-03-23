@@ -15,6 +15,9 @@ export type TriagemFile = {
     nfNumber?: string;
     errorMessage?: string;
     matchConfidence?: string;
+    numero_nf?: string;
+    numero_nc?: string;
+    pdfBlob?: Blob;
 };
 
 export default function WizardTriagem() {
