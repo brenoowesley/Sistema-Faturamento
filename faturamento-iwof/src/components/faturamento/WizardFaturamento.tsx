@@ -235,15 +235,18 @@ export default function WizardFaturamento() {
 
             let matched: ClienteDB | undefined;
             let suggestedClients: ClienteDB[] = [];
+            let status_match: "sucesso" | "pendente" | "vinculado_manual" = "pendente";
 
             const lojaNormalizada = normalizarNome(loja);
 
             if (cnpjDaPlanilha) {
                 matched = allClientes.find(c => normalizeCnpj(c.cnpj || "") === cnpjDaPlanilha);
+                if (matched) status_match = "sucesso";
             }
 
             if (!matched) {
                 matched = clienteByContaAzul.get(lojaNormalizada);
+                if (matched) status_match = "sucesso";
             }
 
             if (!matched) {
@@ -253,6 +256,7 @@ export default function WizardFaturamento() {
                     normalizarNome(c.nome || "") === lojaNormalizada ||
                     normalizarNome(c.nome_conta_azul || "") === lojaNormalizada
                 );
+                if (matched) status_match = "sucesso";
             }
 
             if (!matched) {
@@ -302,7 +306,7 @@ export default function WizardFaturamento() {
                     }
 
                     if (!tied && bestCandidate) {
-                        matched = bestCandidate;
+                        suggestedClients = [bestCandidate];
                     } else {
                         suggestedClients = allPartials;
                     }
@@ -366,6 +370,7 @@ export default function WizardFaturamento() {
                 motivoCancelamento,
                 responsavelCancelamento,
                 status,
+                status_match,
                 clienteId: matched?.id ?? null,
                 razaoSocial: matched?.razao_social ?? null,
                 cnpj: matched?.cnpj ?? null,
@@ -549,7 +554,8 @@ export default function WizardFaturamento() {
                     razaoSocial: cliente.razao_social,
                     cnpj: cliente.cnpj,
                     cicloNome: cliente.ciclos_faturamento?.nome ?? null,
-                    status: newStatus
+                    status: newStatus,
+                    status_match: "vinculado_manual"
                 };
             }
             return a;

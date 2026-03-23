@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ArrowLeft, ChevronRight, DollarSign, Building2, CheckCircle2, AlertTriangle, AlertCircle, Users, XCircle, ChevronDown } from "lucide-react";
-import { FinancialSummary, ConciliationResult, Agendamento } from "../types";
+import { FinancialSummary, ConciliationResult, Agendamento, ClienteDB } from "../types";
 import { fmtCurrency } from "../utils";
 
 interface ResumoFaturamentoProps {
@@ -14,6 +14,8 @@ interface ResumoFaturamentoProps {
     duplicates: { identical: Agendamento[][], suspicious: Agendamento[][] };
     handleSaveLoteInicial: () => Promise<void>;
     saving: boolean;
+    dbClientes: ClienteDB[];
+    handleManualStoreMatch: (lojaRawName: string, clienteId: string) => void;
 }
 
 export default function ResumoFaturamento({
@@ -24,11 +26,30 @@ export default function ResumoFaturamento({
     setAgendamentos,
     duplicates,
     handleSaveLoteInicial,
-    saving
+    saving,
+    dbClientes,
+    handleManualStoreMatch
 }: ResumoFaturamentoProps) {
 
     const [openCategories, setOpenCategories] = useState<Record<string, boolean>>({});
     const [openUFs, setOpenUFs] = useState<Record<string, boolean>>({});
+
+    const [modalVinculoLoja, setModalVinculoLoja] = useState<string | null>(null);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [selectedClienteId, setSelectedClienteId] = useState("");
+
+    const handleOpenVinculo = (lojaName: string) => {
+        setModalVinculoLoja(lojaName);
+        setSearchTerm(lojaName);
+        setSelectedClienteId("");
+    };
+
+    const handleConfirmVinculo = () => {
+        if (modalVinculoLoja && selectedClienteId) {
+            handleManualStoreMatch(modalVinculoLoja, selectedClienteId);
+            setModalVinculoLoja(null);
+        }
+    };
 
     const toggleCategory = (title: string) => {
         setOpenCategories(prev => ({ ...prev, [title]: !prev[title] }));
@@ -495,13 +516,16 @@ export default function ResumoFaturamento({
                                     validLines: number,
                                     invalidLines: number,
                                     reasons: Set<string>,
-                                    totalValor: number
+                                    totalValor: number,
+                                    isPendente: boolean
                                 }>();
 
                                 agendamentos.forEach(a => {
                                     const key = a.loja;
-                                    if (!map.has(key)) map.set(key, { loja: a.loja, validLines: 0, invalidLines: 0, reasons: new Set(), totalValor: 0 });
+                                    if (!map.has(key)) map.set(key, { loja: a.loja, validLines: 0, invalidLines: 0, reasons: new Set(), totalValor: 0, isPendente: false });
                                     const m = map.get(key)!;
+
+                                    if (a.status_match === "pendente") m.isPendente = true;
 
                                     m.totalValor += a.valorIwof;
 
@@ -510,7 +534,10 @@ export default function ResumoFaturamento({
                                     } else {
                                         m.invalidLines++;
                                         if (a.isRemoved) m.reasons.add("Removida Manualmente (Ou Duplicada)");
-                                        else if (!a.clienteId) m.reasons.add("Sem Vínculo/Não Encontrada no Banco");
+                                        else if (!a.clienteId) {
+                                            if (a.status_match === "pendente") m.reasons.add("Não Encontrada (Match Incompleto)");
+                                            else m.reasons.add("Sem Vínculo/Não Encontrada no Banco");
+                                        }
                                         else if (a.status === "CICLO_INCORRETO") m.reasons.add("Ciclo Incorreto");
                                         else if (a.status === "FORA_PERIODO") m.reasons.add("Fora do Período");
                                         else if (a.status === "CANCELAR") m.reasons.add("Regra Irrelevante (<0.16h)");
@@ -531,8 +558,25 @@ export default function ResumoFaturamento({
                                 }
 
                                 return rows.map((r, i) => (
-                                    <tr key={i} className="hover:bg-[var(--bg-card-hover)] transition-colors">
-                                        <td className="py-3 px-4 font-semibold text-[var(--fg)]">{r.loja}</td>
+                                    <tr key={i} className={`hover:bg-[var(--bg-card-hover)] transition-colors ${r.isPendente ? 'bg-[rgba(239,68,68,0.05)] border-l-4 border-l-[var(--danger)]' : ''}`}>
+                                        <td className="py-3 px-4">
+                                            {r.isPendente ? (
+                                                <div className="flex flex-col gap-2 items-start">
+                                                    <span className="font-semibold text-[var(--danger)]">{r.loja}</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="badge badge-error badge-sm text-[9px] font-bold text-white border-transparent bg-[var(--danger)]">NÃO ENCONTRADO</span>
+                                                        <button 
+                                                            className="btn btn-xs bg-[var(--accent)] text-white border-none hover:bg-blue-600 shadow-sm"
+                                                            onClick={() => handleOpenVinculo(r.loja)}
+                                                        >
+                                                            Vincular Manualmente
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <span className="font-semibold text-[var(--fg)]">{r.loja}</span>
+                                            )}
+                                        </td>
                                         <td className="py-3 px-4">
                                             {r.validLines > 0 ? (
                                                 <span className="text-[10px] font-bold px-2 py-1 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20 whitespace-nowrap">
@@ -582,7 +626,7 @@ export default function ResumoFaturamento({
                 <button
                     className="btn btn-primary btn-lg shadow-lg hover:shadow-xl transition-all min-w-[200px]"
                     onClick={handleSaveLoteInicial}
-                    disabled={saving}
+                    disabled={saving || hasBlockers}
                 >
                     {saving ? (
                         <>
@@ -595,6 +639,84 @@ export default function ResumoFaturamento({
                     )}
                 </button>
             </div>
+
+            {/* Modal de Vinculação Manual */}
+            {modalVinculoLoja && (
+                <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+                        <div className="p-5 border-b border-[var(--border)] bg-[rgba(0,0,0,0.1)] flex items-center justify-between">
+                            <h3 className="font-bold text-lg text-[var(--fg)] flex items-center gap-2">
+                                <Building2 size={20} className="text-[var(--accent)]" /> 
+                                Vincular Cliente
+                            </h3>
+                            <button className="btn btn-sm btn-circle btn-ghost text-[var(--fg-dim)]" onClick={() => setModalVinculoLoja(null)}>
+                                <XCircle size={20} />
+                            </button>
+                        </div>
+                        
+                        <div className="p-5 flex flex-col gap-4">
+                            <div className="p-3 bg-[var(--danger)]/10 border border-[var(--danger)]/20 rounded-lg">
+                                <p className="text-xs text-[var(--danger)]/80 font-bold uppercase tracking-wider mb-1">Nome na Planilha</p>
+                                <p className="font-mono text-sm font-semibold text-[var(--danger)] break-all">{modalVinculoLoja}</p>
+                            </div>
+
+                            <div className="flex flex-col gap-2">
+                                <label className="text-sm font-semibold text-[var(--fg-dim)]">Buscar Cliente na Base</label>
+                                <input 
+                                    type="text" 
+                                    className="input w-full bg-[var(--bg-sidebar)] border-[var(--border)] focus:border-[var(--accent)] text-[var(--fg)]" 
+                                    placeholder="Digite para buscar..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                />
+                                
+                                <div className="max-h-[200px] overflow-y-auto w-full custom-scrollbar mt-2 border border-[var(--border)] rounded-lg bg-[var(--bg-sidebar)] divide-y divide-[var(--border)]">
+                                    {dbClientes
+                                        .filter(c => 
+                                            c.razao_social.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                                            (c.nome_fantasia || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                            (c.nome_conta_azul || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                            c.cnpj.includes(searchTerm)
+                                        )
+                                        .slice(0, 50)
+                                        .map(c => (
+                                            <div 
+                                                key={c.id} 
+                                                className={`p-3 cursor-pointer transition-colors ${selectedClienteId === c.id ? 'bg-[rgba(33,118,255,0.1)] border-l-2 border-[var(--accent)]' : 'hover:bg-[var(--bg-card-hover)]'}`}
+                                                onClick={() => setSelectedClienteId(c.id)}
+                                            >
+                                                <p className="font-bold text-[var(--fg)] text-sm">{c.nome_fantasia || c.razao_social}</p>
+                                                <p className="text-xs text-[var(--fg-dim)] font-mono mt-0.5">{c.cnpj}</p>
+                                                {c.nome_conta_azul && <p className="text-xs text-amber-500/80 mt-0.5">Conta Azul: {c.nome_conta_azul}</p>}
+                                            </div>
+                                        ))
+                                    }
+                                </div>
+                            </div>
+
+                            <a 
+                                href={`/dashboard/clientes/novo?nome=${encodeURIComponent(modalVinculoLoja)}`} 
+                                target="_blank" 
+                                className="text-xs text-[var(--accent)] hover:underline flex items-center gap-1 mt-1 font-medium w-fit"
+                            >
+                                <Users size={12} />
+                                Cadastrar nova loja com este nome
+                            </a>
+                        </div>
+                        
+                        <div className="p-4 border-t border-[var(--border)] bg-[rgba(0,0,0,0.1)] flex justify-end gap-2">
+                            <button className="btn btn-ghost text-[var(--fg-dim)]" onClick={() => setModalVinculoLoja(null)}>Cancelar</button>
+                            <button 
+                                className="btn btn-primary shadow-lg px-6" 
+                                disabled={!selectedClienteId}
+                                onClick={handleConfirmVinculo}
+                            >
+                                Confirmar Vínculo
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

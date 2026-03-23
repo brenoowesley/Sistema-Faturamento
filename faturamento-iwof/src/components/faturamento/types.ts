@@ -56,6 +56,7 @@ export interface Agendamento {
     data_competencia?: string;
     dataCompetencia?: string;     // assigned period (YYYY-MM-DD or YYYY-MM)
     boleto_unificado?: boolean;
+    status_match?: "sucesso" | "pendente" | "vinculado_manual";
     rawRow: Record<string, string>;
 
     // Interactive fields
