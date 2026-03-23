@@ -10,7 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 
 // Configura o worker do PDF.js para funcionar no navegador
 if (typeof window !== 'undefined') {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '/workers/pdf.worker.min.mjs';
 }
 
 interface Step2ValidacaoProps {

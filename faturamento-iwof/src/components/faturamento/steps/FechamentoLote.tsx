@@ -10,7 +10,7 @@ import * as pdfjsLib from "pdfjs-dist";
 
 // Garante que a versão do worker é exatamente igual à versão da biblioteca instalada
 if (typeof window !== 'undefined') {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '/workers/pdf.worker.min.mjs';
 }
 
 interface FechamentoLoteProps {

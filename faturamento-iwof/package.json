@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "postinstall": "shx mkdir -p public/workers && shx cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/workers/"
   },
   "dependencies": {
     "@google-cloud/pubsub": "^5.2.3",
@@ -39,6 +40,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "shx": "^0.4.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
