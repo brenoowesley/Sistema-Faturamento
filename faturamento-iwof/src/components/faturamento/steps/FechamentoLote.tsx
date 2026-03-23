@@ -621,15 +621,6 @@ export default function FechamentoLote({
                     r.boletoUnificado ?? true
                 );
 
-                // REGRA NORDESTÃO: O Boleto foi abatido acima. Agora restauramos o valor CHEIO apenas para a Fatura
-                if (isNordestao) {
-                    const valorFaturaCheia = r.valorBruto + finalAcrescimos;
-                    if (r.statusNF === 'EMITIDA') {
-                        totais.valorNF = valorFaturaCheia;
-                    } else {
-                        totais.valorNC = valorFaturaCheia;
-                    }
-                }
 
                 const basePayload = {
                     lote_id: currentLoteId,

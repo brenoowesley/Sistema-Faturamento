@@ -136,7 +136,10 @@ export async function POST(req: NextRequest) {
         const semNFSet = new Set(lojasSemNF || []);
 
         const records = Array.from(finalAgrupado.values()).map(r => {
-            const baseResumo = (r.valor_bruto + r.acrescimos) - r.descontos;
+            const isCicloNordestao = String(r.clientes?.ciclos_faturamento?.nome || "").toUpperCase().includes('NORDESTÃO');
+            const baseResumo = isCicloNordestao 
+                ? (r.valor_bruto + r.acrescimos) 
+                : (r.valor_bruto + r.acrescimos) - r.descontos;
             const isSemNF = semNFSet.has(r.cliente_id) || semNFSet.has(r.clientes?.loja_mae_id);
             return {
                 ...r,

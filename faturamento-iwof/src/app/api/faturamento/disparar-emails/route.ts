@@ -20,6 +20,7 @@ export async function POST(request: Request) {
                 valor_bruto,
                 valor_boleto_final,
                 valor_nc_final,
+                acrescimos,
                 numero_nf,
                 cliente_id,
                 clientes ( nome, razao_social, emails_faturamento, nome_conta_azul, ciclos_faturamento ( nome ) )
@@ -41,6 +42,12 @@ export async function POST(request: Request) {
 
             const destinatarios = cliente.emails_faturamento;
             const cicloNome = cliente.ciclos_faturamento?.nome || "Geral";
+            const isNordestao = cicloNome.toUpperCase().includes('NORDESTAO') || cicloNome.toUpperCase().includes('NORDESTÃO');
+            
+            // Se for Nordestão, mostra o valor bruto sem subtrair descontos para efeito de apresentação na fatura
+            const valorApresentacaoFatura = isNordestao 
+                ? (item.valor_bruto + (item.acrescimos || 0)) 
+                : item.valor_bruto;
 
             try {
                 const res = await prepareEmailData(
@@ -52,7 +59,7 @@ export async function POST(request: Request) {
                     cicloNome,
                     destinatarios,
                     assunto,
-                    item.valor_bruto,
+                    valorApresentacaoFatura,
                     item.valor_boleto_final,
                     item.valor_nc_final,
                     item.numero_nf

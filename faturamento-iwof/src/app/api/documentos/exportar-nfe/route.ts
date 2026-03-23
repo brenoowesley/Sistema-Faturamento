@@ -22,11 +22,12 @@ export async function GET(req: NextRequest) {
             .select(`
                 *,
                 data_competencia,
-                lotes:faturamentos_lote (data_inicio_ciclo, data_fim_ciclo, queiroz_split_date),
+                lotes:faturamentos_lote (data_inicio_ciclo, data_fim_ciclo, queiroz_split_date, nome_pasta),
                 clientes (
                     razao_social, cnpj, email_principal, emails_faturamento, nome_conta_azul,
                     endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge,
-                    loja_mae_id
+                    loja_mae_id,
+                    ciclos_faturamento(nome)
                 )
             `)
             .eq("lote_id", loteId);
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest) {
 
             const { data: lote, error: loteErr } = await supabase
                 .from("faturamentos_lote")
-                .select("data_inicio_ciclo, data_fim_ciclo, queiroz_split_date")
+                .select("data_inicio_ciclo, data_fim_ciclo, queiroz_split_date, nome_pasta")
                 .eq("id", loteId)
                 .maybeSingle();
 
@@ -62,7 +63,8 @@ export async function GET(req: NextRequest) {
                     clientes (
                         razao_social, nome_fantasia, cnpj, email_principal, emails_faturamento, nome_conta_azul,
                         endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge,
-                        lo_ja_mae_id:loja_mae_id, boleto_unificado, tempo_pagamento_dias
+                        lo_ja_mae_id:loja_mae_id, boleto_unificado, tempo_pagamento_dias,
+                        ciclos_faturamento(nome)
                     ),
                     data_competencia
                 `)

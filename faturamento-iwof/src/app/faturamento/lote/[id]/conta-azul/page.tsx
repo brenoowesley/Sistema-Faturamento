@@ -167,31 +167,33 @@ export default function ContaAzulStagingPage() {
 
                 const boletoUnificado = c.boleto_unificado ?? true;
                 const valorIRRF = Number(r.valor_ir_xml || 0);
+                
+                // Puxa exatamente o que o motor calculou e salvou no banco
+                const valorNF = Number((r.valor_nf_emitida - valorIRRF).toFixed(2));
+                const valorNC = Number(r.valor_nc_final || 0);
+                const valorBoletoFinal = Number(r.valor_boleto_final || 0);
 
                 if (!boletoUnificado) {
-                    // Split into NF and NC
-                    // 1. NF Line
                     newMappedRows.push({
                         ...baseRow,
                         id: `${r.id}-NF`,
-                        valor: Number((r.valor_nf_emitida - valorIRRF).toFixed(2)),
+                        valor: valorNF > 0 ? valorNF : 0,
                         descricao: baseRow.descricao + " - Referência: NF",
                         observacoes: `[NF] NF - ${r.numero_nf || "PENDENTE"} | Ref: ${c.nome_fantasia || c.razao_social}`,
                     });
-                    // 2. NC Line (Remainder)
+                    
                     newMappedRows.push({
                         ...baseRow,
                         id: `${r.id}-NC`,
-                        valor: Number(r.valor_nc_final || 0),
+                        valor: valorNC,
                         descricao: baseRow.descricao + " - Referência: NC",
                         observacoes: `[NC] Nota de Crédito | Ref: ${c.nome_fantasia || c.razao_social}`,
                     });
                 } else {
-                    // Unified or single value
                     newMappedRows.push({
                         ...baseRow,
                         id: r.id,
-                        valor: r.valor_boleto_final,
+                        valor: valorBoletoFinal,
                         observacoes: `NF - ${r.numero_nf || "PENDENTE"} R$${r.valor_nf_emitida?.toFixed(2) || "0.00"}`,
                     });
                 }
