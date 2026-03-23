@@ -215,7 +215,7 @@ export async function POST(req: NextRequest) {
             processedClientsGcp.add(deduplicationKey);
 
             const ciclo = cliente.ciclos_faturamento?.nome || "GERAL";
-            const isNordestao = ciclo === "NORDESTÃO";
+            const isNordestao = String(ciclo).toUpperCase().includes('NORDESTÃO');
             const isLeta = ciclo === "LETA";
             const isQueiroz = ciclo === "QUEIROZ";
 
