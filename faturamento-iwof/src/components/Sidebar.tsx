@@ -29,6 +29,7 @@ const navItems = [
     { label: "Triagem de NFs", href: "/triagem", icon: Receipt },
     { label: "Notas de Crédito", href: "/notas-credito", icon: ReceiptText },
     { label: "Lanç. Parciais", href: "/lancamentos-parciais", icon: ClipboardList },
+    { label: "Emissão Avulsa", href: "/faturamento/avulso", icon: FilePlus },
     { label: "Gestão de Saques", href: "/saques", icon: Wallet, exact: true },
     { label: "Rastreio Transfeera", href: "/saques/acompanhamento", icon: Activity },
     { label: "Como Usar", href: "/como-usar", icon: HelpCircle },

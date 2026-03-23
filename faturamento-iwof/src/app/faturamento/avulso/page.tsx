@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
 import {
     FileCode2,
@@ -361,7 +362,14 @@ export default function FaturamentoAvulsoPage() {
         <div className="min-h-screen bg-[var(--bg-main)] p-8 pb-32">
             <div className="max-w-5xl mx-auto space-y-8">
                 
-                {mode !== "SELECAO" && (
+                {mode === "SELECAO" ? (
+                    <Link
+                        href="/faturamento/novo"
+                        className="btn btn-ghost text-[var(--fg-dim)] hover:text-white flex items-center gap-2 pl-0 hover:bg-transparent"
+                    >
+                        <ChevronLeft size={20} /> Voltar para o Faturamento
+                    </Link>
+                ) : (
                     <button
                         onClick={() => setMode("SELECAO")}
                         className="btn btn-ghost text-[var(--fg-dim)] hover:text-white flex items-center gap-2 pl-0 hover:bg-transparent"
