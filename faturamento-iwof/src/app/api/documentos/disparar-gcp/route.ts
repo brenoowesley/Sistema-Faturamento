@@ -242,13 +242,13 @@ export async function POST(req: NextRequest) {
                 const splitDt = new Date(lote.queiroz_split_date + "T12:00:00");
 
                 if (cliente.nome_conta_azul?.includes('(Mês Anterior)') || cliente.razao_social?.includes('(Mês Anterior)')) {
-                    // Termina 1 dia antes da data de corte
-                    const prevDay = new Date(splitDt);
-                    prevDay.setDate(splitDt.getDate() - 1);
-                    periodoCustom = `${formatDataSegura(lote.data_inicio_ciclo)} à ${formatDataSegura(prevDay.toISOString())}`;
+                    // Fatura 1: data fim deve ser obrigatoriamente a dataCorte (inclusive)
+                    periodoCustom = `${formatDataSegura(lote.data_inicio_ciclo)} à ${formatDataSegura(lote.queiroz_split_date)}`;
                 } else if (cliente.nome_conta_azul?.includes('(Mês Atual)') || cliente.razao_social?.includes('(Mês Atual)')) {
-                    // Inicia exatamente na data de corte
-                    periodoCustom = `${formatDataSegura(lote.queiroz_split_date)} à ${formatDataSegura(lote.data_fim_ciclo)}`;
+                    // Fatura 2: data inicio deve ser a dataCorte + 1 dia
+                    const nextDay = new Date(splitDt);
+                    nextDay.setDate(splitDt.getDate() + 1);
+                    periodoCustom = `${formatDataSegura(nextDay.toISOString())} à ${formatDataSegura(lote.data_fim_ciclo)}`;
                 }
             }
 
@@ -344,10 +344,23 @@ export async function POST(req: NextRequest) {
                 // Queiroz Fatiamento de Competências
                 let agsDaLoja = lojaAgendamentosMap.get(cliente.id) || [];
 
-                if (isQueiroz && cons.data_competencia) {
-                    // Seleciona agendamentos apenas do mes/ano especifico
-                    const mesAnoRef = cons.data_competencia.substring(0, 7); // ex: "2024-02"
-                    agsDaLoja = agsDaLoja.filter(ag => ag.inicio.startsWith(mesAnoRef));
+                if (isQueiroz && lote.queiroz_split_date) {
+                    const splitDateStr = lote.queiroz_split_date; // "YYYY-MM-DD"
+                    if (cliente.nome_conta_azul?.includes('(Mês Anterior)') || cliente.razao_social?.includes('(Mês Anterior)')) {
+                        // Fatura 1: data <= dataCorte
+                        agsDaLoja = agsDaLoja.filter(ag => {
+                            if (!ag.inicio) return false;
+                            const dataAg = ag.inicio.split('T')[0];
+                            return dataAg <= splitDateStr;
+                        });
+                    } else if (cliente.nome_conta_azul?.includes('(Mês Atual)') || cliente.razao_social?.includes('(Mês Atual)')) {
+                        // Fatura 2: data > dataCorte
+                        agsDaLoja = agsDaLoja.filter(ag => {
+                            if (!ag.inicio) return false;
+                            const dataAg = ag.inicio.split('T')[0];
+                            return dataAg > splitDateStr;
+                        });
+                    }
                 }
 
                 if (isLeta) {

@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
             .select(`
                 *,
                 data_competencia,
-                lotes:faturamentos_lote (data_inicio_ciclo, data_fim_ciclo),
+                lotes:faturamentos_lote (data_inicio_ciclo, data_fim_ciclo, queiroz_split_date),
                 clientes (
                     razao_social, cnpj, email_principal, emails_faturamento, nome_conta_azul,
                     endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge,
@@ -39,10 +39,9 @@ export async function GET(req: NextRequest) {
             simulationUsed = true;
             console.log("Simulando exportação a partir de agendamentos brutos...");
 
-            // Fetch lote info
             const { data: lote, error: loteErr } = await supabase
                 .from("faturamentos_lote")
-                .select("data_inicio_ciclo, data_fim_ciclo")
+                .select("data_inicio_ciclo, data_fim_ciclo, queiroz_split_date")
                 .eq("id", loteId)
                 .maybeSingle();
 
@@ -193,6 +192,24 @@ export async function GET(req: NextRequest) {
             const c = rec.clientes as any || {};
             const l = rec.lotes as any || {};
 
+            let descPeriodo = `Horas utilizadas: ${fmtDate(l?.data_inicio_ciclo)} À ${fmtDate(l?.data_fim_ciclo)}`;
+
+            if (l?.queiroz_split_date) {
+                const isQueirozSplit = rec.loja?.includes('(Mês Anterior)') || rec.loja?.includes('(Mês Atual)') ||
+                    c.razao_social?.includes('(Mês Anterior)') || c.razao_social?.includes('(Mês Atual)');
+
+                if (isQueirozSplit) {
+                    const splitDt = new Date(l.queiroz_split_date + "T12:00:00");
+                    if (rec.loja?.includes('(Mês Anterior)') || c.razao_social?.includes('(Mês Anterior)')) {
+                        descPeriodo = `Horas utilizadas: ${fmtDate(l?.data_inicio_ciclo)} À ${fmtDate(l.queiroz_split_date)}`;
+                    } else if (rec.loja?.includes('(Mês Atual)') || c.razao_social?.includes('(Mês Atual)')) {
+                        const nextDay = new Date(splitDt);
+                        nextDay.setDate(splitDt.getDate() + 1);
+                        descPeriodo = `Horas utilizadas: ${fmtDate(nextDay.toISOString().split('T')[0])} À ${fmtDate(l?.data_fim_ciclo)}`;
+                    }
+                }
+            }
+
             return {
                 "CPF_CNPJ": c.cnpj ? c.cnpj.replace(/\D/g, "") : "",
                 "Nome": c.razao_social || "",
@@ -208,7 +225,7 @@ export async function GET(req: NextRequest) {
                 "Endereco_Cidade_Codigo": c.codigo_ibge || "",
                 "Endereco_Cidade_Nome": c.cidade || "",
                 "Endereco_Estado": c.estado || "",
-                "Descricao": `Horas utilizadas: ${fmtDate(l?.data_inicio_ciclo)} À ${fmtDate(l?.data_fim_ciclo)}`,
+                "Descricao": descPeriodo,
                 "Data_Competencia": rec.data_competencia || "",
                 "IBSCBS_Indicador_Operacao": "100301",
                 "IBSCBS_Codigo_Classificacao": "000001",

@@ -34,6 +34,11 @@ interface EmissaoNotasProps {
             valorServicos: number;
         }
     }[]>>;
+    queirozConfig?: {
+        splitDate: string;
+        compAnterior: string;
+        compAtual: string;
+    } | null;
 }
 
 export default function EmissaoNotas({
@@ -44,7 +49,8 @@ export default function EmissaoNotas({
     lojasSemNf,
     agendamentos,
     nfseFiles,
-    setNfseFiles
+    setNfseFiles,
+    queirozConfig
 }: EmissaoNotasProps) {
     const [isExporting, setIsExporting] = useState(false);
     const [isExtracting, setIsExtracting] = useState(false);
@@ -138,7 +144,8 @@ export default function EmissaoNotas({
                     agendamentos: payloadAgendamentos,
                     lojasSemNF: Array.from(lojasSemNf),
                     periodoInicio,
-                    periodoFim
+                    periodoFim,
+                    queirozConfig
                 })
             });
 

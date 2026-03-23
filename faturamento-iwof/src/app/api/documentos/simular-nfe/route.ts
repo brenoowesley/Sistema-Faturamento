@@ -5,7 +5,7 @@ import * as xlsx from "xlsx";
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
-        const { agendamentos, lojasSemNF, periodoInicio, periodoFim } = body;
+        const { agendamentos, lojasSemNF, periodoInicio, periodoFim, queirozConfig } = body;
 
         if (!agendamentos || !Array.isArray(agendamentos)) {
             return NextResponse.json({ error: "agendamentos payload is required" }, { status: 400 });
@@ -166,6 +166,22 @@ export async function POST(req: NextRequest) {
             const c = rec.clientes as any || {};
             const l = rec.lotes as any || {};
 
+            let descPeriodo = `Horas utilizadas: ${fmtDate(l?.data_inicio_ciclo)} À ${fmtDate(l?.data_fim_ciclo)}`;
+
+            if (queirozConfig?.splitDate) {
+                const isQueirozSplit = rec.loja?.includes('(Mês Anterior)') || rec.loja?.includes('(Mês Atual)');
+                if (isQueirozSplit) {
+                    const splitDt = new Date(queirozConfig.splitDate + "T12:00:00");
+                    if (rec.loja?.includes('(Mês Anterior)') || c.razao_social?.includes('(Mês Anterior)')) {
+                        descPeriodo = `Horas utilizadas: ${fmtDate(l?.data_inicio_ciclo)} À ${fmtDate(queirozConfig.splitDate)}`;
+                    } else if (rec.loja?.includes('(Mês Atual)') || c.razao_social?.includes('(Mês Atual)')) {
+                        const nextDay = new Date(splitDt);
+                        nextDay.setDate(splitDt.getDate() + 1);
+                        descPeriodo = `Horas utilizadas: ${fmtDate(nextDay.toISOString().split('T')[0])} À ${fmtDate(l?.data_fim_ciclo)}`;
+                    }
+                }
+            }
+
             return {
                 "CPF_CNPJ": c.cnpj ? c.cnpj.replace(/\D/g, "") : "",
                 "Nome": c.razao_social || "",
@@ -181,7 +197,7 @@ export async function POST(req: NextRequest) {
                 "Endereco_Cidade_Codigo": c.codigo_ibge || "",
                 "Endereco_Cidade_Nome": c.cidade || "",
                 "Endereco_Estado": c.estado || "",
-                "Descricao": `Horas utilizadas: ${fmtDate(l?.data_inicio_ciclo)} À ${fmtDate(l?.data_fim_ciclo)}`,
+                "Descricao": descPeriodo,
                 "Data_Competencia": rec.data_competencia || "",
                 "IBSCBS_Indicador_Operacao": "100301",
                 "IBSCBS_Codigo_Classificacao": "000001",
