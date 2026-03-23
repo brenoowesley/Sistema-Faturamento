@@ -195,18 +195,23 @@ export async function GET(req: NextRequest) {
             let descPeriodo = `Horas utilizadas: ${fmtDate(l?.data_inicio_ciclo)} À ${fmtDate(l?.data_fim_ciclo)}`;
 
             if (l?.queiroz_split_date) {
-                const isQueirozSplit = rec.loja?.includes('(Mês Anterior)') || rec.loja?.includes('(Mês Atual)') ||
-                    c.razao_social?.includes('(Mês Anterior)') || c.razao_social?.includes('(Mês Atual)');
+                const recLoja = c.nome_fantasia || c.razao_social; // Define recLoja here
+                const isNomeAnterior = recLoja?.includes('(Mês Anterior)') || c.razao_social?.includes('(Mês Anterior)');
+                const isNomeAtual = recLoja?.includes('(Mês Atual)') || c.razao_social?.includes('(Mês Atual)');
 
-                if (isQueirozSplit) {
-                    const splitDt = new Date(l.queiroz_split_date + "T12:00:00");
-                    if (rec.loja?.includes('(Mês Anterior)') || c.razao_social?.includes('(Mês Anterior)')) {
-                        descPeriodo = `Horas utilizadas: ${fmtDate(l?.data_inicio_ciclo)} À ${fmtDate(l.queiroz_split_date)}`;
-                    } else if (rec.loja?.includes('(Mês Atual)') || c.razao_social?.includes('(Mês Atual)')) {
-                        const nextDay = new Date(splitDt);
-                        nextDay.setDate(splitDt.getDate() + 1);
-                        descPeriodo = `Horas utilizadas: ${fmtDate(nextDay.toISOString().split('T')[0])} À ${fmtDate(l?.data_fim_ciclo)}`;
-                    }
+                let isActuallyAnterior = isNomeAnterior;
+                if (!isNomeAnterior && !isNomeAtual && rec.data_competencia) {
+                    const compDay = new Date(rec.data_competencia + "T12:00:00").getDate();
+                    isActuallyAnterior = (compDay === 1);
+                }
+
+                const splitDt = new Date(l.queiroz_split_date + "T12:00:00");
+                if (isActuallyAnterior) {
+                    descPeriodo = `Horas utilizadas: ${fmtDate(l?.data_inicio_ciclo)} À ${fmtDate(l.queiroz_split_date)}`;
+                } else {
+                    const nextDay = new Date(splitDt);
+                    nextDay.setDate(splitDt.getDate() + 1);
+                    descPeriodo = `Horas utilizadas: ${fmtDate(nextDay.toISOString().split('T')[0])} À ${fmtDate(l?.data_fim_ciclo)}`;
                 }
             }
 
