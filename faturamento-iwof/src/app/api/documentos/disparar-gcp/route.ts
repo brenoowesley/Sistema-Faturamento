@@ -240,11 +240,14 @@ export async function POST(req: NextRequest) {
 
             if (isQueiroz && lote.queiroz_split_date) {
                 const splitDt = new Date(lote.queiroz_split_date + "T12:00:00");
+                const splitMonthStr = lote.queiroz_split_date.substring(0, 7); // ex: "2025-01"
 
-                if (cliente.nome_conta_azul?.includes('(Mês Anterior)') || cliente.razao_social?.includes('(Mês Anterior)')) {
+                const isMAnterior = cons.data_competencia && cons.data_competencia.startsWith(splitMonthStr);
+
+                if (isMAnterior) {
                     // Fatura 1: data fim deve ser obrigatoriamente a dataCorte (inclusive)
                     periodoCustom = `${formatDataSegura(lote.data_inicio_ciclo)} à ${formatDataSegura(lote.queiroz_split_date)}`;
-                } else if (cliente.nome_conta_azul?.includes('(Mês Atual)') || cliente.razao_social?.includes('(Mês Atual)')) {
+                } else {
                     // Fatura 2: data inicio deve ser a dataCorte + 1 dia
                     const nextDay = new Date(splitDt);
                     nextDay.setDate(splitDt.getDate() + 1);
@@ -346,14 +349,17 @@ export async function POST(req: NextRequest) {
 
                 if (isQueiroz && lote.queiroz_split_date) {
                     const splitDateStr = lote.queiroz_split_date; // "YYYY-MM-DD"
-                    if (cliente.nome_conta_azul?.includes('(Mês Anterior)') || cliente.razao_social?.includes('(Mês Anterior)')) {
+                    const splitMonthStr = splitDateStr.substring(0, 7);
+                    const isMAnterior = cons.data_competencia && cons.data_competencia.startsWith(splitMonthStr);
+
+                    if (isMAnterior) {
                         // Fatura 1: data <= dataCorte
                         agsDaLoja = agsDaLoja.filter(ag => {
                             if (!ag.inicio) return false;
                             const dataAg = ag.inicio.split('T')[0];
                             return dataAg <= splitDateStr;
                         });
-                    } else if (cliente.nome_conta_azul?.includes('(Mês Atual)') || cliente.razao_social?.includes('(Mês Atual)')) {
+                    } else {
                         // Fatura 2: data > dataCorte
                         agsDaLoja = agsDaLoja.filter(ag => {
                             if (!ag.inicio) return false;
