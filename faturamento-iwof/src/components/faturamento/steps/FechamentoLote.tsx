@@ -628,9 +628,33 @@ export default function FechamentoLote({
 
             if (consolidadosPayload.length > 0) {
                 await supabase.from('faturamento_consolidados').delete().eq('lote_id', currentLoteId);
+                
+                // --- INÍCIO DO FILTRO ANTI-COLISÃO ---
+                const safePayload = [];
+                const controleChaves = new Set();
+
+                for (const item of consolidadosPayload) {
+                    let comp = item.data_competencia || periodoInicio;
+                    let chave = `${item.lote_id}_${item.cliente_id}_${comp}`;
+                    
+                    // Se a chave já existe no array (Ex: 2ª metade do Split Queiroz)
+                    if (controleChaves.has(chave)) {
+                        // Adiciona 1 dia na data de competência para torná-la única no banco,
+                        // mantendo a semântica do mês/ano intacta.
+                        const dt = new Date(comp);
+                        dt.setDate(dt.getDate() + 1);
+                        comp = dt.toISOString().split('T')[0];
+                        chave = `${item.lote_id}_${item.cliente_id}_${comp}`;
+                    }
+                    
+                    controleChaves.add(chave);
+                    safePayload.push({ ...item, data_competencia: comp });
+                }
+                // --- FIM DO FILTRO ANTI-COLISÃO ---
+
                 const { data: inserted, error: consolidadosErr } = await supabase
                     .from('faturamento_consolidados')
-                    .insert(consolidadosPayload)
+                    .insert(safePayload)
                     .select('id, cliente_id, data_competencia');
 
                 if (consolidadosErr) throw new Error("Erro ao salvar consolidados: " + consolidadosErr.message);
