@@ -21,6 +21,7 @@ export async function POST(request: Request) {
                 valor_boleto_final,
                 valor_nc_final,
                 acrescimos,
+                descontos,
                 numero_nf,
                 cliente_id,
                 clientes ( nome, razao_social, emails_faturamento, nome_conta_azul, ciclos_faturamento ( nome ) )
@@ -44,10 +45,15 @@ export async function POST(request: Request) {
             const cicloNome = cliente.ciclos_faturamento?.nome || "Geral";
             const isNordestao = cicloNome.toUpperCase().includes('NORDESTAO') || cicloNome.toUpperCase().includes('NORDESTÃO');
             
-            // Se for Nordestão, mostra o valor bruto sem subtrair descontos para efeito de apresentação na fatura
+            // Para o Nordestão, o valor bruto e o boleto apresentados não devem ter o desconto abatido
             const valorApresentacaoFatura = isNordestao 
-                ? (item.valor_bruto + (item.acrescimos || 0)) 
-                : item.valor_bruto;
+                ? Number(item.valor_bruto) + Number(item.acrescimos || 0) 
+                : Number(item.valor_bruto);
+
+            // Devolve o valor do desconto ao Boleto apenas na apresentação visual do e-mail
+            const valorApresentacaoBoleto = isNordestao 
+                ? Number(item.valor_boleto_final) + Number(item.descontos || 0) 
+                : Number(item.valor_boleto_final);
 
             try {
                 const res = await prepareEmailData(
@@ -59,8 +65,8 @@ export async function POST(request: Request) {
                     cicloNome,
                     destinatarios,
                     assunto,
-                    valorApresentacaoFatura,
-                    item.valor_boleto_final,
+                    valorApresentacaoFatura,  // Valor Bruto ajustado
+                    valorApresentacaoBoleto,  // Valor Líquido do Boleto ajustado (sem abater o desconto)
                     item.valor_nc_final,
                     item.numero_nf
                 );
