@@ -45,8 +45,10 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Erro ao buscar itens do lote." }, { status: 500 });
         }
 
-        if (!items || items.length === 0) {
-            return NextResponse.json({ error: "Nenhum item aprovado encontrado neste lote." }, { status: 400 });
+        const itensValidos = (items || []).filter((item: any) => Number(item.valor) > 0);
+
+        if (itensValidos.length === 0) {
+            return NextResponse.json({ error: "Nenhum item com valor superior a R$ 0,00 encontrado." }, { status: 400 });
         }
 
         // 3. Autenticar com Transfeera
@@ -74,32 +76,40 @@ export async function POST(req: NextRequest) {
 
         const transfeeraBatchId = String(batchBody.id);
 
-        // 5. PASSO 2: Adicionar transferências no lote criado
-        const transfers = items.map((item) => ({
-            value: item.valor,
-            integration_id: item.id,
-            favored_name: item.nome_usuario,
-            favored_cpf_cnpj: item.cpf_favorecido.replace(/\D/g, ""),
-            pix_key: formatarChavePix(item.tipo_pix, item.chave_pix),
-            pix_key_type: normalizePixKeyType(item.tipo_pix),
-            pix_description: "REPASSE IWOF",
+        // 5. PASSO 2: Adicionar cada transferência individualmente no lote criado
+        // Conforme solicitado: utilizar Promise.all para envio individual na raiz do body
+        const transferResponses = await Promise.all(itensValidos.map(async (item: any) => {
+            const payload = {
+                value: Number(item.valor),
+                integration_id: String(item.id),
+                favored_name: item.nome_usuario,
+                favored_cpf_cnpj: item.cpf_favorecido.replace(/\D/g, ""),
+                pix_key: formatarChavePix(item.tipo_pix, item.chave_pix),
+                pix_key_type: normalizePixKeyType(item.tipo_pix),
+                pix_description: "REPASSE IWOF"
+            };
+
+            const tRes = await fetch(`${baseUrl}/batch/${transfeeraBatchId}/transfer`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                    "User-Agent": UA_HEADER,
+                },
+                body: JSON.stringify(payload),
+            });
+
+            const tBody = await tRes.json();
+            if (!tRes.ok) {
+                console.error(`[Transfeera Approval] Erro no item ${item.id}:`, JSON.stringify(tBody));
+                throw new Error(`Erro na transferência do trabalhador ${item.nome_usuario}: ${tBody.message || "Erro desconhecido"}`);
+            }
+
+            return {
+                integration_id: item.id,
+                transfeera_id: String(tBody.id)
+            };
         }));
-
-        const transfersRes = await fetch(`${baseUrl}/batch/${transfeeraBatchId}/transfer`, {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${token}`,
-                "Content-Type": "application/json",
-                "User-Agent": UA_HEADER,
-            },
-            body: JSON.stringify({ transfers }),
-        });
-
-        const transfersBody = await transfersRes.json();
-        if (!transfersRes.ok) {
-            console.error(`[Transfeera Approval] Erro ao adicionar transferências:`, JSON.stringify(transfersBody));
-            return NextResponse.json({ error: "Erro ao adicionar transferências no lote.", details: transfersBody }, { status: transfersRes.status });
-        }
 
         // 6. PASSO 3: Fechar o lote na Transfeera
         const closeRes = await fetch(`${baseUrl}/batch/${transfeeraBatchId}/close`, {
@@ -119,18 +129,13 @@ export async function POST(req: NextRequest) {
         console.log(`✅ [Transfeera Approval] Lote aprovado e finalizado! batch_id=${transfeeraBatchId}`);
 
         // 7. Atualizar IDs das transferências no Supabase
-        // A Transfeera retorna as transferências após adicioná-las
-        const transfersList = transfersBody.transfers || [];
-        if (transfersList.length > 0) {
-            const updatePromises = transfersList.map((t: any) => {
-                if (!t.integration_id || !t.id) return Promise.resolve();
-                return supabase
-                    .from("itens_saque")
-                    .update({ transfeera_transfer_id: String(t.id) })
-                    .eq("id", t.integration_id);
-            });
-            await Promise.all(updatePromises);
-        }
+        const updatePromises = transferResponses.map((t: any) => {
+            return supabase
+                .from("itens_saque")
+                .update({ transfeera_transfer_id: t.transfeera_id })
+                .eq("id", t.integration_id);
+        });
+        await Promise.all(updatePromises);
 
         // 8. Atualizar status do lote no Supabase
         const { error: updateLoteError } = await supabase
@@ -148,7 +153,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({
             success: true,
             batch_id: transfeeraBatchId,
-            items_count: items.length
+            items_count: itensValidos.length
         });
 
     } catch (err: any) {
