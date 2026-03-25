@@ -15,13 +15,16 @@ import {
     Send,
     Trash2
 } from "lucide-react";
+import { useTheme } from "next-themes";
+
+export const dynamic = 'force-dynamic';
 
 interface LoteAprovacao {
     id: string;
     nome_lote: string;
     tipo_saque: string;
     total_real: number;
-    data_criacao: string;
+    created_at: string;
     status: string;
     item_count?: number;
 }
@@ -58,7 +61,7 @@ export default function AprovacoesPage() {
                             itens_saque(count)
                         `)
                         .eq("status", "AGUARDANDO_APROVACAO")
-                        .order("data_criacao", { ascending: false });
+                        .order("created_at", { ascending: false });
 
                     if (lotesError) throw lotesError;
 
@@ -195,7 +198,7 @@ export default function AprovacoesPage() {
                                     </span>
                                     <div className="flex items-center gap-1.5 text-[var(--fg-dim)] text-[10px] font-bold uppercase">
                                         <Calendar size={12} />
-                                        {new Date(lote.data_criacao).toLocaleDateString('pt-BR')}
+                                        {new Date(lote.created_at).toLocaleDateString('pt-BR')}
                                     </div>
                                 </div>
 
