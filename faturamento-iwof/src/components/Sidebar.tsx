@@ -19,6 +19,7 @@ import {
     Moon,
     Wallet,
     Activity,
+    CheckSquare,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
@@ -31,6 +32,7 @@ const navItems = [
     { label: "Lanç. Parciais", href: "/lancamentos-parciais", icon: ClipboardList },
     { label: "Emissão Avulsa", href: "/faturamento/avulso", icon: FilePlus },
     { label: "Gestão de Saques", href: "/saques", icon: Wallet, exact: true },
+    { label: "Aprovações", href: "/saques/aprovacoes", icon: CheckSquare, roles: ["ADMIN", "APROVADOR"] },
     { label: "Rastreio Transfeera", href: "/saques/acompanhamento", icon: Activity },
     { label: "Como Usar", href: "/como-usar", icon: HelpCircle },
     { label: "Ajustes", href: "/ajustes", icon: SlidersHorizontal },
@@ -100,6 +102,9 @@ export default function Sidebar() {
                         .filter(item => {
                             if (cargo === "CX") {
                                 return item.label === "Rastreio Transfeera";
+                            }
+                            if (item.roles && !item.roles.includes(cargo || "")) {
+                                return false;
                             }
                             return true;
                         })
