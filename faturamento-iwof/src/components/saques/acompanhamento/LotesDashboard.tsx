@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Search, Filter, Calendar, FileText, ChevronRight, Loader2, CheckCircle2 } from "lucide-react";
+import { Search, Filter, Calendar, FileText, ChevronRight, Loader2, CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Modal from "@/components/Modal";
@@ -28,6 +28,7 @@ interface WorkerHistory {
     created_at: string; // we'll fetch from lote
     transfeera_transfer_id?: string;
     status_transfeera?: string;
+    status_item: string;
 }
 
 export default function LotesDashboard() {
@@ -85,10 +86,10 @@ export default function LotesDashboard() {
                 valor,
                 transfeera_transfer_id,
                 status_transfeera,
+                status_item,
                 lotes_saques ( created_at )
             `)
             .or(`nome_usuario.ilike.%${globalSearch}%,cpf_favorecido.ilike.%${globalSearch}%,cpf_conta.ilike.%${globalSearch}%`)
-            .eq("status_item", "APROVADO")
             .order("id", { ascending: false })
             .limit(20);
 
@@ -102,6 +103,7 @@ export default function LotesDashboard() {
                 valor: d.valor,
                 transfeera_transfer_id: d.transfeera_transfer_id,
                 status_transfeera: d.status_transfeera,
+                status_item: d.status_item,
                 created_at: d.lotes_saques?.created_at || new Date().toISOString()
             }));
 
@@ -111,7 +113,7 @@ export default function LotesDashboard() {
             setSearchResults(formatted);
             setShowSearchModal(true);
         } else {
-            alert("Nenhum trabalhador (com saques exportados) encontrado com este termo.");
+            alert("Nenhum trabalhador encontrado com este termo.");
         }
         setIsSearching(false);
     }
@@ -138,14 +140,14 @@ export default function LotesDashboard() {
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div>
                         <h3 className="text-sm font-bold text-accent uppercase tracking-wider mb-1">Pesquisa Rápida Global</h3>
-                        <p className="text-sm text-fg-dim">Procure um trabalhador em todos os lotes exportados pelo Nome ou CPF.</p>
+                        <p className="text-sm text-fg-dim">Procure um trabalhador em todos os saques pelo Nome ou CPF.</p>
                     </div>
                     <form onSubmit={handleGlobalSearch} className="flex gap-2">
                         <div className="relative">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted" size={16} />
                             <input
                                 type="text"
-                                placeholder="CPF ou Nome Completo..."
+                                placeholder="Buscar CPF ou Nome em todos os saques..."
                                 className="input pl-10 w-full md:w-64"
                                 value={globalSearch}
                                 onChange={(e) => setGlobalSearch(e.target.value)}
@@ -264,6 +266,7 @@ export default function LotesDashboard() {
                                         <th className="p-3 font-semibold text-fg-muted uppercase text-xs">Data/Lote</th>
                                         <th className="p-3 font-semibold text-fg-muted uppercase text-xs">Colaborador</th>
                                         <th className="p-3 font-semibold text-fg-muted uppercase text-xs">Valor</th>
+                                        <th className="p-3 font-semibold text-fg-muted uppercase text-xs">Status Interno</th>
                                         <th className="p-3 font-semibold text-fg-muted uppercase text-xs">API Transfeera</th>
                                         <th className="p-3 font-semibold text-fg-muted uppercase text-xs text-center">PDF</th>
                                     </tr>
@@ -285,6 +288,9 @@ export default function LotesDashboard() {
                                             </td>
                                             <td className="p-3 font-bold text-fg">
                                                 R$ {item.valor?.toFixed(2)}
+                                            </td>
+                                            <td className="p-3">
+                                                <StatusBadge status={item.status_item} />
                                             </td>
                                             <td className="p-3">
                                                 <TransfeeraBadge status={item.status_transfeera} isSyncing={isSyncing} />
@@ -322,6 +328,16 @@ export default function LotesDashboard() {
             )}
         </div>
     );
+}
+
+function StatusBadge({ status }: { status: string }) {
+    const cfg: Record<string, { cls: string; icon: React.ReactNode; label: string }> = {
+        APROVADO: { cls: "badge badge-success", icon: <CheckCircle2 size={12} />, label: "Aprovado" },
+        REVISAO: { cls: "badge badge-warning", icon: <AlertTriangle size={12} />, label: "Revisão" },
+        BLOQUEADO: { cls: "badge badge-danger", icon: <XCircle size={12} />, label: "Bloqueado" },
+    };
+    const c = cfg[status] ?? { cls: "badge", icon: null, label: status };
+    return <span className={`${c.cls} inline-flex items-center gap-1`}>{c.icon} {c.label}</span>;
 }
 
 function TransfeeraBadge({ status, isSyncing }: { status?: string, isSyncing: boolean }) {
