@@ -2,7 +2,8 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { ChevronDown, ChevronUp, History, CheckCircle2, XCircle, AlertTriangle, TrendingUp, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, History, CheckCircle2, XCircle, AlertTriangle, TrendingUp, Trash2, RefreshCw, FileText } from "lucide-react";
+import { useTransfeeraSync } from "@/hooks/useTransfeeraSync";
 
 interface Lote {
     id: string;
@@ -13,6 +14,7 @@ interface Lote {
     total_real: number | null;
     receita_financeira: number | null;
     created_at: string;
+    transfeera_batch_id?: string | null;
 }
 
 interface ItemSaque {
@@ -26,6 +28,7 @@ interface ItemSaque {
     data_solicitacao: string;
     status_item: "APROVADO" | "REVISAO" | "BLOQUEADO";
     motivo_bloqueio: string | null;
+    transfeera_id?: string | null;
 }
 
 function fmtDatetime(iso: string): string {
@@ -56,6 +59,25 @@ function LoteRow({ lote, isAdmin, onDeleted }: { lote: Lote; isAdmin: boolean; o
     const [loading, setLoading] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const { isSyncing, syncBatch, downloadReceipt } = useTransfeeraSync();
+
+    async function handleSync(e: React.MouseEvent) {
+        e.stopPropagation();
+        if (!lote.transfeera_batch_id) {
+            alert("Lote não possui ID do Transfeera.");
+            return;
+        }
+
+        let batchItems = items;
+        if (batchItems.length === 0) {
+            const { data } = await supabase.from("itens_saque").select("id, transfeera_id").eq("lote_id", lote.id);
+            batchItems = (data as ItemSaque[]) ?? [];
+        }
+
+        await syncBatch(lote.transfeera_batch_id, batchItems.map(i => ({ id: i.id, transfeera_id: i.transfeera_id })));
+        await loadItems();
+        alert("Sincronização concluída com sucesso!");
+    }
 
     const loadItems = useCallback(async () => {
         if (items.length > 0) return;
@@ -115,6 +137,15 @@ function LoteRow({ lote, isAdmin, onDeleted }: { lote: Lote; isAdmin: boolean; o
                             <span style={{ fontSize: 12, color: "var(--fg-dim)" }}>Custo: <strong style={{ color: "var(--fg)" }}>{R(lote.total_real)}</strong></span>
                         )}
                         <span style={{ fontSize: 11, color: "var(--fg-dim)" }}>{fmtDatetime(lote.created_at)}</span>
+                        {lote.transfeera_batch_id && (
+                            <div
+                                onClick={handleSync}
+                                style={{ cursor: "pointer", display: "flex", alignItems: "center", padding: 4 }}
+                                title="Sincronizar com Transfeera"
+                            >
+                                <RefreshCw size={15} color="var(--success)" className={isSyncing ? "animate-spin" : ""} />
+                            </div>
+                        )}
                         {/* Admin delete button */}
                         {isAdmin && (
                             <button
@@ -147,10 +178,11 @@ function LoteRow({ lote, isAdmin, onDeleted }: { lote: Lote; isAdmin: boolean; o
                                         </h4>
                                         <div style={{ overflowX: "auto" }}>
                                             <table className="data-table">
-                                                <thead><tr>
-                                                    <th>Trabalhador</th><th>CPF Favorecido</th><th>Tipo PIX</th><th>Chave PIX</th>
-                                                    <th>Vlr. Solicitado</th><th>Vlr. Real</th><th>Receita</th>
-                                                </tr></thead>
+                                                 <thead><tr>
+                                                     <th>Trabalhador</th><th>CPF Favorecido</th><th>Tipo PIX</th><th>Chave PIX</th>
+                                                     <th>Vlr. Solicitado</th><th>Vlr. Real</th><th>Receita</th>
+                                                     <th style={{ textAlign: "right" }}>Ação</th>
+                                                 </tr></thead>
                                                 <tbody>
                                                     {approved.map((i) => {
                                                         const rec = i.valor_solicitado !== null ? Number(i.valor_solicitado) - Number(i.valor) : null;
@@ -162,8 +194,17 @@ function LoteRow({ lote, isAdmin, onDeleted }: { lote: Lote; isAdmin: boolean; o
                                                                 <td className="table-mono" style={{ fontSize: 12 }}>{i.chave_pix}</td>
                                                                 <td style={{ color: "var(--fg-muted)" }}>{R(i.valor_solicitado)}</td>
                                                                 <td style={{ color: "var(--accent)", fontWeight: 600 }}>{R(i.valor)}</td>
-                                                                <td style={{ color: "var(--success)", fontWeight: 600 }}>{rec !== null ? R(rec) : "—"}</td>
-                                                            </tr>
+                                                                 <td style={{ color: "var(--success)", fontWeight: 600 }}>{rec !== null ? R(rec) : "—"}</td>
+                                                                <td style={{ textAlign: "right" }}>
+                                                                    <button
+                                                                        className="btn btn-ghost"
+                                                                        style={{ padding: "2px 8px", fontSize: 10, height: "auto", minHeight: 0 }}
+                                                                        onClick={() => downloadReceipt(i.id, i.transfeera_id ?? undefined)}
+                                                                    >
+                                                                        <FileText size={13} /> Comp.
+                                                                    </button>
+                                                                </td>
+                                                             </tr>
                                                         );
                                                     })}
                                                 </tbody>
