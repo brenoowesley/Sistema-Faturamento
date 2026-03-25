@@ -22,7 +22,7 @@ interface UsuarioPerfil {
     id: string;
     email: string;
     nome: string | null;
-    cargo: "ADMIN" | "USER" | "CX";
+    cargo: "ADMIN" | "APROVADOR" | "USER" | "CX";
     created_at: string;
 }
 
@@ -36,13 +36,14 @@ export default function UsuariosPage() {
     // Modals
     const [showAddModal, setShowAddModal] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [showRoleModal, setShowRoleModal] = useState(false);
     const [selectedUser, setSelectedUser] = useState<UsuarioPerfil | null>(null);
 
     // Form states
     const [newUserName, setNewUserName] = useState("");
     const [newUserEmail, setNewUserEmail] = useState("");
     const [newUserPassword, setNewUserPassword] = useState("");
-    const [newUserRole, setNewUserRole] = useState<"ADMIN" | "USER" | "CX">("USER");
+    const [newUserRole, setNewUserRole] = useState<"ADMIN" | "APROVADOR" | "USER" | "CX">("USER");
 
     const fetchUsuarios = useCallback(async () => {
         setLoading(true);
@@ -141,29 +142,33 @@ export default function UsuariosPage() {
     };
 
     const handleToggleRole = async (user: UsuarioPerfil) => {
-        // Toggle sequence: USER -> CX -> ADMIN -> USER
-        let newRole: "ADMIN" | "USER" | "CX" = "USER";
-        if (user.cargo === "USER") newRole = "CX";
-        else if (user.cargo === "CX") newRole = "ADMIN";
-        else newRole = "USER";
+        setSelectedUser(user);
+        setShowRoleModal(true);
+    };
 
-        if (!confirm(`Deseja alterar o cargo de ${user.email} para ${newRole}?`)) return;
-
+    const handleUpdateRole = async (newRole: string) => {
+        if (!selectedUser) return;
+        setIsSaving(true);
         try {
             const res = await fetch("/api/admin/usuarios", {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    id: user.id,
+                    id: selectedUser.id,
                     type: "update_role",
                     cargo: newRole
                 })
             });
 
             if (!res.ok) throw new Error("Erro ao atualizar cargo");
+            
+            setShowRoleModal(false);
+            setSelectedUser(null);
             fetchUsuarios();
         } catch (err: any) {
             alert(err.message);
+        } finally {
+            setIsSaving(false);
         }
     };
 
@@ -265,13 +270,15 @@ export default function UsuariosPage() {
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="p-4">
+                                         <td className="p-4">
                                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-black tracking-widest ${
                                                 user.cargo === "ADMIN" 
                                                     ? "bg-amber-500/10 text-amber-500" 
-                                                    : user.cargo === "CX"
+                                                    : user.cargo === "APROVADOR"
                                                         ? "bg-emerald-500/10 text-emerald-500"
-                                                        : "bg-indigo-500/10 text-indigo-500"
+                                                        : user.cargo === "CX"
+                                                            ? "bg-indigo-500/10 text-indigo-500"
+                                                            : "bg-white/10 text-[var(--fg-dim)]"
                                                 }`}>
                                                 {user.cargo}
                                             </span>
@@ -362,6 +369,7 @@ export default function UsuariosPage() {
                             >
                                 <option value="USER">Usuário Comum (USER)</option>
                                 <option value="CX">Customer Experience (CX)</option>
+                                <option value="APROVADOR">Aprovador de Saques (APROVADOR)</option>
                                 <option value="ADMIN">Administrador (ADMIN)</option>
                             </select>
                         </div>
@@ -419,6 +427,65 @@ export default function UsuariosPage() {
                                 {isSaving ? <Loader2 className="animate-spin" size={18} /> : "Sim, Excluir"}
                             </button>
                         </div>
+                    </div>
+                </Modal>
+            )}
+
+            {/* Modal: Alterar Cargo */}
+            {showRoleModal && selectedUser && (
+                <Modal
+                    isOpen={true}
+                    title="Alterar Cargo do Usuário"
+                    onClose={() => {
+                        setShowRoleModal(false);
+                        setSelectedUser(null);
+                    }}
+                >
+                    <div className="space-y-6">
+                        <div className="p-4 bg-white/5 rounded-xl border border-white/5 flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-500">
+                                <User size={24} />
+                            </div>
+                            <div>
+                                <p className="text-white font-bold text-sm">{selectedUser.nome || "Usuário"}</p>
+                                <p className="text-[10px] text-[var(--fg-dim)]">{selectedUser.email}</p>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3">
+                            {[
+                                { id: "USER", label: "USER - Usuário Comum", desc: "Acesso básico ao sistema faturamento." },
+                                { id: "CX", label: "CX - Customer Experience", desc: "Focado em rastreio e atendimento." },
+                                { id: "APROVADOR", label: "APROVADOR - Aprovador de Saques", desc: "Pode autorizar lotes de pagamento." },
+                                { id: "ADMIN", label: "ADMIN - Administrador", desc: "Acesso total ao sistema e gestão." },
+                            ].map((role) => (
+                                <button
+                                    key={role.id}
+                                    onClick={() => handleUpdateRole(role.id)}
+                                    disabled={isSaving}
+                                    className={`p-4 rounded-xl border text-left transition-all flex flex-col gap-1 ${
+                                        selectedUser.cargo === role.id
+                                            ? "bg-indigo-500/10 border-indigo-500/50"
+                                            : "bg-white/5 border-white/5 hover:border-white/20"
+                                    }`}
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <span className={`text-sm font-bold ${selectedUser.cargo === role.id ? "text-indigo-400" : "text-white"}`}>
+                                            {role.label}
+                                        </span>
+                                        {selectedUser.cargo === role.id && <CheckCircle2 size={16} className="text-indigo-400" />}
+                                    </div>
+                                    <p className="text-[10px] text-[var(--fg-dim)]">{role.desc}</p>
+                                </button>
+                            ))}
+                        </div>
+
+                        <button
+                            onClick={() => setShowRoleModal(false)}
+                            className="w-full py-3 text-sm font-bold text-[var(--fg-dim)] hover:text-white transition-colors"
+                        >
+                            Cancelar
+                        </button>
                     </div>
                 </Modal>
             )}
