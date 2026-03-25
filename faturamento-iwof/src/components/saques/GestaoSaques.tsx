@@ -659,9 +659,11 @@ function BloqueadosTable({ items, onForceApprove, onEdit }: {
 function LotePanel({
     lote,
     onUpdateLote,
+    onComplete,
 }: {
     lote: LoteLocal;
     onUpdateLote: (tipo: string, updater: (l: LoteLocal) => LoteLocal) => void;
+    onComplete: () => void;
 }) {
     const supabase = createClient();
     const [forceApproveItem, setForceApproveItem] = useState<SaqueItem | null>(null);
@@ -762,14 +764,14 @@ function LotePanel({
                     total_solicitado: totalSolicitado,
                     total_real: totalReal,
                     receita_financeira: receita,
-                    status: "Exportado",
+                    status: "AGUARDANDO_APROVACAO",
                 })
                 .select()
                 .single();
             if (loteErr) throw loteErr;
 
             const itens = lote.items.map((i) => ({
-                id: i.id, // CRÍTICO: Garante que o UUID gerado no parse do Excel seja o mesmo do Banco de Dados
+                id: i.id,
                 lote_id: loteDb.id,
                 cpf_conta: i.cpf_conta,
                 cpf_favorecido: i.cpf_favorecido,
@@ -785,142 +787,14 @@ function LotePanel({
             const { error: itemsErr } = await supabase.from("itens_saque").insert(itens);
             if (itemsErr) throw itemsErr;
 
-            buildTransfeeraXlsx(lote.items, `transfeera_${lote.tipo_saque.replace(/ /g, "_")}.xlsx`);
-            update((l) => ({ ...l, saving: false, saveMsg: { type: "success", text: `Lote salvo! ${approved.length} aprovado(s) exportados.` } }));
+            alert("O lote foi enviado para aprovação");
+            onComplete();
         } catch (err: unknown) {
             const e = err as { message?: string };
             update((l) => ({ ...l, saving: false, saveMsg: { type: "error", text: e.message ?? "Erro ao salvar." } }));
         }
     }
 
-    async function handleDirectIntegration() {
-        update((l) => ({ ...l, sendingApi: true, apiMsg: null }));
-        try {
-            // ── Passo 1: Salvar no Supabase (idêntico ao handleExport) ──
-            let loteDbId = lote.savedLoteId;
-
-            if (!loteDbId) {
-                const { data: loteDb, error: loteErr } = await supabase
-                    .from("lotes_saques")
-                    .insert({
-                        nome_lote: lote.nome,
-                        tipo_saque: lote.tipo_saque,
-                        total_solicitado: totalSolicitado,
-                        total_real: totalReal,
-                        receita_financeira: receita,
-                        status: "Enviado API",
-                    })
-                    .select()
-                    .single();
-                if (loteErr) throw loteErr;
-                loteDbId = loteDb.id;
-
-                const itens = lote.items.map((i) => ({
-                    id: i.id,
-                    lote_id: loteDbId,
-                    cpf_conta: i.cpf_conta,
-                    cpf_favorecido: i.cpf_favorecido,
-                    nome_usuario: i.nome_usuario || null,
-                    chave_pix: i.chave_pix,
-                    tipo_pix: i.tipo_pix,
-                    valor: i.valor_real,
-                    valor_solicitado: i.valor_solicitado,
-                    data_solicitacao: i.data_solicitacao || null,
-                    status_item: i.status,
-                    motivo_bloqueio: i.motivo_bloqueio ?? null,
-                }));
-                const { error: itemsErr } = await supabase.from("itens_saque").insert(itens);
-                if (itemsErr) throw itemsErr;
-
-                update((l) => ({ ...l, savedLoteId: loteDbId }));
-            }
-
-            // ── Passo 2: Enviar para a API Transfeera ──
-            const apiPayload = {
-                action: "create_batch",
-                lote_nome: lote.nome,
-                items: approved.map((i) => ({
-                    id: i.id,
-                    valor_real: i.valor_real,
-                    tipo_pix: i.tipo_pix,
-                    chave_pix: i.chave_pix,
-                    cpf_favorecido: i.cpf_favorecido,
-                    nome_usuario: i.nome_usuario,
-                })),
-            };
-
-            const res = await fetch("/api/transfeera", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(apiPayload),
-            });
-
-            const data = await res.json();
-            console.log("[GestaoSaques] 🏷️ Resposta da API Transfeera:", data);
-
-            if (!res.ok) {
-                // Extrair erros da API
-                let errorMsg = data.error || "Erro desconhecido da Transfeera.";
-                const apiErrorItems: Record<string, string> = {};
-                
-                if (data.errorItems && Array.isArray(data.errorItems)) {
-                    data.errorItems.forEach((err: any) => {
-                        if (err.id) apiErrorItems[err.id] = err.message;
-                    });
-                    errorMsg += "\n⚠️ Os itens listados com problemas foram movidos automaticamente para a aba de Revisão.";
-                } else if (data.transferErrors && data.transferErrors.length > 0) {
-                    errorMsg += "\n" + data.transferErrors.slice(0, 5).join("\n");
-                }
-                
-                update((l) => {
-                    const hasAppErrorItems = Object.keys(apiErrorItems).length > 0;
-                    return {
-                        ...l, 
-                        sendingApi: false, 
-                        apiMsg: { type: "error", text: errorMsg }, 
-                        apiErrorItems,
-                        activeTab: hasAppErrorItems ? "REVISAO" : l.activeTab,
-                        items: l.items.map(i => {
-                            if (apiErrorItems[i.id] && i.status === "APROVADO") {
-                                return {
-                                    ...i,
-                                    status: "REVISAO" as ItemStatus,
-                                    motivo_bloqueio: `[Transfeera API] ${apiErrorItems[i.id]}`
-                                };
-                            }
-                            return i;
-                        })
-                    };
-                });
-                return;
-            }
-
-            // ── Passo 3: Atualizar Lote no Supabase e Finalizar ──
-            const batchId: string = data.batchId || data.batch_id;
-
-            // 1. Atualizar lote com transfeera_batch_id
-            await supabase
-                .from("lotes_saques")
-                .update({ transfeera_batch_id: batchId })
-                .eq("id", loteDbId);
-
-            update((l) => ({
-                ...l,
-                sendingApi: false,
-                apiMsg: {
-                    type: "success",
-                    text: `✅ Lote recebido e em processamento. Os status individuais serão atualizados automaticamente na listagem em instantes.`,
-                },
-            }));
-        } catch (err: unknown) {
-            const e = err as { message?: string };
-            update((l) => ({
-                ...l,
-                sendingApi: false,
-                apiMsg: { type: "error", text: e.message ?? "Erro ao enviar lote para a Transfeera." },
-            }));
-        }
-    }
 
     function handleDownloadExcluidos() {
         triggerDownload(buildExcluidosCsv(lote.items), `excluidos_${lote.tipo_saque.replace(/ /g, "_")}.csv`);
@@ -988,28 +862,10 @@ function LotePanel({
                                 className="btn btn-primary"
                                 style={{ fontSize: 13, padding: "8px 18px" }}
                                 onClick={handleExport}
-                                disabled={lote.saving || lote.sendingApi || approved.length === 0 || lote.saveMsg?.type === "success" || lote.apiMsg?.type === "success"}
+                                disabled={lote.saving || approved.length === 0}
                             >
-                                <Download size={14} />
-                                {lote.saving ? "Salvando…" : "Exportar Transfeera"}
-                            </button>
-                            <button
-                                className="btn"
-                                style={{
-                                    fontSize: 13,
-                                    padding: "8px 18px",
-                                    background: "rgba(52,211,153,0.15)",
-                                    color: "var(--success)",
-                                    border: "1px solid rgba(52,211,153,0.3)",
-                                }}
-                                onClick={handleDirectIntegration}
-                                disabled={lote.saving || lote.sendingApi || approved.length === 0 || lote.apiMsg?.type === "success"}
-                            >
-                                {lote.sendingApi ? (
-                                    <><Loader2 size={14} className="animate-spin" /> Enviando…</>
-                                ) : (
-                                    <><CloudUpload size={14} /> Enviar Lote Direto (API)</>
-                                )}
+                                <CheckCircle2 size={14} />
+                                {lote.saving ? "Enviando…" : "Enviar para Aprovação"}
                             </button>
                         </div>
                     </div>
@@ -1231,7 +1087,7 @@ export default function GestaoSaques() {
             </div>
 
             {lotes.map((lote) => (
-                <LotePanel key={lote.tipo_saque} lote={lote} onUpdateLote={updateLote} />
+                <LotePanel key={lote.tipo_saque} lote={lote} onUpdateLote={updateLote} onComplete={() => setLotes([])} />
             ))}
         </>
     );

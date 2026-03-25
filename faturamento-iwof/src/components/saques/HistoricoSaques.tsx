@@ -28,7 +28,8 @@ interface ItemSaque {
     data_solicitacao: string;
     status_item: "APROVADO" | "REVISAO" | "BLOQUEADO";
     motivo_bloqueio: string | null;
-    transfeera_id?: string | null;
+    transfeera_transfer_id?: string | null;
+    status_transfeera?: string | null;
 }
 
 function fmtDatetime(iso: string): string {
@@ -52,6 +53,23 @@ function StatusBadge({ status }: { status: string }) {
     return <span className={c.cls}>{c.icon} {c.label}</span>;
 }
 
+function TransfeeraBadge({ status }: { status?: string | null }) {
+    if (!status || status === "NAO_SUBMETIDO") {
+         return <span className="badge badge-ghost" style={{ fontSize: 10 }}>Não Submetido</span>;
+    }
+    const s = status.toUpperCase();
+    if (["FINALIZADO", "EFETIVADO", "PAGO", "CONCLUIDO"].includes(s)) {
+        return <span className="badge badge-success" style={{ fontSize: 10 }}><CheckCircle2 size={10} /> Concluído</span>;
+    }
+    if (["EM_PROCESSAMENTO", "AGENDADO", "PROCESSANDO"].includes(s)) {
+        return <span className="badge badge-info" style={{ fontSize: 10 }}>Em Regulação</span>;
+    }
+    if (["FALHA", "FAILED", "ERROR", "DEVOLVIDO"].includes(s)) {
+        return <span className="badge badge-danger" style={{ fontSize: 10 }}><XCircle size={10} /> Falhou</span>;
+    }
+    return <span className="badge" style={{ fontSize: 10 }}>{status}</span>;
+}
+
 function LoteRow({ lote, isAdmin, onDeleted }: { lote: Lote; isAdmin: boolean; onDeleted: (id: string) => void }) {
     const supabase = createClient();
     const [open, setOpen] = useState(false);
@@ -68,13 +86,13 @@ function LoteRow({ lote, isAdmin, onDeleted }: { lote: Lote; isAdmin: boolean; o
             return;
         }
 
-        let batchItems = items;
+        let batchItems: Pick<ItemSaque, "id" | "transfeera_transfer_id">[] = items;
         if (batchItems.length === 0) {
-            const { data } = await supabase.from("itens_saque").select("id, transfeera_id").eq("lote_id", lote.id);
-            batchItems = (data as ItemSaque[]) ?? [];
+            const { data } = await supabase.from("itens_saque").select("id, transfeera_transfer_id").eq("lote_id", lote.id);
+            batchItems = (data as any[]) ?? [];
         }
 
-        await syncBatch(lote.transfeera_batch_id, batchItems.map(i => ({ id: i.id, transfeera_id: i.transfeera_id })));
+        await syncBatch(lote.transfeera_batch_id, batchItems.map(i => ({ id: i.id, transfeera_id: i.transfeera_transfer_id })));
         await loadItems();
         alert("Sincronização concluída com sucesso!");
     }
@@ -178,9 +196,9 @@ function LoteRow({ lote, isAdmin, onDeleted }: { lote: Lote; isAdmin: boolean; o
                                         </h4>
                                         <div style={{ overflowX: "auto" }}>
                                             <table className="data-table">
-                                                 <thead><tr>
+                                                     <thead><tr>
                                                      <th>Trabalhador</th><th>CPF Favorecido</th><th>Tipo PIX</th><th>Chave PIX</th>
-                                                     <th>Vlr. Solicitado</th><th>Vlr. Real</th><th>Receita</th>
+                                                     <th>Vlr. Solicitado</th><th>Vlr. Real</th><th>Receita</th><th>Status Banco</th>
                                                      <th style={{ textAlign: "right" }}>Ação</th>
                                                  </tr></thead>
                                                 <tbody>
@@ -189,17 +207,20 @@ function LoteRow({ lote, isAdmin, onDeleted }: { lote: Lote; isAdmin: boolean; o
                                                         return (
                                                             <tr key={i.id}>
                                                                 <td style={{ fontSize: 12, color: "var(--fg-dim)" }}>{i.nome_usuario || "—"}</td>
-                                                                <td className="table-mono">{i.cpf_favorecido}</td>
+                                                                 <td className="table-mono">{i.cpf_favorecido}</td>
                                                                 <td><span className="badge badge-info">{i.tipo_pix}</span></td>
-                                                                <td className="table-mono" style={{ fontSize: 12 }}>{i.chave_pix}</td>
+                                                                 <td className="table-mono" style={{ fontSize: 12 }}>{i.chave_pix}</td>
                                                                 <td style={{ color: "var(--fg-muted)" }}>{R(i.valor_solicitado)}</td>
                                                                 <td style={{ color: "var(--accent)", fontWeight: 600 }}>{R(i.valor)}</td>
-                                                                 <td style={{ color: "var(--success)", fontWeight: 600 }}>{rec !== null ? R(rec) : "—"}</td>
-                                                                <td style={{ textAlign: "right" }}>
+                                                                <td style={{ color: rec !== null && rec > 0 ? "var(--success)" : "var(--fg-muted)" }}>{R(rec)}</td>
+                                                                <td><TransfeeraBadge status={i.status_transfeera} /></td>
+                                                                 <td style={{ textAlign: "right" }}>
                                                                     <button
                                                                         className="btn btn-ghost"
                                                                         style={{ padding: "2px 8px", fontSize: 10, height: "auto", minHeight: 0 }}
-                                                                        onClick={() => downloadReceipt(i.id, i.transfeera_id ?? undefined)}
+                                                                        onClick={() => downloadReceipt(i.id, i.transfeera_transfer_id || undefined)}
+                                                                        disabled={!i.transfeera_transfer_id}
+                                                                        title={!i.transfeera_transfer_id ? "Aguardando processamento" : "Baixar Comprovante"}
                                                                     >
                                                                         <FileText size={13} /> Comp.
                                                                     </button>

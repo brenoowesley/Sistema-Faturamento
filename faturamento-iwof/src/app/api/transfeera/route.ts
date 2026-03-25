@@ -2,115 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-// ─── Token Cache ────────────────────────────────────────────────────────────────
-let cachedTransfeeraToken: string | null = null;
-let tokenExpiryTime: number | null = null;
-
-async function getTransfeeraToken() {
-    if (cachedTransfeeraToken && tokenExpiryTime && Date.now() < tokenExpiryTime) {
-        return cachedTransfeeraToken;
-    }
-
-    const clientId = process.env.TRANSFEERA_CLIENT_ID;
-    const clientSecret = process.env.TRANSFEERA_CLIENT_SECRET;
-
-    const loginBase = process.env.TRANSFEERA_ENV === "sandbox"
-        ? "https://login-api-sandbox.transfeera.com"
-        : "https://login-api.transfeera.com";
-
-    if (!clientId || !clientSecret) {
-        console.error("Transfeera Error: Missing TRANSFEERA_CLIENT_ID or TRANSFEERA_CLIENT_SECRET");
-        throw new Error("Configuração de API ausente no servidor");
-    }
-
-    const response = await fetch(`${loginBase}/authorization`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "User-Agent": "IWOF - Sistema de Faturamento (breno@iwof.com.br)"
-        },
-        body: JSON.stringify({
-            grant_type: "client_credentials",
-            client_id: clientId,
-            client_secret: clientSecret
-        })
-    });
-
-    if (!response.ok) {
-        const errBody = await response.text();
-        console.error(`Transfeera Auth Error: Status ${response.status} - Body: ${errBody}`);
-        throw new Error(`Transfeera Auth Error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    cachedTransfeeraToken = data.access_token;
-    const expiresInSecs = data.expires_in || 3600;
-    tokenExpiryTime = Date.now() + (expiresInSecs - 60) * 1000;
-
-    return cachedTransfeeraToken;
-}
-
-function getTransfeeraBaseUrl() {
-    return process.env.TRANSFEERA_ENV === "sandbox"
-        ? "https://api-sandbox.transfeera.com"
-        : "https://api.transfeera.com";
-}
-
-// ─── Status Normalizer ──────────────────────────────────────────────────────────
-function normalizeTransfeeraStatus(raw: string): string {
-    if (!raw) return "NAO_SUBMETIDO";
-    const s = raw.toUpperCase().trim();
-    const map: Record<string, string> = {
-        FINALIZADO: "FINALIZADO",
-        EFETIVADO: "EFETIVADO",
-        PAGO: "FINALIZADO",
-        CONCLUIDO: "FINALIZADO",
-        CONCLUÍDO: "FINALIZADO",
-        EM_PROCESSAMENTO: "EM_PROCESSAMENTO",
-        PROCESSANDO: "EM_PROCESSAMENTO",
-        EM_PROCESSAMENTO_BANCO: "EM_PROCESSAMENTO",
-        AGENDADO: "AGENDADO",
-        SCHEDULED: "AGENDADO",
-        DEVOLVIDO: "DEVOLVIDO",
-        RETURNED: "DEVOLVIDO",
-        FALHA: "FALHA",
-        FAILED: "FALHA",
-        ERROR: "FALHA",
-        CRIADO: "AGENDADO",
-        CREATED: "AGENDADO",
-    };
-    return map[s] ?? raw;
-}
-
-/**
- * Formata a chave PIX conforme as exigências da Transfeera.
- * Especialmente para TELEFONE, que exige o formato E.164 (+55...)
- */
-function formatarChavePix(tipo: string, chave: string): string {
-    const t = tipo.toUpperCase();
-    const c = chave.trim();
-    
-    if (t === "TELEFONE") {
-        // Remove tudo que não for número
-        const apenasNumeros = c.replace(/\D/g, "");
-        
-        // Se tem 10 ou 11 dígitos (DDD + Número), assume Brasil e põe +55
-        if (apenasNumeros.length === 10 || apenasNumeros.length === 11) {
-            return `+55${apenasNumeros}`;
-        }
-        
-        // Se já começa com 55 e tem 12 ou 13 dígitos, apenas adiciona o +
-        if (apenasNumeros.startsWith("55") && (apenasNumeros.length === 12 || apenasNumeros.length === 13)) {
-            return `+${apenasNumeros}`;
-        }
-        
-        return c; // Caso não se encaixe, envia original (deixando a API validar)
-    }
-    
-    return c;
-}
-
-const UA_HEADER = "IWOF - Sistema de Faturamento (breno@iwof.com.br)";
+import { 
+    getTransfeeraToken, 
+    getTransfeeraBaseUrl, 
+    normalizeTransfeeraStatus, 
+    formatarChavePix, 
+    normalizePixKeyType,
+    UA_HEADER 
+} from "@/lib/transfeera";
 
 // ─── POST Handler ───────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
@@ -149,19 +48,6 @@ export async function POST(req: NextRequest) {
 
             console.log(`[Transfeera] ▶ create_batch: Iniciando 3 passos para "${lote_nome}" com ${items.length} transferência(s) | Ambiente: ${env}`);
 
-            // Normalizar tipo_pix para o formato que a Transfeera aceita
-            function normalizePixKeyType(tipo: string): string {
-                const map: Record<string, string> = {
-                    "EMAIL": "EMAIL",
-                    "CPF": "CPF",
-                    "CNPJ": "CNPJ",
-                    "TELEFONE": "TELEFONE",
-                    "CHAVE_ALEATORIA": "CHAVE_ALEATORIA",
-                    "EVP": "CHAVE_ALEATORIA",
-                    "ALEATORIO": "CHAVE_ALEATORIA",
-                };
-                return map[tipo.toUpperCase()] || tipo;
-            }
 
             // Montar payload TUDO-EM-UM conforme documentação Transfeera
             const transfers = items.map((item) => ({
