@@ -131,14 +131,16 @@ export async function prepareEmailData(
     nomeContaAzul: string,
     cicloNome: string,
     destinatarios: string,
-    assunto: string
+    assunto: string,
+    nomePastaManual?: string
 ) {
     console.log(`\n[DEEP DEBUG] --- Início prepareEmailData ---`);
     console.log(`[DEBUG] Lote ID: ${loteId}`);
     console.log(`[DEBUG] Cliente: ${clienteNome} (ID: ${clienteId})`);
     console.log(`[DEBUG] Razão Social: ${razaoSocial}`);
     console.log(`[DEBUG] Nome Conta Azul: ${nomeContaAzul}`);
-    console.log(`[DEBUG] Ciclo Original: ${cicloNome}`);
+    console.log(`[DEBUG] Ciclo Original (Exibição): ${cicloNome}`);
+    console.log(`[DEBUG] Nome Pasta Lote (Drive): ${nomePastaManual || 'Não fornecido'}`);
 
     // 1. Localizar Pasta GCP
     let finalFolderId: string | null = null;
@@ -154,8 +156,9 @@ export async function prepareEmailData(
 
     if (rootId) {
         const empresaParaPasta = (nomeContaAzul || razaoSocial || clienteNome).trim();
-        const pastaCiclo = (cicloNome || "Geral").trim();
-        console.log(`[DEBUG] Termos de busca hierárquica: Empresa="${empresaParaPasta}", Ciclo="${pastaCiclo}"`);
+        // PRIORIDADE: nomePastaManual (nome do lote) -> cicloNome (regra) -> "Geral"
+        const pastaCiclo = (nomePastaManual || cicloNome || "Geral").trim();
+        console.log(`[DEBUG] Termos de busca hierárquica: Empresa="${empresaParaPasta}", Pasta Final="${pastaCiclo}"`);
 
         console.log(`[DEBUG] 1/4 - Buscando Pasta Ano...`);
         const anoId = await findFolder(uploadAno, rootId);

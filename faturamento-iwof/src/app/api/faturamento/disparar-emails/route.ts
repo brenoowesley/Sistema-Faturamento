@@ -12,7 +12,21 @@ export async function POST(request: Request) {
         const { loteId, assunto } = await request.json();
         if (!loteId) throw new Error("ID do Lote não fornecido.");
 
-        // 1. Buscar os consolidados e os dados do cliente (Join)
+        // 1. Buscar o nome da pasta do lote (Drive)
+        const { data: lote, error: loteErr } = await supabaseAdmin
+            .from('faturamentos_lote')
+            .select('nome_pasta')
+            .eq('id', loteId)
+            .single();
+
+        if (loteErr || !lote) {
+            console.error("Erro ao buscar lote:", loteErr);
+            throw new Error(`Dados do lote não encontrados para o ID: ${loteId}`);
+        }
+
+        const nomePastaLote = lote.nome_pasta;
+
+        // 2. Buscar os consolidados e os dados do cliente (Join)
         const { data: consolidados, error: consErr } = await supabaseAdmin
             .from('faturamento_consolidados')
             .select(`
@@ -26,7 +40,7 @@ export async function POST(request: Request) {
 
         const resultados = [];
 
-        // 2. Disparar e-mails individualmente via Email Service
+        // 3. Disparar e-mails individualmente via Email Service
         for (const item of consolidados) {
             const cliente: any = Array.isArray(item.clientes) ? item.clientes[0] : item.clientes;
 
@@ -47,7 +61,8 @@ export async function POST(request: Request) {
                     cliente.nome_conta_azul || "",
                     cicloNome,
                     destinatarios,
-                    assunto
+                    assunto,
+                    nomePastaLote // Novo argumento: ID/Nome da pasta manual para busca no Drive
                 );
                 resultados.push({ cliente: cliente.nome, status: 'Enviado', to: destinatarios, anexos: res.anexos_count });
             } catch (emailErr: any) {
