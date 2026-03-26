@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
         const transfeeraBatchId = String(batchBody.id);
 
         // 5a. Fechar o lote imediatamente
-        const closeRes = await fetch(`${baseUrl}/batch/${transfeeraBatchId}/close`, {
+        const closeRes = await fetch(`${baseUrl}/batch/${transfeeraBatchId}`, {
             method: "POST",
             headers: {
                 "Authorization": `Bearer ${token}`,
