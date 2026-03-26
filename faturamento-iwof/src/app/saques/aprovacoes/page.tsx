@@ -190,7 +190,7 @@ export default function AprovacoesPage() {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {lotes.map((lote) => (
-                        <div key={lote.id} className="card p-6 flex flex-col justify-between hover:border-accent/40 transition-all border-white/10 group">
+                        <div key={lote.id} className="card p-6 flex flex-col justify-between hover:border-accent/40 transition-all border-white/10 group cursor-pointer" onClick={() => window.location.href = `/saques/aprovacoes/${lote.id}`}>
                             <div className="space-y-4">
                                 <div className="flex justify-between items-start">
                                     <span className="px-2 py-1 rounded-md bg-accent/10 border border-accent/20 text-accent text-[10px] font-bold tracking-widest uppercase">

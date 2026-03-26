@@ -45,6 +45,7 @@ interface SaqueItem {
     motivo_bloqueio?: string;
     chave_pix_edit?: string;
     tipo_pix_edit?: string;
+    chave_corrigida_automaticamente: boolean;
 }
 
 interface LoteLocal {
@@ -97,39 +98,101 @@ function normalizePixType(raw: string): string {
     return map[up] ?? up;
 }
 
+// ─── CPF Checksum Validator (mod 11) ────────────────────────────────────────────
+function isValidCpf(cpf: string): boolean {
+    const digits = cpf.replace(/\D/g, "");
+    if (digits.length !== 11 || /^(\d)\1+$/.test(digits)) return false;
+    let sum = 0;
+    for (let i = 0; i < 9; i++) sum += parseInt(digits[i]) * (10 - i);
+    let rest = (sum * 10) % 11;
+    if (rest === 10) rest = 0;
+    if (rest !== parseInt(digits[9])) return false;
+    sum = 0;
+    for (let i = 0; i < 10; i++) sum += parseInt(digits[i]) * (11 - i);
+    rest = (sum * 10) % 11;
+    if (rest === 10) rest = 0;
+    return rest === parseInt(digits[10]);
+}
+
+function isGarbageKey(chave: string): boolean {
+    if (chave.length > 77) return true;
+    const lower = chave.toLowerCase();
+    if (lower.includes("br.gov.bcb.pix") || lower.includes("brcode")) return true;
+    return false;
+}
+
+function isPhonePattern(digits: string): boolean {
+    if (digits.length < 10 || digits.length > 11) return false;
+    const ddd = parseInt(digits.substring(0, 2));
+    return ddd >= 11 && ddd <= 99;
+}
+
 /**
- * Detects the correct PIX type from the key format.
- * For 11-digit ambiguity (CPF vs TELEFONE), trusts original type if valid;
- * otherwise compares digits against cpf_favorecido.
+ * Detects and auto-corrects PIX type from the key format.
+ * Returns the corrected type and whether correction was applied.
+ * Uses CPF checksum (mod 11) for 11-digit ambiguity resolution.
  */
-function correctPixType(chave: string, tipoOriginal: string, cpfFavorecido: string): string {
+function correctPixTypeSmart(chave: string, tipoOriginal: string, cpfFavorecido: string): { tipo: string; corrigida: boolean } {
     const c = chave.trim();
-    if (!c) return tipoOriginal || "";
+    if (!c) return { tipo: tipoOriginal || "", corrigida: false };
+
+    // REJECT GARBAGE (Pix copia-e-cola, etc.)
+    if (isGarbageKey(c)) return { tipo: tipoOriginal || "CHAVE_ALEATORIA", corrigida: false };
 
     // EMAIL: contains @ and a dot after @
-    if (c.includes("@") && /\.\w+/.test(c.split("@")[1] ?? "")) return "EMAIL";
+    if (c.includes("@") && /\.\w+/.test(c.split("@")[1] ?? "")) {
+        const wasEmail = tipoOriginal.toUpperCase() === "EMAIL";
+        return { tipo: "EMAIL", corrigida: !wasEmail };
+    }
 
     // UUID / CHAVE_ALEATORIA
-    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(c))
-        return "CHAVE_ALEATORIA";
-    // Long mixed alphanumeric (not a phone / CPF)
-    if (/[a-zA-Z]/.test(c) && c.replace(/\-/g, "").length >= 25)
-        return "CHAVE_ALEATORIA";
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(c)) {
+        return { tipo: "CHAVE_ALEATORIA", corrigida: tipoOriginal.toUpperCase() !== "CHAVE_ALEATORIA" };
+    }
+    if (/[a-zA-Z]/.test(c) && c.replace(/-/g, "").length >= 25) {
+        return { tipo: "CHAVE_ALEATORIA", corrigida: tipoOriginal.toUpperCase() !== "CHAVE_ALEATORIA" };
+    }
 
     // Numeric-only analysis
-    const digits = c.replace(/[\s\(\)\-\.]/g, "");
+    const digits = c.replace(/[\s()\-.]/g, "");
     if (/^\d+$/.test(digits)) {
-        if (digits.length === 14) return "CNPJ";
-        if (digits.length === 10) return "TELEFONE";
+        if (digits.length === 14) {
+            return { tipo: "CNPJ", corrigida: tipoOriginal.toUpperCase() !== "CNPJ" };
+        }
+        if (digits.length === 10) {
+            return { tipo: "TELEFONE", corrigida: tipoOriginal.toUpperCase() !== "TELEFONE" };
+        }
         if (digits.length === 11) {
             const top = tipoOriginal.toUpperCase();
-            if (top === "CPF" || top === "TELEFONE") return top;
+            const cpfValid = isValidCpf(digits);
+            const phoneMatch = isPhonePattern(digits);
+
+            if (cpfValid) {
+                if (top === "TELEFONE") {
+                    return { tipo: "CPF", corrigida: true };
+                }
+                return { tipo: "CPF", corrigida: top !== "CPF" };
+            }
+
+            if (phoneMatch) {
+                if (top === "CPF") {
+                    return { tipo: "TELEFONE", corrigida: true };
+                }
+                return { tipo: "TELEFONE", corrigida: top !== "TELEFONE" };
+            }
+
+            if (top === "CPF" || top === "TELEFONE") return { tipo: top, corrigida: false };
             const cleanCpf = sanitizeCpf(cpfFavorecido);
-            return cleanCpf === digits ? "CPF" : "TELEFONE";
+            return { tipo: cleanCpf === digits ? "CPF" : "TELEFONE", corrigida: true };
         }
     }
 
-    return tipoOriginal || "CHAVE_ALEATORIA";
+    return { tipo: tipoOriginal || "CHAVE_ALEATORIA", corrigida: false };
+}
+
+// Keep backward compat for saveRevisaoItem etc.
+function correctPixType(chave: string, tipoOriginal: string, cpfFavorecido: string): string {
+    return correctPixTypeSmart(chave, tipoOriginal, cpfFavorecido).tipo;
 }
 
 function validateItem(cpf_conta: string, cpf_favorecido: string, chave_pix: string, tipo_pix: string)
@@ -150,9 +213,18 @@ function validateItem(cpf_conta: string, cpf_favorecido: string, chave_pix: stri
             return { status: "REVISAO", motivo_bloqueio: "Telefone parece incompleto ou inválido. Deve conter DDD + Número." };
         }
     }
-    if (tipo === "CNPJ" && !/^\d/.test(chave.replace(/[\.\/\-]/g, "")))
+    if (tipo === "CNPJ" && !/^\d/.test(chave.replace(/[.\/-]/g, "")))
         return { status: "REVISAO", motivo_bloqueio: "Tipo PIX é CNPJ mas a chave não parece um CNPJ." };
     return { status: "APROVADO" };
+}
+
+/** Full strict validation: base rules + garbage detection + ambiguity check */
+function validateItemStrict(cpf_conta: string, cpf_favorecido: string, chave_pix: string, tipo_pix: string)
+    : Pick<SaqueItem, "status" | "motivo_bloqueio"> {
+    const chave = sanitizeStr(chave_pix);
+    if (chave && isGarbageKey(chave))
+        return { status: "REVISAO", motivo_bloqueio: "Chave PIX ambígua/inválida — parece ser um Pix copia-e-cola ou string inválida." };
+    return validateItem(cpf_conta, cpf_favorecido, chave_pix, tipo_pix);
 }
 
 function parseRows(rawRows: Record<string, unknown>[]): SaqueItem[] {
@@ -164,13 +236,13 @@ function parseRows(rawRows: Record<string, unknown>[]): SaqueItem[] {
             const nome_usuario = sanitizeStr(String(r["Trabalhador"] ?? r["Nome"] ?? r["Nome do Usuário"] ?? r["Nome do Usuario"] ?? r["Usuario"] ?? r["Usuário"] ?? ""));
             const chave_pix = sanitizeStr(String(r["Chave PIX"] ?? ""));
             const tipo_pix_raw = normalizePixType(String(r["Tipo de Chave PIX"] ?? ""));
-            const tipo_pix = correctPixType(chave_pix, tipo_pix_raw, cpf_favorecido);
+            const { tipo: tipo_pix, corrigida } = correctPixTypeSmart(chave_pix, tipo_pix_raw, cpf_favorecido);
             const valor_solicitado = parseFloat(String(r["Valor Solicitado"] ?? "0").replace(",", ".")) || 0;
             const valor_real = parseFloat(String(r["Valor Real"] ?? "0").replace(",", ".")) || 0;
             const tipo_saque = sanitizeStr(String(r["Tipo"] ?? "PADRÃO")).toUpperCase();
             const dateParsed = parseDate(r["Solicitado em"] as string | number | Date);
             const data_solicitacao = dateParsed ? dateParsed.toISOString() : String(r["Solicitado em"] ?? "");
-            const validation = validateItem(cpf_conta, cpf_favorecido, chave_pix, tipo_pix);
+            const validation = validateItemStrict(cpf_conta, cpf_favorecido, chave_pix, tipo_pix);
             return {
                 id: localId(),
                 tipo_saque,
@@ -184,6 +256,7 @@ function parseRows(rawRows: Record<string, unknown>[]): SaqueItem[] {
                 tipo_pix,
                 chave_pix_edit: chave_pix,
                 tipo_pix_edit: tipo_pix,
+                chave_corrigida_automaticamente: corrigida,
                 ...validation,
             } as SaqueItem;
         });
@@ -365,6 +438,7 @@ function AprovadosTable({ items, onUpdateTipoPix, onRemove, onEdit, apiErrorItem
     apiErrorItems?: Record<string, string>;
 }) {
     const [f, setF] = useState({ data: "", nome: "", cpf: "", tipoPix: "", chavePix: "", vlrSol: "", vlrReal: "" });
+    const [showAutoCorrigidos, setShowAutoCorrigidos] = useState(false);
 
     const filtered = items.filter((i) =>
         matches(fmtDate(parseDate(i.data_solicitacao)), f.data) &&
@@ -373,99 +447,124 @@ function AprovadosTable({ items, onUpdateTipoPix, onRemove, onEdit, apiErrorItem
         matches(i.tipo_pix, f.tipoPix) &&
         matches(i.chave_pix, f.chavePix) &&
         matches(i.valor_solicitado.toFixed(2), f.vlrSol) &&
-        matches(i.valor_real.toFixed(2), f.vlrReal)
+        matches(i.valor_real.toFixed(2), f.vlrReal) &&
+        (!showAutoCorrigidos || i.chave_corrigida_automaticamente)
     );
 
     if (!items.length) return <p className="table-empty">Nenhum item aprovado ainda.</p>;
 
-    const hasFilters = Object.values(f).some(Boolean);
+    const hasFilters = Object.values(f).some(Boolean) || showAutoCorrigidos;
+    const autoCount = items.filter(i => i.chave_corrigida_automaticamente).length;
 
     return (
-        <table className="data-table">
-            <thead>
-                <tr>
-                    <th>
-                        Data
-                        <input style={filterInputStyle} placeholder="filtrar…" value={f.data} onChange={(e) => setF((p) => ({ ...p, data: e.target.value }))} />
-                    </th>
-                    <th>
-                        Nome
-                        <input style={filterInputStyle} placeholder="filtrar…" value={f.nome} onChange={(e) => setF((p) => ({ ...p, nome: e.target.value }))} />
-                    </th>
-                    <th>
-                        CPF Favorecido
-                        <input style={filterInputStyle} placeholder="filtrar…" value={f.cpf} onChange={(e) => setF((p) => ({ ...p, cpf: e.target.value }))} />
-                    </th>
-                    <th>
-                        Tipo PIX
-                        <input style={filterInputStyle} placeholder="filtrar…" value={f.tipoPix} onChange={(e) => setF((p) => ({ ...p, tipoPix: e.target.value }))} />
-                    </th>
-                    <th>
-                        Chave PIX
-                        <input style={filterInputStyle} placeholder="filtrar…" value={f.chavePix} onChange={(e) => setF((p) => ({ ...p, chavePix: e.target.value }))} />
-                    </th>
-                    <th>
-                        Vlr. Solicitado
-                        <input style={filterInputStyle} placeholder="filtrar…" value={f.vlrSol} onChange={(e) => setF((p) => ({ ...p, vlrSol: e.target.value }))} />
-                    </th>
-                    <th>
-                        Vlr. Real
-                        <input style={filterInputStyle} placeholder="filtrar…" value={f.vlrReal} onChange={(e) => setF((p) => ({ ...p, vlrReal: e.target.value }))} />
-                    </th>
-                    <th>Receita</th>
-                    <th>Ações</th>
-                </tr>
-            </thead>
-            <tbody>
-                {filtered.map((i) => {
-                    const errorMsg = apiErrorItems[i.id];
-                    return (
-                    <tr key={i.id} style={errorMsg ? { backgroundColor: "rgba(248,113,113,0.1)", outline: "1px solid var(--danger)" } : {}}>
-                        <td className="table-mono">{fmtDate(parseDate(i.data_solicitacao))}</td>
-                        <td style={{ fontSize: 12, color: "var(--fg-dim)" }}>
-                            {i.nome_usuario || "—"}
-                            {errorMsg && <div style={{ color: "var(--danger)", fontSize: 11, fontWeight: 700, marginTop: 4 }}>Erro: {errorMsg}</div>}
-                        </td>
-                        <td className="table-mono">{i.cpf_favorecido}</td>
-                        <td>
-                            <select
-                                value={i.tipo_pix}
-                                onChange={(e) => onUpdateTipoPix(i.id, e.target.value)}
-                                style={{
-                                    background: "rgba(33,118,255,0.08)",
-                                    color: "var(--accent)",
-                                    border: "1px solid rgba(33,118,255,0.25)",
-                                    borderRadius: 20,
-                                    padding: "3px 10px",
-                                    fontSize: 12,
-                                    fontWeight: 600,
-                                    cursor: "pointer",
-                                }}
-                            >
-                                {PIX_TYPE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                            </select>
-                        </td>
-                        <td className="table-mono" style={{ fontSize: 12 }}>{i.chave_pix}</td>
-                        <td style={{ color: "var(--fg-muted)" }}>R$ {i.valor_solicitado.toFixed(2)}</td>
-                        <td style={{ fontWeight: 600, color: "var(--accent)" }}>R$ {i.valor_real.toFixed(2)}</td>
-                        <td style={{ fontWeight: 600, color: "var(--success)" }}>R$ {(i.valor_solicitado - i.valor_real).toFixed(2)}</td>
-                        <td>
-                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                                <button className="btn btn-ghost" style={{ padding: "4px 8px", color: "var(--accent)" }} onClick={() => onEdit(i)} title="Editar"><Edit size={14} /></button>
-                                <button className="btn btn-ghost" style={{ padding: "4px 8px", color: "var(--danger)" }} onClick={() => onRemove(i.id)} title="Remover Manualmente"><XCircle size={14} /></button>
-                            </div>
-                        </td>
+        <>
+            {autoCount > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--fg-dim)" }}>
+                        <input
+                            type="checkbox"
+                            checked={showAutoCorrigidos}
+                            onChange={(e) => setShowAutoCorrigidos(e.target.checked)}
+                            style={{ accentColor: "var(--warning)" }}
+                        />
+                        <AlertTriangle size={14} color="var(--warning)" />
+                        Mostrar apenas Auto-Corrigidos ({autoCount})
+                    </label>
+                </div>
+            )}
+            <table className="data-table">
+                <thead>
+                    <tr>
+                        <th>
+                            Data
+                            <input style={filterInputStyle} placeholder="filtrar…" value={f.data} onChange={(e) => setF((p) => ({ ...p, data: e.target.value }))} />
+                        </th>
+                        <th>
+                            Nome
+                            <input style={filterInputStyle} placeholder="filtrar…" value={f.nome} onChange={(e) => setF((p) => ({ ...p, nome: e.target.value }))} />
+                        </th>
+                        <th>
+                            CPF Favorecido
+                            <input style={filterInputStyle} placeholder="filtrar…" value={f.cpf} onChange={(e) => setF((p) => ({ ...p, cpf: e.target.value }))} />
+                        </th>
+                        <th>
+                            Tipo PIX
+                            <input style={filterInputStyle} placeholder="filtrar…" value={f.tipoPix} onChange={(e) => setF((p) => ({ ...p, tipoPix: e.target.value }))} />
+                        </th>
+                        <th>
+                            Chave PIX
+                            <input style={filterInputStyle} placeholder="filtrar…" value={f.chavePix} onChange={(e) => setF((p) => ({ ...p, chavePix: e.target.value }))} />
+                        </th>
+                        <th>
+                            Vlr. Solicitado
+                            <input style={filterInputStyle} placeholder="filtrar…" value={f.vlrSol} onChange={(e) => setF((p) => ({ ...p, vlrSol: e.target.value }))} />
+                        </th>
+                        <th>
+                            Vlr. Real
+                            <input style={filterInputStyle} placeholder="filtrar…" value={f.vlrReal} onChange={(e) => setF((p) => ({ ...p, vlrReal: e.target.value }))} />
+                        </th>
+                        <th>Receita</th>
+                        <th>Ações</th>
                     </tr>
-                    );
-                })}
-                {filtered.length === 0 && hasFilters && (
-                    <tr><td colSpan={9} style={{ textAlign: "center", padding: 20, color: "var(--fg-dim)", fontSize: 13 }}>
-                        <Filter size={14} style={{ marginRight: 6, opacity: 0.5 }} />
-                        Nenhum resultado para os filtros aplicados.
-                    </td></tr>
-                )}
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    {filtered.map((i) => {
+                        const errorMsg = apiErrorItems[i.id];
+                        return (
+                        <tr key={i.id} style={errorMsg ? { backgroundColor: "rgba(248,113,113,0.1)", outline: "1px solid var(--danger)" } : {}}>
+                            <td className="table-mono">{fmtDate(parseDate(i.data_solicitacao))}</td>
+                            <td style={{ fontSize: 12, color: "var(--fg-dim)" }}>
+                                {i.nome_usuario || "—"}
+                                {errorMsg && <div style={{ color: "var(--danger)", fontSize: 11, fontWeight: 700, marginTop: 4 }}>Erro: {errorMsg}</div>}
+                            </td>
+                            <td className="table-mono">{i.cpf_favorecido}</td>
+                            <td>
+                                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                    <select
+                                        value={i.tipo_pix}
+                                        onChange={(e) => onUpdateTipoPix(i.id, e.target.value)}
+                                        style={{
+                                            background: "rgba(33,118,255,0.08)",
+                                            color: "var(--accent)",
+                                            border: "1px solid rgba(33,118,255,0.25)",
+                                            borderRadius: 20,
+                                            padding: "3px 10px",
+                                            fontSize: 12,
+                                            fontWeight: 600,
+                                            cursor: "pointer",
+                                        }}
+                                    >
+                                        {PIX_TYPE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                                    </select>
+                                    {i.chave_corrigida_automaticamente && (
+                                        <span title="Tipo PIX foi corrigido automaticamente pelo sistema" style={{ cursor: "help" }}>
+                                            <AlertTriangle size={14} color="var(--warning)" />
+                                        </span>
+                                    )}
+                                </div>
+                            </td>
+                            <td className="table-mono" style={{ fontSize: 12 }}>{i.chave_pix}</td>
+                            <td style={{ color: "var(--fg-muted)" }}>R$ {i.valor_solicitado.toFixed(2)}</td>
+                            <td style={{ fontWeight: 600, color: "var(--accent)" }}>R$ {i.valor_real.toFixed(2)}</td>
+                            <td style={{ fontWeight: 600, color: "var(--success)" }}>R$ {(i.valor_solicitado - i.valor_real).toFixed(2)}</td>
+                            <td>
+                                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                    <button className="btn btn-ghost" style={{ padding: "4px 8px", color: "var(--accent)" }} onClick={() => onEdit(i)} title="Editar"><Edit size={14} /></button>
+                                    <button className="btn btn-ghost" style={{ padding: "4px 8px", color: "var(--danger)" }} onClick={() => onRemove(i.id)} title="Remover Manualmente"><XCircle size={14} /></button>
+                                </div>
+                            </td>
+                        </tr>
+                        );
+                    })}
+                    {filtered.length === 0 && hasFilters && (
+                        <tr><td colSpan={9} style={{ textAlign: "center", padding: 20, color: "var(--fg-dim)", fontSize: 13 }}>
+                            <Filter size={14} style={{ marginRight: 6, opacity: 0.5 }} />
+                            Nenhum resultado para os filtros aplicados.
+                        </td></tr>
+                    )}
+                </tbody>
+            </table>
+        </>
     );
 }
 
@@ -756,6 +855,7 @@ function LotePanel({
     async function handleExport() {
         update((l) => ({ ...l, saving: true, saveMsg: null }));
         try {
+            const allTotalSolicitado = lote.items.reduce((s, i) => s + i.valor_solicitado, 0);
             const { data: loteDb, error: loteErr } = await supabase
                 .from("lotes_saques")
                 .insert({
@@ -764,6 +864,7 @@ function LotePanel({
                     total_solicitado: totalSolicitado,
                     total_real: totalReal,
                     receita_financeira: receita,
+                    valor_solicitado_total: allTotalSolicitado,
                     status: "AGUARDANDO_APROVACAO",
                 })
                 .select()
@@ -783,6 +884,7 @@ function LotePanel({
                 data_solicitacao: i.data_solicitacao || null,
                 status_item: i.status,
                 motivo_bloqueio: i.motivo_bloqueio ?? null,
+                chave_corrigida_automaticamente: i.chave_corrigida_automaticamente,
             }));
             const { error: itemsErr } = await supabase.from("itens_saque").insert(itens);
             if (itemsErr) throw itemsErr;

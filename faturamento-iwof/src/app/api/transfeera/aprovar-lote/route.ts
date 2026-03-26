@@ -34,12 +34,48 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Lote não encontrado." }, { status: 404 });
         }
 
-        // 2. Consultar itens aprovados
+        // 2. Autenticar com Transfeera
+        const token = await getTransfeeraToken();
+        const baseUrl = getTransfeeraBaseUrl();
+
+        // 3. CRIAÇÃO IDEMPOTENTE: Verificar se o lote já possui transfeera_batch_id
+        let transfeeraBatchId = lote.transfeera_batch_id ? String(lote.transfeera_batch_id) : null;
+
+        if (!transfeeraBatchId) {
+            const batchRes = await fetch(`${baseUrl}/batch`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                    "User-Agent": UA_HEADER,
+                },
+                body: JSON.stringify({
+                    name: lote.nome_lote,
+                    type: "TRANSFERENCIA",
+                }),
+            });
+
+            const batchBody = await batchRes.json();
+            if (!batchRes.ok) {
+                return NextResponse.json({ error: "Erro ao criar lote na Transfeera.", details: batchBody }, { status: batchRes.status });
+            }
+
+            transfeeraBatchId = String(batchBody.id);
+
+            // Salvar imediatamente o ID para idempotência
+            await supabase
+                .from("lotes_saques")
+                .update({ transfeera_batch_id: transfeeraBatchId })
+                .eq("id", lote_id);
+        }
+
+        // 4. ENVIO PARCIAL: Buscar apenas itens APROVADOS que ainda não possuem transfeera_transfer_id
         const { data: items, error: itemsError } = await supabase
             .from("itens_saque")
             .select("*")
             .eq("lote_id", lote_id)
-            .eq("status_item", "APROVADO");
+            .eq("status_item", "APROVADO")
+            .is("transfeera_transfer_id", null);
 
         if (itemsError) {
             return NextResponse.json({ error: "Erro ao buscar itens do lote." }, { status: 500 });
@@ -47,71 +83,82 @@ export async function POST(req: NextRequest) {
 
         const itensValidos = (items || []).filter((item: any) => Number(item.valor) > 0);
 
-        if (itensValidos.length === 0) {
-            return NextResponse.json({ error: "Nenhum item com valor superior a R$ 0,00 encontrado." }, { status: 400 });
-        }
+        // 5. Enviar individualmente com captura de falhas POR ITEM
+        let successCount = 0;
+        let failedCount = 0;
 
-        // 3. Autenticar com Transfeera
-        const token = await getTransfeeraToken();
-        const baseUrl = getTransfeeraBaseUrl();
+        if (itensValidos.length > 0) {
+            const results = await Promise.allSettled(itensValidos.map(async (item: any) => {
+                const payload = {
+                    value: Number(item.valor),
+                    integration_id: String(item.id),
+                    description: "REPASSE IWOF",
+                    destination_bank_account: {
+                        favored_name: item.nome_usuario,
+                        favored_cpf_cnpj: item.cpf_favorecido.replace(/\D/g, ""),
+                        pix_key: formatarChavePix(item.tipo_pix, item.chave_pix),
+                        pix_key_type: normalizePixKeyType(item.tipo_pix),
+                    }
+                };
 
-        // 4. PASSO 1: Criar o lote na Transfeera
-        const batchRes = await fetch(`${baseUrl}/batch`, {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${token}`,
-                "Content-Type": "application/json",
-                "User-Agent": UA_HEADER,
-            },
-            body: JSON.stringify({
-                name: lote.nome_lote,
-                type: "TRANSFERENCIA",
-            }),
-        });
+                const tRes = await fetch(`${baseUrl}/batch/${transfeeraBatchId}/transfer`, {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "Content-Type": "application/json",
+                        "User-Agent": UA_HEADER,
+                    },
+                    body: JSON.stringify(payload),
+                });
 
-        const batchBody = await batchRes.json();
-        if (!batchRes.ok) {
-            return NextResponse.json({ error: "Erro ao criar lote na Transfeera.", details: batchBody }, { status: batchRes.status });
-        }
+                const tBody = await tRes.json();
+                if (!tRes.ok) {
+                    // Marcar item como REVISAO no banco com o erro
+                    await supabase
+                        .from("itens_saque")
+                        .update({
+                            status_item: "REVISAO",
+                            motivo_bloqueio: `Transfeera: ${tBody.message || JSON.stringify(tBody)}`,
+                        })
+                        .eq("id", item.id);
+                    throw new Error(`${item.nome_usuario}: ${tBody.message || "Erro desconhecido"}`);
+                }
 
-        const transfeeraBatchId = String(batchBody.id);
+                // Sucesso: salvar transfeera_transfer_id
+                await supabase
+                    .from("itens_saque")
+                    .update({ transfeera_transfer_id: String(tBody.id) })
+                    .eq("id", item.id);
 
-        // 5. PASSO 2: Adicionar cada transferência individualmente no lote criado
-        // Conforme solicitado: utilizar Promise.all para envio individual na raiz do body
-        const transferResponses = await Promise.all(itensValidos.map(async (item: any) => {
-            const payload = {
-                value: Number(item.valor),
-                integration_id: String(item.id),
-                favored_name: item.nome_usuario,
-                favored_cpf_cnpj: item.cpf_favorecido.replace(/\D/g, ""),
-                pix_key: formatarChavePix(item.tipo_pix, item.chave_pix),
-                pix_key_type: normalizePixKeyType(item.tipo_pix),
-                pix_description: "REPASSE IWOF"
-            };
+                return { id: item.id, transfeera_id: tBody.id };
+            }));
 
-            const tRes = await fetch(`${baseUrl}/batch/${transfeeraBatchId}/transfer`, {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                    "User-Agent": UA_HEADER,
-                },
-                body: JSON.stringify(payload),
-            });
-
-            const tBody = await tRes.json();
-            if (!tRes.ok) {
-                console.error(`[Transfeera Approval] Erro no item ${item.id}:`, JSON.stringify(tBody));
-                throw new Error(`Erro na transferência do trabalhador ${item.nome_usuario}: ${tBody.message || "Erro desconhecido"}`);
+            for (const r of results) {
+                if (r.status === "fulfilled") successCount++;
+                else failedCount++;
             }
+        }
 
-            return {
-                integration_id: item.id,
-                transfeera_id: String(tBody.id)
-            };
-        }));
+        // 6. A TRAVA DO FECHAMENTO: Contagem de itens sem transfeera_transfer_id
+        const { count: pendingCount } = await supabase
+            .from("itens_saque")
+            .select("*", { count: "exact", head: true })
+            .eq("lote_id", lote_id)
+            .is("transfeera_transfer_id", null)
+            .in("status_item", ["APROVADO", "REVISAO"]);
 
-        // 6. PASSO 3: Fechar o lote na Transfeera
+        if ((pendingCount ?? 0) > 0) {
+            // NÃO FECHAR O LOTE — retornar 207 (sucesso parcial)
+            console.warn(`⚠️ [Transfeera Approval] Lote ${lote_id}: ${pendingCount} itens pendentes. Lote NÃO fechado.`);
+            return NextResponse.json({
+                closed: false,
+                success_count: successCount,
+                failed_count: pendingCount,
+                message: `${pendingCount} transferência(s) falharam ou estão pendentes. Corrija ou exclua os itens destacados para fechar o lote.`,
+            }, { status: 207 });
+        }
+
+        // 7. 100% dos itens têm transfeera_transfer_id → FECHAR O LOTE
         const closeRes = await fetch(`${baseUrl}/batch/${transfeeraBatchId}/close`, {
             method: "POST",
             headers: {
@@ -128,32 +175,17 @@ export async function POST(req: NextRequest) {
 
         console.log(`✅ [Transfeera Approval] Lote aprovado e finalizado! batch_id=${transfeeraBatchId}`);
 
-        // 7. Atualizar IDs das transferências no Supabase
-        const updatePromises = transferResponses.map((t: any) => {
-            return supabase
-                .from("itens_saque")
-                .update({ transfeera_transfer_id: t.transfeera_id })
-                .eq("id", t.integration_id);
-        });
-        await Promise.all(updatePromises);
-
         // 8. Atualizar status do lote no Supabase
-        const { error: updateLoteError } = await supabase
+        await supabase
             .from("lotes_saques")
-            .update({
-                status: "PROCESSANDO",
-                transfeera_batch_id: transfeeraBatchId,
-            })
+            .update({ status: "PROCESSANDO" })
             .eq("id", lote_id);
 
-        if (updateLoteError) {
-            return NextResponse.json({ error: "Lote finalizado, mas erro ao atualizar status no banco." }, { status: 500 });
-        }
-
         return NextResponse.json({
+            closed: true,
             success: true,
             batch_id: transfeeraBatchId,
-            items_count: itensValidos.length
+            items_count: successCount,
         });
 
     } catch (err: any) {
