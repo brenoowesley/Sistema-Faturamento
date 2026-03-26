@@ -94,15 +94,7 @@ export async function POST(req: NextRequest) {
         // ═══ PASSO 5: Fechamento e Atualização (Caminho Feliz) ════════════════
         const transfeeraBatchId = String(batchBody.id);
 
-        // 5a. Fechar o lote imediatamente
-        const closeRes = await fetch(`${baseUrl}/batch/${transfeeraBatchId}`, {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${token}`,
-                "Content-Type": "application/json",
-                "User-Agent": UA_HEADER,
-            },
-        });
+
 
         if (!closeRes.ok) {
             const closeBody = await closeRes.json();
