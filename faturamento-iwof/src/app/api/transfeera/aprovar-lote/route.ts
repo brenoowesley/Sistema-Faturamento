@@ -96,17 +96,7 @@ export async function POST(req: NextRequest) {
 
 
 
-        if (!closeRes.ok) {
-            const closeBody = await closeRes.json();
-            console.error("❌ [Transfeera Bulk] Erro ao fechar batch:", JSON.stringify(closeBody, null, 2));
-            // Lote foi criado mas não fechado — salvar batch_id para não perder referência
-            await supabase.from("lotes_saques").update({ transfeera_batch_id: transfeeraBatchId }).eq("id", lote_id);
-            return NextResponse.json({
-                error: "O lote foi criado na Transfeera mas houve erro ao fechá-lo.",
-                transfeera_error: closeBody.message || closeBody,
-                batch_id: transfeeraBatchId,
-            }, { status: 500 });
-        }
+
 
         // 5b. Extrair IDs de transferências e atualizar itens_saque
         const createdTransfers: any[] = batchBody.transfers || [];
