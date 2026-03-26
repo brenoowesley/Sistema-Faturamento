@@ -980,6 +980,19 @@ export default function FechamentoLote({
     };
 
     const handleDispararEmails = async () => {
+        // Verifica se faltam passos básicos e pede confirmação
+        const faltamBoletos = !actionState.boletosSuccess;
+        const faltamNfs = !actionState.nfsSuccess;
+
+        if (faltamBoletos || faltamNfs) {
+            const itensFaltantes = [];
+            if (faltamNfs) itensFaltantes.push("Notas Fiscais (Passo 4)");
+            if (faltamBoletos) itensFaltantes.push("Boletos (Passo 5)");
+            
+            const confirmMsg = `Atenção: Você ainda não organizou os seguintes itens: ${itensFaltantes.join(' e ')}. \n\nOs e-mails serão enviados sem esses documentos anexados. Deseja enviar assim mesmo?`;
+            if (!window.confirm(confirmMsg)) return;
+        }
+
         setLoadingMap(p => ({ ...p, "emailsSuccess": true }));
         try {
             let targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
@@ -1211,11 +1224,18 @@ export default function FechamentoLote({
                             </div>
                         </div>
 
-                        <div className="flex gap-4 mt-8 pt-6 border-t border-[var(--border)]">
+                        {(!actionState.boletosSuccess || !actionState.nfsSuccess) && (
+                            <div className="mt-6 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg flex items-center gap-3 text-amber-500 text-xs">
+                                <AlertTriangle size={16} />
+                                <span><strong>Aviso:</strong> Algumas etapas de anexos (NFs ou Boletos) não foram concluídas. Os e-mails podem ir incompletos.</span>
+                            </div>
+                        )}
+
+                        <div className="flex gap-4 mt-6 pt-6 border-t border-[var(--border)]">
                             <button className="flex-1 btn btn-ghost" onClick={() => setActiveModal(null)} disabled={loadingMap["emailsSuccess"]}>Cancelar</button>
                             <button className="flex-[2] btn btn-primary bg-blue-600 hover:bg-blue-700 border-none text-white font-bold gap-3 shadow-lg shadow-blue-500/30" 
                                 onClick={handleDispararEmails} 
-                                disabled={loadingMap["emailsSuccess"] || (!actionState.boletosSuccess && !actionState.nfsSuccess)}>
+                                disabled={loadingMap["emailsSuccess"]}>
                                 {loadingMap["emailsSuccess"] ? <span className="loading loading-spinner loading-sm"></span> : <Send size={20} />}
                                 {loadingMap["emailsSuccess"] ? "Processando Envios no Servidor..." : "CONFIRMAR DISPARO EM LOTE"}
                             </button>
