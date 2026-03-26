@@ -17,12 +17,6 @@ export async function POST(request: Request) {
             .from('faturamento_consolidados')
             .select(`
                 id,
-                valor_bruto,
-                valor_boleto_final,
-                valor_nc_final,
-                acrescimos,
-                descontos,
-                numero_nf,
                 cliente_id,
                 clientes ( nome, razao_social, emails_faturamento, nome_conta_azul, ciclos_faturamento ( nome ) )
             `)
@@ -43,18 +37,7 @@ export async function POST(request: Request) {
 
             const destinatarios = cliente.emails_faturamento;
             const cicloNome = cliente.ciclos_faturamento?.nome || "Geral";
-            const isNordestao = cicloNome.toUpperCase().includes('NORDESTAO') || cicloNome.toUpperCase().includes('NORDESTÃO');
             
-            // Para o Nordestão, o valor bruto e o boleto apresentados não devem ter o desconto abatido
-            const valorApresentacaoFatura = isNordestao 
-                ? Number(item.valor_bruto) + Number(item.acrescimos || 0) 
-                : Number(item.valor_bruto);
-
-            // Devolve o valor do desconto ao Boleto apenas na apresentação visual do e-mail
-            const valorApresentacaoBoleto = isNordestao 
-                ? Number(item.valor_boleto_final) + Number(item.descontos || 0) 
-                : Number(item.valor_boleto_final);
-
             try {
                 const res = await prepareEmailData(
                     loteId,
@@ -64,11 +47,7 @@ export async function POST(request: Request) {
                     cliente.nome_conta_azul || "",
                     cicloNome,
                     destinatarios,
-                    assunto,
-                    valorApresentacaoFatura,  // Valor Bruto ajustado
-                    valorApresentacaoBoleto,  // Valor Líquido do Boleto ajustado (sem abater o desconto)
-                    item.valor_nc_final,
-                    item.numero_nf
+                    assunto
                 );
                 resultados.push({ cliente: cliente.nome, status: 'Enviado', to: destinatarios, anexos: res.anexos_count });
             } catch (emailErr: any) {

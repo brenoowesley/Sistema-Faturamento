@@ -1,58 +1,68 @@
+export interface BillingTemplateData {
+  clienteNome: string;
+  cicloNome: string;
+  mes: string;
+  ano: string;
+}
+
 /**
- * Template de E-mail de Faturamento iWof
- * @param data Dados dinâmicos do faturamento
+ * Template de E-mail de Faturamento iWof Modernizado
+ * @param data Dados dinâmicos para o template (sem valores financeiros)
  * @returns HTML string pronta para envio
  */
-export function getBillingTemplate(data: {
-    clienteNome: string;
-    valorBruto: number;
-    valorLiquidoBoleto: number;
-    valorNC: number;
-    numeroNF: string | null;
-}) {
-    const fmtBRL = (valor: number) => `R$ ${valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-    return `
-        <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-            <div style="background-color: #0056b3; padding: 20px; text-align: center;">
-                <h2 style="color: #ffffff; margin: 0; font-size: 24px;">Faturamento Mensal iWof</h2>
-            </div>
-            <div style="padding: 30px;">
-                <h3 style="color: #333; margin-top: 0;">Olá, equipe da ${data.clienteNome}!</h3>
-                <p style="color: #555; line-height: 1.6;">O faturamento referente a este ciclo já se encontra disponível e consolidado em nosso sistema.</p>
-                
-                <div style="background-color: #f8f9fa; padding: 20px; border-left: 4px solid #0056b3; margin: 25px 0; border-radius: 0 8px 8px 0;">
-                    <h4 style="margin-top: 0; color: #0056b3; margin-bottom: 15px;">Resumo Financeiro</h4>
-                    <table style="width: 100%; border-collapse: collapse;">
-                        <tr>
-                            <td style="padding: 8px 0; color: #555; border-bottom: 1px solid #eee;">Valor Bruto dos Serviços:</td>
-                            <td style="padding: 8px 0; text-align: right; font-weight: bold; border-bottom: 1px solid #eee;">${fmtBRL(data.valorBruto)}</td>
-                        </tr>
-                        ${data.valorLiquidoBoleto > 0 ? `
-                        <tr>
-                            <td style="padding: 8px 0; color: #555; border-bottom: 1px solid #eee;">Valor Líquido do Boleto:</td>
-                            <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #28a745; border-bottom: 1px solid #eee;">${fmtBRL(data.valorLiquidoBoleto)}</td>
-                        </tr>` : ''}
-                        ${data.valorNC > 0 ? `
-                        <tr>
-                            <td style="padding: 8px 0; color: #555; border-bottom: 1px solid #eee;">Nota de Crédito Provisionada:</td>
-                            <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #dc3545; border-bottom: 1px solid #eee;">${fmtBRL(data.valorNC)}</td>
-                        </tr>` : ''}
-                        ${data.numeroNF ? `
-                        <tr>
-                            <td style="padding: 8px 0; color: #555;">Nota Fiscal:</td>
-                            <td style="padding: 8px 0; text-align: right; font-weight: bold;">${data.numeroNF}</td>
-                        </tr>` : ''}
-                    </table>
-                </div>
-
-                <p style="color: #555; line-height: 1.6;">Os documentos fiscais (NFSe, Boletos e Recibos) já processados estão anexados a este e-mail para o fechamento fiscal.</p>
-                <br>
-                <p style="color: #555; line-height: 1.6;">Atenciosamente,<br><strong>Departamento Financeiro - iWof</strong></p>
-            </div>
-            <div style="background-color: #f1f3f5; padding: 15px; text-align: center; font-size: 12px; color: #888;">
-                Esta é uma mensagem automática gerada pelo Sistema de Faturamento iWof. Não é necessário responder.
-            </div>
-        </div>
-    `;
+export function getBillingTemplate(data: BillingTemplateData) {
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Faturamento iWof</title>
+  <style>
+    body { margin: 0; padding: 0; background-color: #f4f7f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+    .container { max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05); border: 1px solid #e9ecef; overflow: hidden; }
+    .header { background-color: #1c5d99; text-align: center; padding: 20px; }
+    .header img { max-width: 120px; height: auto; }
+    .content { padding: 30px; }
+    .content h2 { font-size: 26px; color: #133b5c; margin-bottom: 20px; text-align: center; font-weight: 600; }
+    .content p { font-size: 16px; line-height: 1.7; color: #34495e; margin: 0 0 15px; }
+    .content strong { color: #1c5d99; font-weight: 600; }
+    .highlight { background-color: #d6eaf8; border-left: 5px solid #1c5d99; padding: 20px; margin: 25px 0; border-radius: 8px; }
+    .highlight p { margin: 0; font-weight: 500; color: #154360; }
+    .whatsapp-button { display: inline-block; background-color: #25D366; color: #ffffff !important; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: bold; text-align: center; margin-top: 20px; transition: all 0.3s ease; box-shadow: 0 2px 5px rgba(0,0,0,0.15); }
+    .whatsapp-button:hover { background-color: #1EBE57; transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+    .whatsapp-button img { width: 20px; vertical-align: middle; margin-right: 10px; }
+    .contact-info { margin-top: 30px; }
+    .contact-info p { margin-bottom: 5px; }
+    .footer { text-align: center; font-size: 12px; color: #868e96; padding: 0 30px 30px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="https://assets.unlayer.com/projects/261331/1734830295084-992622.png?w=256px" alt="iWof Logo">
+    </div>
+    <div class="content">
+      <h2>Sua fatura iWof chegou!</h2>
+      <p>Olá,</p>
+      <p>Tudo pronto! A fatura do seu ciclo <strong>${data.cicloNome}</strong>, referente a <strong>${data.clienteNome}</strong> de <strong>${data.mes}/${data.ano}</strong>, já está disponível nos anexos deste e-mail.</p>
+      <div class="highlight">
+        <p><strong>Sua atenção é importante!</strong> Uma rápida revisão garante que tudo está correto com seus lançamentos.</p>
+      </div>
+      <p>Ficou com alguma dúvida ou notou algo diferente? Nossa equipe está pronta para ajudar. É só chamar!</p>
+      <div class="contact-info">
+        <p>Um abraço,</p>
+        <p><strong>Equipe iWof</strong></p>
+      </div>
+      <a href="https://wa.me/558486987507" class="whatsapp-button">
+        <img src="https://img.icons8.com/m_outlined/512/FFFFFF/whatsapp.png" alt="WhatsApp Logo">
+        Fale conosco no WhatsApp
+      </a>
+    </div>
+    <div class="footer">
+      <p>&copy; ${data.ano} iWof. Todos os direitos reservados.</p>
+      <p>Você recebeu este e-mail como parte do seu contrato de serviços.</p>
+    </div>
+  </div>
+</body>
+</html>`;
 }

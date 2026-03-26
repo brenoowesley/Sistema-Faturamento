@@ -94,14 +94,6 @@ export async function POST(req: NextRequest) {
         // ═══ PASSO 5: Fechamento e Atualização (Caminho Feliz) ════════════════
         const transfeeraBatchId = String(batchBody.id);
 
-
-
-        if (!closeRes.ok) {
-            // Lote foi criado mas não fechado — salvar batch_id para não perder referência
-            await supabase.from("lotes_saques").update({ transfeera_batch_id: transfeeraBatchId }).eq("id", lote_id);
-
-        }
-
         // 5b. Extrair IDs de transferências e atualizar itens_saque
         const createdTransfers: any[] = batchBody.transfers || [];
         if (createdTransfers.length > 0) {

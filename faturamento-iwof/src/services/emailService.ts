@@ -108,20 +108,18 @@ export async function prepareEmailData(
     nomeContaAzul: string,
     cicloNome: string,
     destinatarios: string,
-    assunto: string,
-    valorBruto: number,
-    valorLiquidoBoleto: number,
-    valorNC: number,
-    numeroNF: string | null
+    assunto: string
 ) {
     // 1. Localizar Pasta GCP
     let finalFolderId: string | null = null;
     const rootId = getRootFolderId();
+    
+    // Obter Mês/Ano para busca de pastas e para o template
+    const now = new Date();
+    const uploadAno = now.getFullYear().toString();
+    const uploadMes = (now.getMonth() + 1).toString().padStart(2, '0');
+
     if (rootId) {
-        const now = new Date();
-        const uploadAno = now.getFullYear().toString();
-        const uploadMes = (now.getMonth() + 1).toString().padStart(2, '0');
-        
         const empresaParaPasta = (nomeContaAzul || razaoSocial || clienteNome).trim();
         const pastaCiclo = (cicloNome || "Geral").trim();
 
@@ -137,7 +135,7 @@ export async function prepareEmailData(
         }
     }
 
-    // 3. Baixar Anexos
+    // 2. Baixar Anexos
     const attachments: any[] = [];
     if (finalFolderId) {
         const pdfs = await getFolderPdfs(finalFolderId);
@@ -155,10 +153,9 @@ export async function prepareEmailData(
     // 3. Montar HTML Rico
     const htmlBody = getBillingTemplate({
         clienteNome,
-        valorBruto,
-        valorLiquidoBoleto,
-        valorNC,
-        numeroNF
+        cicloNome,
+        mes: uploadMes,
+        ano: uploadAno
     });
 
     // 4. Disparar via Nodemailer
