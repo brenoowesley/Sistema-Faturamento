@@ -33,6 +33,9 @@ async function findFolder(folderName: string, parentFolderId: string): Promise<s
         const safeFolderName = folderName.replace(/'/g, "\\'");
         const qExact = `name='${safeFolderName}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`;
 
+        console.log(`[DEBUG] findFolder - Iniciando busca EXATA para: "${folderName}" em parent: ${parentFolderId}`);
+        console.log(`[DEBUG] findFolder - Query exata: ${qExact}`);
+
         const resExact = await drive.files.list({
             q: qExact,
             fields: 'files(id, name)',
@@ -42,11 +45,16 @@ async function findFolder(folderName: string, parentFolderId: string): Promise<s
             includeItemsFromAllDrives: true,
         });
 
-        if (resExact.data.files && resExact.data.files.length > 0 && resExact.data.files[0].id) {
-            return resExact.data.files[0].id;
+        const exactFiles = resExact.data.files || [];
+        console.log(`[DEBUG] findFolder - Resultados da busca exata: ${exactFiles.length}`);
+
+        if (exactFiles.length > 0 && exactFiles[0].id) {
+            console.log(`[DEBUG] findFolder - Encontrado (EXATO): ${exactFiles[0].name} (ID: ${exactFiles[0].id})`);
+            return exactFiles[0].id;
         }
 
         // Fuzzy search
+        console.log(`[DEBUG] findFolder - Falha na busca exata. Iniciando busca FUZZY em parent: ${parentFolderId}`);
         const resList = await drive.files.list({
             q: `'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
             fields: 'files(id, name)',
@@ -55,29 +63,39 @@ async function findFolder(folderName: string, parentFolderId: string): Promise<s
             includeItemsFromAllDrives: true,
         });
 
-        if (resList.data.files && resList.data.files.length > 0) {
+        const totalFolders = resList.data.files || [];
+        console.log(`[DEBUG] findFolder - Total de pastas no parent para fuzzy: ${totalFolders.length}`);
+
+        if (totalFolders.length > 0) {
             const requestedNameUpper = folderName.trim().toUpperCase();
-            const foundFolder = resList.data.files.find(f => {
+            console.log(`[DEBUG] findFolder - Comparando "${requestedNameUpper}" com as pastas encontradas...`);
+            
+            const foundFolder = totalFolders.find(f => {
                 const driveFolderName = f.name || "";
                 const pattern = driveFolderName
                     .toUpperCase()
                     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
                     .replace(/_/g, "[ &ÇÁÀÂÃÉÊÍÓÔÕÚ']");
                 const regex = new RegExp(`^${pattern}$`, 'i');
-                return regex.test(requestedNameUpper);
+                const isMatch = regex.test(requestedNameUpper);
+                if (isMatch) console.log(`[DEBUG] findFolder - MATCH FUZZY ENCONTRADO: "${driveFolderName}" (ID: ${f.id})`);
+                return isMatch;
             });
+            
             if (foundFolder && foundFolder.id) return foundFolder.id;
         }
 
+        console.log(`[DEBUG] findFolder - Nenhuma pasta encontrada para "${folderName}"`);
         return null;
     } catch (error) {
-        console.error('[EmailService] Erro ao buscar pasta:', folderName, error);
+        console.error('[DEBUG] [EmailService] Erro fatal em findFolder:', folderName, error);
         return null;
     }
 }
 
 async function getFolderPdfs(folderId: string) {
     try {
+        console.log(`[DEBUG] getFolderPdfs - Listando PDFs na pasta ID: ${folderId}`);
         const res = await drive.files.list({
             q: `'${folderId}' in parents and mimeType='application/pdf' and trashed=false`,
             fields: 'files(id, name)',
@@ -85,18 +103,23 @@ async function getFolderPdfs(folderId: string) {
             supportsAllDrives: true,
             includeItemsFromAllDrives: true,
         });
-        return res.data.files || [];
+        
+        const files = res.data.files || [];
+        console.log(`[DEBUG] getFolderPdfs - Encontrados ${files.length} PDFs: ${files.map(f => f.name).join(', ')}`);
+        return files;
     } catch (error) {
-        console.error('[EmailService] Erro ao listar PDFs na pasta', folderId, error);
+        console.error('[DEBUG] [EmailService] Erro ao listar PDFs na pasta', folderId, error);
         return [];
     }
 }
 
 async function downloadDriveFile(fileId: string): Promise<Buffer> {
+    console.log(`[DEBUG] downloadDriveFile - Iniciando download do ID: ${fileId}`);
     const response = await drive.files.get(
         { fileId, alt: 'media', supportsAllDrives: true },
         { responseType: 'arraybuffer' }
     );
+    console.log(`[DEBUG] downloadDriveFile - Download concluído para ID: ${fileId} (${(response.data as ArrayBuffer).byteLength} bytes)`);
     return Buffer.from(response.data as ArrayBuffer);
 }
 
@@ -110,29 +133,61 @@ export async function prepareEmailData(
     destinatarios: string,
     assunto: string
 ) {
+    console.log(`\n[DEEP DEBUG] --- Início prepareEmailData ---`);
+    console.log(`[DEBUG] Lote ID: ${loteId}`);
+    console.log(`[DEBUG] Cliente: ${clienteNome} (ID: ${clienteId})`);
+    console.log(`[DEBUG] Razão Social: ${razaoSocial}`);
+    console.log(`[DEBUG] Nome Conta Azul: ${nomeContaAzul}`);
+    console.log(`[DEBUG] Ciclo Original: ${cicloNome}`);
+
     // 1. Localizar Pasta GCP
     let finalFolderId: string | null = null;
     const rootId = getRootFolderId();
+    console.log(`[DEBUG] Root Folder ID Extraído: ${rootId}`);
     
     // Obter Mês/Ano para busca de pastas e para o template
     const now = new Date();
     const uploadAno = now.getFullYear().toString();
     const uploadMes = (now.getMonth() + 1).toString().padStart(2, '0');
 
+    console.log(`[DEBUG] Parâmetros de pesquisa temporal: Ano="${uploadAno}", Mes="${uploadMes}"`);
+
     if (rootId) {
         const empresaParaPasta = (nomeContaAzul || razaoSocial || clienteNome).trim();
         const pastaCiclo = (cicloNome || "Geral").trim();
+        console.log(`[DEBUG] Termos de busca hierárquica: Empresa="${empresaParaPasta}", Ciclo="${pastaCiclo}"`);
 
+        console.log(`[DEBUG] 1/4 - Buscando Pasta Ano...`);
         const anoId = await findFolder(uploadAno, rootId);
         if (anoId) {
+            console.log(`[DEBUG] Pasta ANO encontrada: ID ${anoId}`);
+            console.log(`[DEBUG] 2/4 - Buscando Pasta Mês...`);
             const mesId = await findFolder(uploadMes, anoId);
             if (mesId) {
+                console.log(`[DEBUG] Pasta MÊS encontrada: ID ${mesId}`);
+                console.log(`[DEBUG] 3/4 - Buscando Pasta Empresa...`);
                 const empresaId = await findFolder(empresaParaPasta, mesId);
                 if (empresaId) {
+                    console.log(`[DEBUG] Pasta EMPRESA encontrada: ID ${empresaId}`);
+                    console.log(`[DEBUG] 4/4 - Buscando Pasta Ciclo...`);
                     finalFolderId = await findFolder(pastaCiclo, empresaId);
+                } else {
+                    console.error(`[DEBUG] falhou ao encontrar pasta EMPRESA: "${empresaParaPasta}"`);
                 }
+            } else {
+                console.error(`[DEBUG] falhou ao encontrar pasta MÊS: "${uploadMes}"`);
             }
+        } else {
+            console.error(`[DEBUG] falhou ao encontrar pasta ANO: "${uploadAno}"`);
         }
+    } else {
+        console.error(`[DEBUG] Root ID não configurado ou inválido.`);
+    }
+
+    if (finalFolderId) {
+        console.log(`[DEBUG] Pasta FINAL (Ciclo) localizada: ID ${finalFolderId}`);
+    } else {
+        console.error(`[DEBUG] ID FINAL DE PASTA NÃO LOCALIZADO. Nenhum anexo será carregado.`);
     }
 
     // 2. Baixar Anexos
@@ -149,6 +204,7 @@ export async function prepareEmailData(
             }
         }
     }
+    console.log(`[DEBUG] Total de anexos carregados: ${attachments.length}`);
 
     // 3. Montar HTML Rico
     const htmlBody = getBillingTemplate({
@@ -170,7 +226,10 @@ export async function prepareEmailData(
     });
 
     const emailList = destinatarios.split(/[,;]+/).map((e: string) => e.trim()).filter((e: string) => e.length > 0);
-    if (emailList.length === 0) throw new Error("Sem destinatários válidos.");
+    if (emailList.length === 0) {
+        console.error(`[DEBUG] Lista de destinatários vazia.`);
+        throw new Error("Sem destinatários válidos.");
+    }
 
     const to = emailList[0];
     const cc = emailList.slice(1).join(', ');
@@ -184,8 +243,11 @@ export async function prepareEmailData(
         attachments
     };
 
+    console.log(`[DEBUG] Enviando e-mail para: ${to} (CC: ${cc || 'nenhum'}) com ${attachments.length} anexos.`);
+
     try {
-        await transporter.sendMail(mailOptions);
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[DEBUG] E-mail enviado com sucesso: ${info.messageId}`);
         
         // 5. Registrar no Supabase (Log)
         await supabaseAdmin.from('logs_envio_email').insert({
@@ -196,9 +258,10 @@ export async function prepareEmailData(
             status: 'Sucesso'
         });
 
+        console.log(`[DEEP DEBUG] --- Fim prepareEmailData (Sucesso) ---\n`);
         return { success: true, destinatarios, anexos_count: attachments.length };
     } catch (error: any) {
-        console.error(`[EmailService] Erro disparo para ${clienteNome}:`, error);
+        console.error(`[DEBUG] ERRO NO DISPARO REAL:`, error);
         await supabaseAdmin.from('logs_envio_email').insert({
             lote_id: loteId,
             cliente_nome: razaoSocial || clienteNome,
@@ -207,6 +270,7 @@ export async function prepareEmailData(
             status: 'Erro',
             mensagem_erro: error.message
         });
+        console.log(`[DEEP DEBUG] --- Fim prepareEmailData (Falha) ---\n`);
         throw error;
     }
 }
