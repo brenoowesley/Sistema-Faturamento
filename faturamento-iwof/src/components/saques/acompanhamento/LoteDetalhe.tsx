@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Search, ArrowLeft, Download, FileText, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
+import { Search, ArrowLeft, Download, FileText, CheckCircle2, Loader2, RefreshCw, Banknote, TrendingUp, ArrowDownCircle, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useTransfeeraSync } from "@/hooks/useTransfeeraSync";
@@ -15,6 +15,7 @@ interface SaqueItem {
     chave_pix: string;
     tipo_pix: string;
     valor: number;
+    valor_solicitado: number | null;
     status_item: string;
     status_transfeera?: string;
     motivo_bloqueio?: string;
@@ -121,6 +122,22 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
         );
     }
 
+    // ═══ Dynamic Financial Metrics (based on item-level status) ═══
+    const SUCCESS_STATUSES = ["CONCLUIDO", "FINALIZADO", "EFETIVADO", "PAGO"];
+    const FAIL_STATUSES = ["FALHA", "DEVOLVIDO", "REMOVIDO", "BLOQUEADO"];
+
+    const financialMetrics = useMemo(() => {
+        const efetivados = itens.filter(i => SUCCESS_STATUSES.includes(i.status_item?.toUpperCase() || ""));
+        const falhas = itens.filter(i => FAIL_STATUSES.includes(i.status_item?.toUpperCase() || ""));
+
+        const vlrSolicitadoEfetivado = efetivados.reduce((s, i) => s + (Number(i.valor_solicitado) || Number(i.valor) || 0), 0);
+        const vlrPagoReal = efetivados.reduce((s, i) => s + (Number(i.valor) || 0), 0);
+        const receitaReal = vlrSolicitadoEfetivado - vlrPagoReal;
+        const vlrDevolvido = falhas.reduce((s, i) => s + (Number(i.valor_solicitado) || Number(i.valor) || 0), 0);
+
+        return { vlrSolicitadoEfetivado, vlrPagoReal, receitaReal, vlrDevolvido };
+    }, [itens]);
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -159,6 +176,38 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
                 <div className="ml-auto text-right">
                     <p className="text-xs font-semibold text-fg-dim uppercase tracking-wider mb-1">Total do Lote</p>
                     <p className="text-2xl font-bold text-accent">R$ {lote.total_real?.toFixed(2)}</p>
+                </div>
+            </div>
+
+            {/* Financial Metric Cards — Dynamic Reconciliation */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="card" style={{ padding: "16px 20px", borderColor: "rgba(167,139,250,0.15)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                        <Banknote size={16} color="#a78bfa" />
+                        <span style={{ fontSize: 10, color: "var(--fg-dim)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6 }}>Vlr. Solicitado (Efetivado)</span>
+                    </div>
+                    <span style={{ fontSize: 22, fontWeight: 800, color: "#a78bfa" }}>R$ {financialMetrics.vlrSolicitadoEfetivado.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="card" style={{ padding: "16px 20px", borderColor: "rgba(33,118,255,0.15)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                        <ArrowDownCircle size={16} color="#2176ff" />
+                        <span style={{ fontSize: 10, color: "var(--fg-dim)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6 }}>Valor Pago (Saída Real)</span>
+                    </div>
+                    <span style={{ fontSize: 22, fontWeight: 800, color: "#2176ff" }}>R$ {financialMetrics.vlrPagoReal.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="card" style={{ padding: "16px 20px", borderColor: "rgba(34,197,94,0.15)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                        <TrendingUp size={16} color="#22c55e" />
+                        <span style={{ fontSize: 10, color: "var(--fg-dim)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6 }}>Receita Financeira Real</span>
+                    </div>
+                    <span style={{ fontSize: 22, fontWeight: 800, color: "#22c55e" }}>R$ {financialMetrics.receitaReal.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="card" style={{ padding: "16px 20px", borderColor: "rgba(249,115,22,0.15)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                        <RotateCcw size={16} color="#f97316" />
+                        <span style={{ fontSize: 10, color: "var(--fg-dim)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6 }}>Valor Devolvido / Falhas</span>
+                    </div>
+                    <span style={{ fontSize: 22, fontWeight: 800, color: "#f97316" }}>R$ {financialMetrics.vlrDevolvido.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
                 </div>
             </div>
 

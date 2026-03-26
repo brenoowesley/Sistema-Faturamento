@@ -180,7 +180,7 @@ export default function LoteDetalhePage() {
     }
 
     async function handleApprove() {
-        if (!confirm("Tem certeza que deseja aprovar este lote e enviar para a Transfeera?")) return;
+        if (!confirm("Tem certeza que deseja aprovar este lote e enviar para a Transfeera?\n\nModelo: Tudo ou Nada — se houver qualquer erro, o lote inteiro será rejeitado.")) return;
         setProcessingAction(true);
         setActionMsg(null);
         try {
@@ -191,18 +191,17 @@ export default function LoteDetalhePage() {
             });
             const data = await res.json();
 
-            if (res.status === 207) {
-                // Partial success
-                setActionMsg({ type: "warning", text: `${data.failed_count || "Algumas"} transferências falharam. Corrija ou exclua os itens destacados em vermelho para poder fechar o lote.` });
-                loadData(); // Reload to show updated statuses
-            } else if (!res.ok) {
-                throw new Error(data.error || "Erro ao aprovar lote");
-            } else {
-                setActionMsg({ type: "success", text: "Lote aprovado e enviado com sucesso!" });
-                setTimeout(() => router.push("/saques/aprovacoes"), 2000);
+            if (!res.ok) {
+                const detail = data.transfeera_error
+                    ? (typeof data.transfeera_error === "string" ? data.transfeera_error : JSON.stringify(data.transfeera_error))
+                    : "";
+                throw new Error(`${data.error || "Erro ao aprovar lote"}${detail ? " — " + detail : ""}`);
             }
+
+            setActionMsg({ type: "success", text: `Lote aprovado e enviado com sucesso! (${data.items_count} transferências)` });
+            setTimeout(() => router.push("/saques/aprovacoes"), 2000);
         } catch (err: any) {
-            setActionMsg({ type: "error", text: "Erro: " + err.message });
+            setActionMsg({ type: "error", text: err.message });
         } finally {
             setProcessingAction(false);
         }
@@ -447,10 +446,11 @@ export default function LoteDetalhePage() {
             <div className="card p-4 bg-orange-500/5 border-orange-500/10 flex items-start gap-3">
                 <AlertTriangle className="text-orange-500 shrink-0 mt-0.5" size={18} />
                 <div>
-                    <p className="text-xs font-bold text-orange-200/80">Aviso Importante</p>
+                    <p className="text-xs font-bold text-orange-200/80">Modelo: Tudo ou Nada</p>
                     <p className="text-[10px] text-orange-200/50 leading-relaxed mt-1">
-                        Editar um item reseta seu ID de transferência, forçando o reenvio.
-                        O lote só será fechado na Transfeera quando 100% dos itens tiverem sido enviados com sucesso.
+                        Ao aprovar, todos os itens serão enviados em lote único para a Transfeera.
+                        Se qualquer item tiver uma chave PIX inválida, o lote inteiro será rejeitado.
+                        Corrija os itens na tabela antes de aprovar.
                     </p>
                 </div>
             </div>

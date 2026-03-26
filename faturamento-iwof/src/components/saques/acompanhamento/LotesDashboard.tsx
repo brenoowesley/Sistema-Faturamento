@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Search, Filter, Calendar, FileText, ChevronRight, Loader2, CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
+import { Search, Filter, Calendar, FileText, ChevronRight, Loader2, CheckCircle2, AlertTriangle, XCircle, Banknote, TrendingUp, ArrowDownCircle, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Modal from "@/components/Modal";
@@ -14,6 +14,9 @@ interface LoteSaque {
     tipo_saque: string;
     total_solicitado: number;
     total_real: number;
+    receita_financeira: number;
+    valor_solicitado_total: number | null;
+    valor_devolvido: number | null;
     status: string;
     created_at: string;
 }
@@ -133,8 +136,47 @@ export default function LotesDashboard() {
 
     const tipos = Array.from(new Set(lotes.map(l => l.tipo_saque).filter(Boolean)));
 
+    const processados = lotes.filter(l => l.status !== "AGUARDANDO_APROVACAO");
+    const aggSolicitado = processados.reduce((s, l) => s + (l.valor_solicitado_total ?? l.total_solicitado ?? 0), 0);
+    const aggReal = processados.reduce((s, l) => s + (l.total_real ?? 0), 0);
+    const aggReceita = processados.reduce((s, l) => s + (l.receita_financeira ?? 0), 0);
+    const aggDevolvido = processados.reduce((s, l) => s + (l.valor_devolvido ?? 0), 0);
+
     return (
         <div className="space-y-6">
+            {/* Financial Summary Cards */}
+            {processados.length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="card" style={{ padding: "16px 20px", borderColor: "rgba(167,139,250,0.15)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                            <Banknote size={16} color="#a78bfa" />
+                            <span style={{ fontSize: 11, color: "var(--fg-dim)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6 }}>Vlr. Solicitado Total</span>
+                        </div>
+                        <span style={{ fontSize: 22, fontWeight: 800, color: "#a78bfa" }}>R$ {aggSolicitado.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="card" style={{ padding: "16px 20px", borderColor: "rgba(33,118,255,0.15)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                            <ArrowDownCircle size={16} color="#2176ff" />
+                            <span style={{ fontSize: 11, color: "var(--fg-dim)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6 }}>Valor Pago (Real)</span>
+                        </div>
+                        <span style={{ fontSize: 22, fontWeight: 800, color: "#2176ff" }}>R$ {aggReal.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="card" style={{ padding: "16px 20px", borderColor: "rgba(34,197,94,0.15)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                            <TrendingUp size={16} color="#22c55e" />
+                            <span style={{ fontSize: 11, color: "var(--fg-dim)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6 }}>Receita Financeira</span>
+                        </div>
+                        <span style={{ fontSize: 22, fontWeight: 800, color: "#22c55e" }}>R$ {aggReceita.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="card" style={{ padding: "16px 20px", borderColor: "rgba(249,115,22,0.15)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                            <RotateCcw size={16} color="#f97316" />
+                            <span style={{ fontSize: 11, color: "var(--fg-dim)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6 }}>Valor Devolvido</span>
+                        </div>
+                        <span style={{ fontSize: 22, fontWeight: 800, color: "#f97316" }}>R$ {aggDevolvido.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                </div>
+            )}
             {/* Global Search Tool */}
             <div className="card" style={{ background: "linear-gradient(to right, rgba(33,118,255,0.05), transparent)", borderLeft: "4px solid var(--accent)" }}>
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
