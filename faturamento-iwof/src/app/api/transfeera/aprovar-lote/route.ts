@@ -96,7 +96,11 @@ export async function POST(req: NextRequest) {
 
 
 
+        if (!closeRes.ok) {
+            // Lote foi criado mas não fechado — salvar batch_id para não perder referência
+            await supabase.from("lotes_saques").update({ transfeera_batch_id: transfeeraBatchId }).eq("id", lote_id);
 
+        }
 
         // 5b. Extrair IDs de transferências e atualizar itens_saque
         const createdTransfers: any[] = batchBody.transfers || [];
