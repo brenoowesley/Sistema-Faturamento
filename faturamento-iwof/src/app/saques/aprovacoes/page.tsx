@@ -13,8 +13,10 @@ import {
     Layers,
     Calendar,
     Send,
-    Trash2
+    Trash2,
+    Eye
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 
 export const dynamic = 'force-dynamic';
@@ -31,6 +33,7 @@ interface LoteAprovacao {
 
 export default function AprovacoesPage() {
     const supabase = createClient();
+    const router = useRouter();
     const [loading, setLoading] = useState(true);
     const [authorized, setAuthorized] = useState(false);
     const [lotes, setLotes] = useState<LoteAprovacao[]>([]);
@@ -82,30 +85,8 @@ export default function AprovacoesPage() {
         checkAccessAndLoad();
     }, [supabase]);
 
-    async function handleApprove(loteId: string) {
-        if (!confirm("Tem certeza que deseja aprovar este lote e enviar para a Transfeera?")) return;
-        
-        setProcessingId(loteId);
-        try {
-            const res = await fetch("/api/transfeera/aprovar-lote", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ lote_id: loteId }),
-            });
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                throw new Error(data.error || "Erro ao aprovar lote");
-            }
-
-            alert("Lote aprovado e enviado com sucesso!");
-            setLotes(prev => prev.filter(l => l.id !== loteId));
-        } catch (err: any) {
-            alert("Erro: " + err.message);
-        } finally {
-            setProcessingId(null);
-        }
+    async function handleReview(loteId: string) {
+        router.push(`/saques/aprovacoes/${loteId}`);
     }
 
     async function handleReject(loteId: string) {
@@ -190,7 +171,7 @@ export default function AprovacoesPage() {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {lotes.map((lote) => (
-                        <div key={lote.id} className="card p-6 flex flex-col justify-between hover:border-accent/40 transition-all border-white/10 group cursor-pointer" onClick={() => window.location.href = `/saques/aprovacoes/${lote.id}`}>
+                        <div key={lote.id} className="card p-6 flex flex-col justify-between hover:border-accent/40 transition-all border-white/10 group cursor-pointer" onClick={() => router.push(`/saques/aprovacoes/${lote.id}`)}>
                             <div className="space-y-4">
                                 <div className="flex justify-between items-start">
                                     <span className="px-2 py-1 rounded-md bg-accent/10 border border-accent/20 text-accent text-[10px] font-bold tracking-widest uppercase">
@@ -222,7 +203,10 @@ export default function AprovacoesPage() {
 
                             <div className="grid grid-cols-2 gap-3 mt-8">
                                 <button
-                                    onClick={() => handleReject(lote.id)}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleReject(lote.id);
+                                    }}
                                     disabled={processingId !== null}
                                     className="btn border border-red-500/30 bg-red-500/5 text-red-500 hover:bg-red-500 hover:text-white flex items-center justify-center gap-2 py-2.5 text-xs font-bold transition-all rounded-xl"
                                 >
@@ -230,12 +214,15 @@ export default function AprovacoesPage() {
                                     Rejeitar
                                 </button>
                                 <button
-                                    onClick={() => handleApprove(lote.id)}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleReview(lote.id);
+                                    }}
                                     disabled={processingId !== null}
                                     className="btn bg-accent text-white hover:opacity-90 flex items-center justify-center gap-2 py-2.5 text-xs font-bold transition-all rounded-xl shadow-[0_4px_12px_rgba(33,118,255,0.3)]"
                                 >
-                                    {processingId === lote.id ? <Loader2 className="animate-spin" size={14} /> : <Send size={14} />}
-                                    Aprovar
+                                    <Eye size={14} />
+                                    Revisar Lote
                                 </button>
                             </div>
                         </div>
