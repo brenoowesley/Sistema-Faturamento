@@ -109,6 +109,25 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
         return result;
     }, [itens, searchTerm, statusFilters]);
 
+    // ═══ Dynamic Financial Metrics (based on item-level status) ═══
+    // These constants and the useMemo MUST be before any early returns (React Rules of Hooks)
+    const SUCCESS_STATUSES = ["CONCLUIDO", "FINALIZADO", "EFETIVADO", "PAGO"];
+    const FAIL_STATUSES = ["FALHA", "DEVOLVIDO", "REMOVIDO", "BLOQUEADO"];
+
+    const financialMetrics = useMemo(() => {
+        // Defensive: itens may be empty during initial load — fallback gracefully
+        const safeItens = itens ?? [];
+        const efetivados = safeItens.filter(i => SUCCESS_STATUSES.includes(i.status_item?.toUpperCase() || ""));
+        const falhas = safeItens.filter(i => FAIL_STATUSES.includes(i.status_item?.toUpperCase() || ""));
+
+        const vlrSolicitadoEfetivado = efetivados.reduce((s, i) => s + (Number(i.valor_solicitado) || Number(i.valor) || 0), 0);
+        const vlrPagoReal = efetivados.reduce((s, i) => s + (Number(i.valor) || 0), 0);
+        const receitaReal = vlrSolicitadoEfetivado - vlrPagoReal;
+        const vlrDevolvido = falhas.reduce((s, i) => s + (Number(i.valor_solicitado) || Number(i.valor) || 0), 0);
+
+        return { vlrSolicitadoEfetivado, vlrPagoReal, receitaReal, vlrDevolvido };
+    }, [itens]);
+
     if (loading) {
         return <div className="p-12 text-center text-fg-muted font-mono">Carregando detalhes do lote...</div>;
     }
@@ -121,22 +140,6 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
             </div>
         );
     }
-
-    // ═══ Dynamic Financial Metrics (based on item-level status) ═══
-    const SUCCESS_STATUSES = ["CONCLUIDO", "FINALIZADO", "EFETIVADO", "PAGO"];
-    const FAIL_STATUSES = ["FALHA", "DEVOLVIDO", "REMOVIDO", "BLOQUEADO"];
-
-    const financialMetrics = useMemo(() => {
-        const efetivados = itens.filter(i => SUCCESS_STATUSES.includes(i.status_item?.toUpperCase() || ""));
-        const falhas = itens.filter(i => FAIL_STATUSES.includes(i.status_item?.toUpperCase() || ""));
-
-        const vlrSolicitadoEfetivado = efetivados.reduce((s, i) => s + (Number(i.valor_solicitado) || Number(i.valor) || 0), 0);
-        const vlrPagoReal = efetivados.reduce((s, i) => s + (Number(i.valor) || 0), 0);
-        const receitaReal = vlrSolicitadoEfetivado - vlrPagoReal;
-        const vlrDevolvido = falhas.reduce((s, i) => s + (Number(i.valor_solicitado) || Number(i.valor) || 0), 0);
-
-        return { vlrSolicitadoEfetivado, vlrPagoReal, receitaReal, vlrDevolvido };
-    }, [itens]);
 
     return (
         <div className="space-y-6">
