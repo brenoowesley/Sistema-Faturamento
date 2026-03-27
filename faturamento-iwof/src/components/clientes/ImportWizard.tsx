@@ -240,7 +240,7 @@ export default function ImportWizard() {
                 email_contato: "",
                 nome_conta_azul: "",
                 tempo_pagamento_dias: "",
-                boleto_unificado: false,
+                boleto_unificado: true,
                 ciclo_faturamento_id: "",
                 _needsCompletion: false,
             };
