@@ -1,21 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// Rotas bloqueadas para o papel CX (apenas Rastreio, Perfil e Sair são permitidos)
-const CX_BLOCKED_PREFIXES = [
-    "/",
-    "/faturamento",
-    "/saques/aprovacoes",
-    "/saques",
-    "/clientes",
-    "/usuarios",
-    "/triagem",
-    "/notas-credito",
-    "/lancamentos-parciais",
-    "/ajustes",
-    "/como-usar",
-];
-
 // Rota permitida exclusivamente pelo CX que não deve ser bloqueada
 const CX_ALLOWED_PREFIX = "/saques/acompanhamento";
 
@@ -68,9 +53,15 @@ export async function middleware(request: NextRequest) {
             .single();
 
         const cargo = perfil?.cargo || "USER";
+        const role = cargo.toUpperCase();
+
+        // Admin e Aprovador têm acesso total (Bypass)
+        if (role === "ADMIN" || role === "APROVADOR") {
+            return response;
+        }
 
         // ── Aplicar regras do CX ──────────────────────────────────────────────
-        if (cargo === "CX") {
+        if (role === "CX") {
             // CX só pode acessar /saques/acompanhamento e /perfil
             const isCxAllowed =
                 pathname.startsWith(CX_ALLOWED_PREFIX) ||
