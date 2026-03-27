@@ -758,11 +758,11 @@ function BloqueadosTable({ items, onForceApprove, onEdit }: {
 function LotePanel({
     lote,
     onUpdateLote,
-    onComplete,
+    onLoteSent,
 }: {
     lote: LoteLocal;
     onUpdateLote: (tipo: string, updater: (l: LoteLocal) => LoteLocal) => void;
-    onComplete: () => void;
+    onLoteSent: (tipo: string) => void;
 }) {
     const supabase = createClient();
     const [forceApproveItem, setForceApproveItem] = useState<SaqueItem | null>(null);
@@ -889,8 +889,8 @@ function LotePanel({
             const { error: itemsErr } = await supabase.from("itens_saque").insert(itens);
             if (itemsErr) throw itemsErr;
 
-            alert("O lote foi enviado para aprovação");
-            onComplete();
+            // Sinaliza sucesso isolado para o lote atual sem afetar os demais
+            onLoteSent(lote.tipo_saque);
         } catch (err: unknown) {
             const e = err as { message?: string };
             update((l) => ({ ...l, saving: false, saveMsg: { type: "error", text: e.message ?? "Erro ao salvar." } }));
@@ -1114,11 +1114,13 @@ function EditarSaqueModal({ item, onSave, onClose }: { item: SaqueItem; onSave: 
 export default function GestaoSaques() {
     const [lotes, setLotes] = useState<LoteLocal[]>([]);
     const [fileName, setFileName] = useState<string | null>(null);
+    const [lotesEnviados, setLotesEnviados] = useState<string[]>([]);
 
     const onDrop = useCallback((accepted: File[]) => {
         const file = accepted[0];
         if (!file) return;
         setFileName(file.name);
+        setLotesEnviados([]); // Limpa rastreio ao carregar nova planilha
 
         if (file.name.endsWith(".csv")) {
             Papa.parse(file, {
@@ -1154,6 +1156,12 @@ export default function GestaoSaques() {
         setLotes((prev) => prev.map((l) => l.tipo_saque === tipo ? updater(l) : l));
     }
 
+    function handleLoteSent(tipo: string) {
+        setLotesEnviados((prev) => [...prev, tipo]);
+    }
+
+    const todosEnviados = lotes.length > 0 && lotesEnviados.length === lotes.length;
+
     // ── Empty state ──
     if (lotes.length === 0) {
         return (
@@ -1182,15 +1190,94 @@ export default function GestaoSaques() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
                 <p style={{ fontSize: 13, color: "var(--fg-dim)" }}>
                     <strong style={{ color: "var(--fg)" }}>{fileName}</strong> — {lotes.reduce((s, l) => s + l.items.length, 0)} linha(s) • {lotes.length} lote(s) detectado(s)
+                    {lotesEnviados.length > 0 && (
+                        <span style={{ marginLeft: 10, color: "var(--success)", fontWeight: 600 }}>
+                            • {lotesEnviados.length}/{lotes.length} enviado(s)
+                        </span>
+                    )}
                 </p>
-                <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={() => { setLotes([]); setFileName(null); }}>
+                <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={() => { setLotes([]); setFileName(null); setLotesEnviados([]); }}>
                     <Upload size={14} /> Novo Upload
                 </button>
             </div>
 
-            {lotes.map((lote) => (
-                <LotePanel key={lote.tipo_saque} lote={lote} onUpdateLote={updateLote} onComplete={() => setLotes([])} />
-            ))}
+            {lotes.map((lote) => {
+                const foiEnviado = lotesEnviados.includes(lote.tipo_saque);
+
+                if (foiEnviado) {
+                    return (
+                        <div key={lote.tipo_saque} style={{
+                            border: "1px solid rgba(52,211,153,0.35)",
+                            borderRadius: "var(--radius)",
+                            marginBottom: 20,
+                            padding: "20px 24px",
+                            background: "rgba(52,211,153,0.06)",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 14,
+                        }}>
+                            <div style={{
+                                width: 40, height: 40,
+                                borderRadius: "50%",
+                                background: "rgba(52,211,153,0.15)",
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                flexShrink: 0,
+                            }}>
+                                <CheckCircle2 size={20} color="var(--success)" />
+                            </div>
+                            <div>
+                                <p style={{ fontWeight: 700, color: "var(--success)", fontSize: 14, marginBottom: 2 }}>
+                                    ✅ Lote <strong>[{lote.tipo_saque}]</strong> enviado para aprovação com sucesso!
+                                </p>
+                                <p style={{ fontSize: 12, color: "var(--fg-dim)" }}>
+                                    {lote.items.filter(i => i.status === "APROVADO").length} transferências • R$ {lote.items.filter(i => i.status === "APROVADO").reduce((s, i) => s + i.valor_real, 0).toFixed(2)} enviados para revisão de Aprovador.
+                                </p>
+                            </div>
+                        </div>
+                    );
+                }
+
+                return (
+                    <LotePanel
+                        key={lote.tipo_saque}
+                        lote={lote}
+                        onUpdateLote={updateLote}
+                        onLoteSent={handleLoteSent}
+                    />
+                );
+            })}
+
+            {/* Botão de Finalizar — só aparece quando todos os lotes foram enviados */}
+            {todosEnviados && (
+                <div style={{
+                    marginTop: 8,
+                    padding: "20px 24px",
+                    border: "1px solid rgba(52,211,153,0.3)",
+                    borderRadius: "var(--radius)",
+                    background: "rgba(52,211,153,0.04)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    flexWrap: "wrap",
+                    gap: 12,
+                }}>
+                    <div>
+                        <p style={{ fontWeight: 700, color: "var(--success)", fontSize: 15, marginBottom: 4 }}>
+                            🎉 Todos os {lotes.length} lote(s) foram enviados!
+                        </p>
+                        <p style={{ fontSize: 12, color: "var(--fg-dim)" }}>
+                            Os lotes estão aguardando revisão e aprovação. Você pode iniciar um novo upload.
+                        </p>
+                    </div>
+                    <button
+                        className="btn btn-primary"
+                        style={{ fontSize: 14, padding: "10px 22px" }}
+                        onClick={() => { setLotes([]); setFileName(null); setLotesEnviados([]); }}
+                    >
+                        <CloudUpload size={16} /> Finalizar e Novo Upload
+                    </button>
+                </div>
+            )}
         </>
     );
 }
