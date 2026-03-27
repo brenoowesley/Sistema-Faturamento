@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   LayoutDashboard,
@@ -43,6 +44,7 @@ import { Suspense } from "react";
 
 function DashboardContent() {
   const supabase = createClient();
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Stats>({
     faturamentoTotal: 0,
@@ -59,7 +61,7 @@ function DashboardContent() {
   const fetchDashboardData = useCallback(async () => {
     setLoading(true);
     try {
-      // 0. User Role
+      // 0. User Role — redireciona imediatamente se for CX
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         const { data: perfil } = await supabase
@@ -67,7 +69,14 @@ function DashboardContent() {
           .select("cargo")
           .eq("id", user.id)
           .single();
-        setUserRole(perfil?.cargo || "USER");
+        const role = perfil?.cargo || "USER";
+        setUserRole(role);
+
+        // CX não tem acesso ao Dashboard — ejetar imediatamente
+        if (role === "CX") {
+          router.replace("/saques/acompanhamento");
+          return; // interrompe o fetch, evita renderizar dados desnecessários
+        }
       }
       // 1. Clientes Ativos
       const { count: clientesCount } = await supabase

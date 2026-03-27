@@ -6,36 +6,27 @@ import { createClient } from "@/lib/supabase/client";
 import {
     LayoutDashboard,
     Users,
-    FilePlus,
-    SlidersHorizontal,
     Receipt,
     LogOut,
     UserCircle,
     ShieldAlert,
-    ReceiptText,
-    ClipboardList,
-    HelpCircle,
     Sun,
     Moon,
-    Wallet,
+    Banknote,
     Activity,
-    CheckSquare,
+    CheckCircle,
+    Briefcase,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 const navItems = [
-    { label: "Dashboard", href: "/", icon: LayoutDashboard },
-    { label: "Clientes", href: "/clientes", icon: Users },
-    { label: "Novo Faturamento", href: "/faturamento/novo", icon: FilePlus },
-    { label: "Triagem de NFs", href: "/triagem", icon: Receipt },
-    { label: "Notas de Crédito", href: "/notas-credito", icon: ReceiptText },
-    { label: "Lanç. Parciais", href: "/lancamentos-parciais", icon: ClipboardList },
-    { label: "Emissão Avulsa", href: "/faturamento/avulso", icon: FilePlus },
-    { label: "Gestão de Saques", href: "/saques", icon: Wallet, exact: true },
-    { label: "Aprovações de Saque", href: "/saques/aprovacoes", icon: CheckSquare, roles: ["ADMIN", "APROVADOR"] },
-    { label: "Rastreio Transfeera", href: "/saques/acompanhamento", icon: Activity },
-    { label: "Como Usar", href: "/como-usar", icon: HelpCircle },
-    { label: "Ajustes", href: "/ajustes", icon: SlidersHorizontal },
+    { label: "Painel Principal",      href: "/",                      icon: LayoutDashboard, roles: ["ADMIN", "APROVADOR", "USER"],               exact: true },
+    { label: "Faturamento",           href: "/faturamento/lotes",      icon: Receipt,         roles: ["ADMIN", "APROVADOR", "USER"] },
+    { label: "Gestão de Saques",      href: "/saques",                 icon: Banknote,        roles: ["ADMIN", "APROVADOR", "USER"],               exact: true },
+    { label: "Aprovação de Saques",   href: "/saques/aprovacoes",      icon: CheckCircle,     roles: ["ADMIN", "APROVADOR", "USER"] },
+    { label: "Rastreio de Saques",    href: "/saques/acompanhamento",  icon: Activity,        roles: ["ADMIN", "APROVADOR", "USER", "CX"] },
+    { label: "Clientes",              href: "/clientes",               icon: Briefcase,       roles: ["ADMIN", "APROVADOR", "USER"] },
+    { label: "Usuários",              href: "/usuarios",               icon: Users,           roles: ["ADMIN", "APROVADOR"] },
 ];
 
 export default function Sidebar() {
@@ -98,16 +89,11 @@ export default function Sidebar() {
                 {/* Navigation */}
                 <nav className="sidebar-nav">
                     <span className="sidebar-section-label">Menu Principal</span>
-                    {navItems
-                        .filter(item => {
-                            if (cargo === "CX") {
-                                return item.label === "Rastreio Transfeera";
-                            }
-                            if (item.roles && !item.roles.includes(cargo || "")) {
-                                return false;
-                            }
-                            return true;
-                        })
+                {navItems
+                        .filter(item =>
+                            // Item sem roles = não existe na nova matriz (bloqueio defensivo)
+                            !!item.roles && item.roles.includes(cargo || "USER")
+                        )
                         .map((item) => {
                         const isActive = item.exact
                             ? pathname === item.href
@@ -130,17 +116,6 @@ export default function Sidebar() {
 
                     <div className="mt-8">
                         <span className="sidebar-section-label">Conta e Segurança</span>
-
-                        {(cargo === "ADMIN" || cargo === "APROVADOR") && (
-                            <Link
-                                href="/usuarios"
-                                className={`sidebar-link ${pathname.startsWith("/usuarios") ? "sidebar-link-active" : ""}`}
-                            >
-                                <ShieldAlert size={20} />
-                                <span>Gestão de Usuários</span>
-                                {pathname.startsWith("/usuarios") && <span className="sidebar-active-indicator" />}
-                            </Link>
-                        )}
 
                         <Link
                             href="/perfil"
