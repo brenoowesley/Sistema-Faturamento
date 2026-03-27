@@ -1,32 +1,36 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { prepareEmailData } from '@/services/emailService';
+import { PubSub } from '@google-cloud/pubsub';
+import { getBillingTemplate } from '@/services/email/templates/billingTemplate';
 
 const supabaseAdmin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+const pubsub = new PubSub({
+    projectId: process.env.GOOGLE_CLIENT_EMAIL?.split('@')[1].split('.')[0],
+    credentials: {
+        client_email: process.env.GOOGLE_CLIENT_EMAIL,
+        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    },
+});
+
 export async function POST(request: Request) {
     try {
         const { loteId, assunto } = await request.json();
         if (!loteId) throw new Error("ID do Lote não fornecido.");
 
-        // 1. Buscar o nome da pasta do lote (Drive)
+        // 1. Buscar o lote (para nome_pasta)
         const { data: lote, error: loteErr } = await supabaseAdmin
             .from('faturamentos_lote')
             .select('nome_pasta')
             .eq('id', loteId)
             .single();
 
-        if (loteErr || !lote) {
-            console.error("Erro ao buscar lote:", loteErr);
-            throw new Error(`Dados do lote não encontrados para o ID: ${loteId}`);
-        }
+        if (loteErr || !lote) throw new Error(`Lote não encontrado: ${loteErr?.message}`);
 
-        const nomePastaLote = lote.nome_pasta;
-
-        // 2. Buscar os consolidados e os dados do cliente (Join)
+        // 2. Buscar consolidados + dados do cliente
         const { data: consolidados, error: consErr } = await supabaseAdmin
             .from('faturamento_consolidados')
             .select(`
@@ -36,44 +40,71 @@ export async function POST(request: Request) {
             `)
             .eq('lote_id', loteId);
 
-        if (consErr || !consolidados) throw new Error(`Erro ao buscar dados: ${consErr?.message}`);
+        if (consErr || !consolidados) throw new Error(`Erro ao buscar consolidados: ${consErr?.message}`);
 
-        const resultados = [];
+        const topic = pubsub.topic('topic-disparo-emails');
+        const publishPromises: Promise<string>[] = [];
+        const now = new Date();
+        const mes = (now.getMonth() + 1).toString().padStart(2, '0');
+        const ano = now.getFullYear().toString();
 
-        // 3. Disparar e-mails individualmente via Email Service
+        // 3. Loop de publicação (Producer)
         for (const item of consolidados) {
             const cliente: any = Array.isArray(item.clientes) ? item.clientes[0] : item.clientes;
-
-            if (!cliente || !cliente.emails_faturamento) {
-                resultados.push({ cliente: cliente?.nome || 'Desconhecido', status: 'Ignorado (Sem e-mail)' });
-                continue;
-            }
+            
+            if (!cliente || !cliente.emails_faturamento) continue;
 
             const destinatarios = cliente.emails_faturamento;
             const cicloNome = cliente.ciclos_faturamento?.nome || "Geral";
-            
-            try {
-                const res = await prepareEmailData(
-                    loteId,
-                    item.cliente_id,
-                    cliente.nome || "",
-                    cliente.razao_social || "",
-                    cliente.nome_conta_azul || "",
-                    cicloNome,
-                    destinatarios,
-                    assunto,
-                    nomePastaLote // Novo argumento: ID/Nome da pasta manual para busca no Drive
-                );
-                resultados.push({ cliente: cliente.nome, status: 'Enviado', to: destinatarios, anexos: res.anexos_count });
-            } catch (emailErr: any) {
-                resultados.push({ cliente: cliente.nome, status: 'Erro', erro: emailErr.message });
-            }
+            const clienteNome = cliente.nome || "";
+            const razaoSocial = cliente.razao_social || "";
+            const nomeContaAzul = cliente.nome_conta_azul || "";
+
+            // Gerar HTML via template (unificado com o worker)
+            const htmlBody = getBillingTemplate({
+                clienteNome,
+                cicloNome,
+                mes,
+                ano
+            });
+
+            const payload = {
+                loteId,
+                clienteId: item.cliente_id,
+                clienteNome,
+                razaoSocial,
+                nomeContaAzul,
+                cicloNome,
+                destinatarios,
+                assunto: assunto || `Faturamento Mensal - ${razaoSocial || clienteNome}`,
+                htmlBody,
+                nomePastaLote: lote.nome_pasta,
+                mes,
+                ano
+            };
+
+            const dataBuffer = Buffer.from(JSON.stringify(payload));
+            publishPromises.push(topic.publishMessage({ data: dataBuffer }));
         }
 
-        return NextResponse.json({ success: true, message: "Disparo concluído", resultados });
+        // 4. Disparo simultâneo para o Pub/Sub
+        if (publishPromises.length > 0) {
+            await Promise.all(publishPromises);
+            
+            // 5. Atualizar status do lote (Integridade do Fluxo)
+            await supabaseAdmin
+                .from('faturamentos_lote')
+                .update({ status: 'ENVIANDO' })
+                .eq('id', loteId);
+        }
+
+        return NextResponse.json({ 
+            success: true, 
+            message: `Disparo de ${publishPromises.length} e-mails iniciado via GCP Pub/Sub!` 
+        });
 
     } catch (error: any) {
-        console.error("🚨 Erro Crítico na API de E-mails:", error);
+        console.error("🚨 Erro na API de Pub/Sub Producer:", error);
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 }
