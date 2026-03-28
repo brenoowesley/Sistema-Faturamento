@@ -16,17 +16,35 @@ import {
     Activity,
     CheckCircle,
     Briefcase,
+    Filter,
+    SlidersHorizontal,
+    FileText,
+    ListPlus,
+    BookOpen,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 const navItems = [
     { label: "Painel Principal",      href: "/",                      icon: LayoutDashboard, roles: ["ADMIN", "APROVADOR", "USER"],               exact: true },
+    
+    // Grupo: Faturamento
     { label: "Faturamento",           href: "/faturamento/lotes",      icon: Receipt,         roles: ["ADMIN", "APROVADOR", "USER"] },
+    { label: "Triagem",               href: "/triagem",               icon: Filter,          roles: ["ADMIN", "APROVADOR"] },
+    { label: "Lançamentos Parciais",  href: "/lancamentos-parciais",   icon: ListPlus,        roles: ["ADMIN", "APROVADOR"] },
+    { label: "Notas de Crédito",      href: "/notas-credito",          icon: FileText,        roles: ["ADMIN", "APROVADOR"] },
+    { label: "Central de Ajustes",    href: "/ajustes",                icon: SlidersHorizontal, roles: ["ADMIN", "APROVADOR"] },
+
+    // Grupo: Saques
     { label: "Gestão de Saques",      href: "/saques",                 icon: Banknote,        roles: ["ADMIN", "APROVADOR", "USER"],               exact: true },
     { label: "Aprovação de Saques",   href: "/saques/aprovacoes",      icon: CheckCircle,     roles: ["ADMIN", "APROVADOR", "USER"] },
     { label: "Rastreio de Saques",    href: "/saques/acompanhamento",  icon: Activity,        roles: ["ADMIN", "APROVADOR", "USER", "CX"] },
+
+    // Grupo: Cadastros
     { label: "Clientes",              href: "/clientes",               icon: Briefcase,       roles: ["ADMIN", "APROVADOR", "USER"] },
+
+    // Grupo: Configurações e Ajuda
     { label: "Usuários",              href: "/usuarios",               icon: Users,           roles: ["ADMIN", "APROVADOR"] },
+    { label: "Manual de Uso",         href: "/como-usar",              icon: BookOpen,        roles: ["ADMIN", "APROVADOR", "USER"] },
 ];
 
 export default function Sidebar() {
