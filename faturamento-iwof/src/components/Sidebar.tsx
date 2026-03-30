@@ -34,7 +34,6 @@ const navItems = [
     { label: "Triagem",               href: "/triagem",               icon: Filter,          roles: ["ADMIN", "APROVADOR"] },
     { label: "Lançamentos Parciais",  href: "/lancamentos-parciais",   icon: ListPlus,        roles: ["ADMIN", "APROVADOR"] },
     { label: "Notas de Crédito",      href: "/notas-credito",          icon: FileText,        roles: ["ADMIN", "APROVADOR"] },
-    { label: "Central de Ajustes",    href: "/ajustes",                icon: SlidersHorizontal, roles: ["ADMIN", "APROVADOR"] },
 
     // Grupo: Saques
     { label: "Gestão de Saques",      href: "/saques",                 icon: Banknote,        roles: ["ADMIN", "APROVADOR", "USER"],               exact: true },
@@ -45,6 +44,7 @@ const navItems = [
     { label: "Clientes",              href: "/clientes",               icon: Briefcase,       roles: ["ADMIN", "APROVADOR", "USER"] },
 
     // Grupo: Configurações e Ajuda
+    { label: "Ajustes",               href: "/ajustes",                icon: SlidersHorizontal, roles: ["ADMIN", "APROVADOR"] },
     { label: "Usuários",              href: "/usuarios",               icon: Users,           roles: ["ADMIN", "APROVADOR"] },
     { label: "Manual de Uso",         href: "/como-usar",              icon: BookOpen,        roles: ["ADMIN", "APROVADOR", "USER"] },
 ];
