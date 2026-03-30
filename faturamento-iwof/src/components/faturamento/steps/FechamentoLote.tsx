@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef, useEffect } from "react";
-import { ArrowLeft, CheckCircle2, ShieldCheck, FileText, UploadCloud, CloudLightning, Mail, AlertTriangle, Info, FileStack, X, FileArchive, Search, Send, FileCode2, Lock, Save, Eye } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ShieldCheck, FileText, UploadCloud, CloudLightning, Mail, AlertTriangle, Info, FileStack, X, FileArchive, Search, Send, FileCode2, Lock, Save, Eye, Activity } from "lucide-react";
 import { Agendamento, FinancialSummary } from "../types";
 import { fmtCurrency, normalizarNome, calcularTotaisFaturamento } from "../utils";
 import JSZip from "jszip";
@@ -1440,6 +1440,19 @@ export default function FechamentoLote({
                         </div>
                         {actionState.emailsSuccess && <span className="text-xs font-bold px-2 py-1 bg-green-500/20 text-green-500 rounded-lg flex items-center gap-1"><CheckCircle2 size={12} /> Enviado</span>}
                     </button>
+
+                    {actionState.emailsSuccess && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                const targetLoteId = loteId || saveResult?.loteId || (typeof window !== "undefined" ? sessionStorage.getItem('currentLoteId') : null);
+                                if (targetLoteId) window.location.href = `/faturamento/logs-envio/${targetLoteId}`;
+                            }}
+                            className="mt-3 w-full btn btn-outline border-green-500 text-green-500 hover:bg-green-500 hover:border-green-500 hover:text-white flex items-center justify-center gap-2 rounded-xl h-11 transition-all"
+                        >
+                            <Activity size={18} /> Acompanhar Status dos Envios
+                        </button>
+                    )}
 
                     {pendingNfReports.length > 0 && (
                         <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 mt-2 flex flex-col gap-3">

@@ -18,6 +18,22 @@ const supabaseAdmin = createClient(
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+// [NOVO] Configuração Global do Nodemailer com Pooling
+const mailTransporter = nodemailer.createTransport({
+    pool: true,
+    maxConnections: 3,
+    maxMessages: 100,
+    rateDelta: 1000,
+    rateLimit: 2,
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.SMTP_PORT || '465'),
+    secure: process.env.SMTP_PORT === '465',
+    auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+    }
+});
+
 const getRootFolderId = () => {
     const rawFolderEnv = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || process.env.DRIVE_FOLDER_URL;
     if (!rawFolderEnv) return null;
@@ -217,16 +233,8 @@ export async function prepareEmailData(
         ano: uploadAno
     });
 
-    // 4. Disparar via Nodemailer
-    const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || 'smtp.gmail.com',
-        port: parseInt(process.env.SMTP_PORT || '465'),
-        secure: process.env.SMTP_PORT === '465',
-        auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS,
-        }
-    });
+    // 4. Disparar via Nodemailer usando a instância global (Pooling)
+    const transporter = mailTransporter;
 
     const emailList = destinatarios.split(/[,;]+/).map((e: string) => e.trim()).filter((e: string) => e.length > 0);
     if (emailList.length === 0) {

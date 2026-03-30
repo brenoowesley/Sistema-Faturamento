@@ -4,6 +4,11 @@ const path = require('path');
 require('dotenv').config();
 
 const transporter = nodemailer.createTransport({
+    pool: true,
+    maxConnections: 3,
+    maxMessages: 100,
+    rateDelta: 1000,
+    rateLimit: 2,
     host: process.env.SMTP_HOST || 'smtp.gmail.com', // Ajuste conforme providor (gmail, office365 etc)
     port: process.env.SMTP_PORT || 587,
     secure: false, // true for 465, false for other ports
