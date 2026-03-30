@@ -44,7 +44,7 @@ const navItems = [
     { label: "Clientes",              href: "/clientes",               icon: Briefcase,       roles: ["ADMIN", "APROVADOR", "USER"] },
 
     // Grupo: Configurações e Ajuda
-    { label: "Ajustes",               href: "/ajustes",                icon: SlidersHorizontal, roles: ["ADMIN", "APROVADOR"] },
+    { label: "Ajustes",               href: "/ajustes",                icon: SlidersHorizontal, roles: ["ADMIN", "APROVADOR", "USER"] },
     { label: "Usuários",              href: "/usuarios",               icon: Users,           roles: ["ADMIN", "APROVADOR"] },
     { label: "Manual de Uso",         href: "/como-usar",              icon: BookOpen,        roles: ["ADMIN", "APROVADOR", "USER"] },
 ];

@@ -263,6 +263,8 @@ export default function AjustesPage() {
     const [pendingAdjustments, setPendingAdjustments] = useState<any[]>([]);
     const [showPreview, setShowPreview] = useState(false);
     const [isProcessingFile, setIsProcessingFile] = useState(false);
+    const [userRole, setUserRole] = useState("USER");
+    const isAdminOrAprovador = userRole === "ADMIN" || userRole === "APROVADOR";
 
     // Bulk action states
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -377,7 +379,15 @@ export default function AjustesPage() {
     useEffect(() => {
         fetchAjustes();
         fetchClientes();
-    }, [fetchAjustes, fetchClientes]);
+        const fetchRole = async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const { data } = await supabase.from("usuarios_perfis").select("cargo").eq("id", user.id).single();
+                if (data?.cargo) setUserRole(data.cargo);
+            }
+        };
+        fetchRole();
+    }, [fetchAjustes, fetchClientes, supabase]);
 
     const handleSaveDesconto = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -856,7 +866,7 @@ export default function AjustesPage() {
                                                     isLoading={isProcessingFile}
                                                     onUpload={(files) => handleFileUpload(files, "DESCONTO")}
                                                 />
-                                                {selectedIds.size > 0 && (
+                                                {isAdminOrAprovador && selectedIds.size > 0 && (
                                                     <button
                                                         onClick={handleBulkDelete}
                                                         className="btn btn-danger w-full bg-red-600 hover:bg-red-700 flex items-center justify-center gap-2 h-10 rounded-xl transition-all"
@@ -914,12 +924,16 @@ export default function AjustesPage() {
                                                                     <button onClick={(e) => { e.stopPropagation(); setSelectedAjuste(a); setShowModalDetalhes(true); }} title="Visualizar" className="btn btn-ghost btn-xs text-[var(--primary)]">
                                                                         <Eye size={14} />
                                                                     </button>
-                                                                    <button onClick={(e) => { e.stopPropagation(); handleEdit(a); }} title="Editar" className="btn btn-ghost btn-xs text-[var(--primary)]">
-                                                                        <Pencil size={14} />
-                                                                    </button>
-                                                                    <button onClick={(e) => { e.stopPropagation(); handleDelete(a.id); }} title="Excluir" className="btn btn-ghost btn-xs text-[var(--danger)]">
-                                                                        <Trash2 size={14} />
-                                                                    </button>
+                                                                    {isAdminOrAprovador && (
+                                                                        <>
+                                                                            <button onClick={(e) => { e.stopPropagation(); handleEdit(a); }} title="Editar" className="btn btn-ghost btn-xs text-[var(--primary)]">
+                                                                                <Pencil size={14} />
+                                                                            </button>
+                                                                            <button onClick={(e) => { e.stopPropagation(); handleDelete(a.id); }} title="Excluir" className="btn btn-ghost btn-xs text-[var(--danger)]">
+                                                                                <Trash2 size={14} />
+                                                                            </button>
+                                                                        </>
+                                                                    )}
                                                                 </div>
                                                             </td>
                                                         </tr>
@@ -950,7 +964,7 @@ export default function AjustesPage() {
                                                     isLoading={isProcessingFile}
                                                     onUpload={(files) => handleFileUpload(files, "ACRESCIMO")}
                                                 />
-                                                {selectedIds.size > 0 && (
+                                                {isAdminOrAprovador && selectedIds.size > 0 && (
                                                     <button
                                                         onClick={handleBulkDelete}
                                                         className="btn btn-danger w-full bg-red-600 hover:bg-red-700 flex items-center justify-center gap-2 h-10 rounded-xl transition-all"
@@ -1008,12 +1022,16 @@ export default function AjustesPage() {
                                                                     <button onClick={(e) => { e.stopPropagation(); setSelectedAjuste(a); setShowModalDetalhes(true); }} title="Visualizar" className="btn btn-ghost btn-xs text-[var(--primary)]">
                                                                         <Eye size={14} />
                                                                     </button>
-                                                                    <button onClick={(e) => { e.stopPropagation(); handleEdit(a); }} title="Editar" className="btn btn-ghost btn-xs text-[var(--primary)]">
-                                                                        <Pencil size={14} />
-                                                                    </button>
-                                                                    <button onClick={(e) => { e.stopPropagation(); handleDelete(a.id); }} title="Excluir" className="btn btn-ghost btn-xs text-[var(--danger)]">
-                                                                        <Trash2 size={14} />
-                                                                    </button>
+                                                                    {isAdminOrAprovador && (
+                                                                        <>
+                                                                            <button onClick={(e) => { e.stopPropagation(); handleEdit(a); }} title="Editar" className="btn btn-ghost btn-xs text-[var(--primary)]">
+                                                                                <Pencil size={14} />
+                                                                            </button>
+                                                                            <button onClick={(e) => { e.stopPropagation(); handleDelete(a.id); }} title="Excluir" className="btn btn-ghost btn-xs text-[var(--danger)]">
+                                                                                <Trash2 size={14} />
+                                                                            </button>
+                                                                        </>
+                                                                    )}
                                                                 </div>
                                                             </td>
                                                         </tr>
@@ -1032,7 +1050,7 @@ export default function AjustesPage() {
                                 {activeTab === "historico" && (
                                     <div className="space-y-4">
                                         <div className="flex justify-end min-h-[40px]">
-                                            {selectedIds.size > 0 && (
+                                            {isAdminOrAprovador && selectedIds.size > 0 && (
                                                 <button
                                                     onClick={handleRevertToPending}
                                                     className="btn btn-warning bg-amber-500 hover:bg-amber-600 text-amber-950 flex items-center justify-center gap-2 h-10 rounded-lg transition-all font-bold px-6"
