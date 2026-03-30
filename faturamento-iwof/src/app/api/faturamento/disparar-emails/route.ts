@@ -8,16 +8,15 @@ const supabaseAdmin = createClient(
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const pubsub = new PubSub({
-    projectId: process.env.GOOGLE_CLIENT_EMAIL?.split('@')[1].split('.')[0],
-    credentials: {
-        client_email: process.env.GOOGLE_CLIENT_EMAIL,
-        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-    },
-});
-
 export async function POST(request: Request) {
     try {
+        const pubsub = new PubSub({
+            projectId: 'faturamentoiwof',
+            credentials: {
+                client_email: process.env.GOOGLE_CLIENT_EMAIL,
+                private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+            },
+        });
         const { loteId, assunto } = await request.json();
         if (!loteId) throw new Error("ID do Lote não fornecido.");
 
