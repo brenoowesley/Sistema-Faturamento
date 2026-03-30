@@ -216,6 +216,21 @@ body {
   color: var(--accent);
 }
 
+.sidebar-link-primary {
+  background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+  color: #fff !important;
+  font-weight: 600;
+  box-shadow: 0 4px 12px var(--accent-glow);
+  margin-bottom: 8px;
+}
+
+.sidebar-link-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px var(--accent-glow);
+  filter: brightness(1.1);
+  color: #fff !important;
+}
+
 .sidebar-active-indicator {
   position: absolute;
   right: 0;

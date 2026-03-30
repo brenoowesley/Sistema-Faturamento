@@ -21,6 +21,7 @@ import {
     FileText,
     ListPlus,
     BookOpen,
+    PlusCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
@@ -28,6 +29,7 @@ const navItems = [
     { label: "Painel Principal",      href: "/",                      icon: LayoutDashboard, roles: ["ADMIN", "APROVADOR", "USER"],               exact: true },
     
     // Grupo: Faturamento
+    { label: "Novo Faturamento",      href: "/faturamento/novo",       icon: PlusCircle,       roles: ["ADMIN", "APROVADOR"], isPrimary: true },
     { label: "Faturamento",           href: "/faturamento/lotes",      icon: Receipt,         roles: ["ADMIN", "APROVADOR", "USER"] },
     { label: "Triagem",               href: "/triagem",               icon: Filter,          roles: ["ADMIN", "APROVADOR"] },
     { label: "Lançamentos Parciais",  href: "/lancamentos-parciais",   icon: ListPlus,        roles: ["ADMIN", "APROVADOR"] },
@@ -119,15 +121,15 @@ export default function Sidebar() {
                                 ? pathname === "/"
                                 : pathname.startsWith(item.href);
 
-                        return (
+                         return (
                             <Link
                                 key={item.href}
                                 href={item.href}
-                                className={`sidebar-link ${isActive ? "sidebar-link-active" : ""}`}
+                                className={`sidebar-link ${item.isPrimary ? "sidebar-link-primary" : ""} ${isActive ? "sidebar-link-active" : ""}`}
                             >
                                 <item.icon size={20} />
                                 <span>{item.label}</span>
-                                {isActive && <span className="sidebar-active-indicator" />}
+                                {isActive && !item.isPrimary && <span className="sidebar-active-indicator" />}
                             </Link>
                         );
                     })}
