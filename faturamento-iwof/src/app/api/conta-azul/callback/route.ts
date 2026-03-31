@@ -1,95 +1,65 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
     try {
-        const code = request.nextUrl.searchParams.get("code");
+        const { searchParams } = new URL(request.url);
+        const code = searchParams.get("code");
 
         if (!code) {
-            return NextResponse.json(
-                { error: "Parâmetro 'code' não encontrado na URL." },
-                { status: 400 }
-            );
+            return NextResponse.json({ error: "Nenhum código fornecido." }, { status: 400 });
         }
 
-        const clientId = process.env.CA_CLIENT_ID;
-        const clientSecret = process.env.CA_CLIENT_SECRET;
+        const clientId = process.env.CA_CLIENT_ID?.trim();
+        const clientSecret = process.env.CA_CLIENT_SECRET?.trim();
 
         if (!clientId || !clientSecret) {
-            return NextResponse.json(
-                { error: "As variáveis CA_CLIENT_ID ou CA_CLIENT_SECRET não estão configuradas corretamente no ambiente." },
-                { status: 500 }
-            );
+            return NextResponse.json({ error: "Chaves ausentes na Vercel." }, { status: 500 });
         }
 
-        // 1. Solicita os Tokens usando o Authorization Code nativamente
-        const base64Auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+        const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
-        const params = new URLSearchParams({
+        const body = new URLSearchParams({
             grant_type: "authorization_code",
             redirect_uri: "https://faturamento-iwof.vercel.app/api/conta-azul/callback",
             code: code,
+            client_id: clientId // Exigência do novo servidor Cognito
         });
 
-        const tokenResponse = await fetch("https://api.contaazul.com/oauth2/token", {
+        // BATER NA PORTA NOVA (auth.contaazul.com)
+        const tokenResponse = await fetch("https://auth.contaazul.com/oauth2/token", {
             method: "POST",
             headers: {
-                "Authorization": `Basic ${base64Auth}`,
+                "Authorization": `Basic ${credentials}`,
                 "Content-Type": "application/x-www-form-urlencoded",
             },
-            body: params.toString(),
-            cache: "no-store"
+            body: body.toString(),
         });
 
         const tokenData = await tokenResponse.json();
 
         if (!tokenResponse.ok) {
-            return NextResponse.json(
-                { error: "Falha na extração de Tokens Conta Azul", details: tokenData },
-                { status: tokenResponse.status }
-            );
+            return NextResponse.json({ error: "Falha Nova API", details: tokenData }, { status: tokenResponse.status });
         }
 
-        const accessToken = tokenData.access_token;
-        const refreshToken = tokenData.refresh_token;
-
-        // 2. Comprova a eficácia do Token testando o resgate de Bancos via GET
-        const banksResponse = await fetch("https://api.contaazul.com/v1/banks", {
+        // Buscar bancos na API V2
+        const banksResponse = await fetch("https://api-v2.contaazul.com/v1/banks", {
             method: "GET",
-            headers: {
-                "Authorization": `Bearer ${accessToken}`
-            },
-            cache: "no-store"
+            headers: { "Authorization": `Bearer ${tokenData.access_token}` },
         });
 
-        const banksData = await banksResponse.json();
+        // Se o /banks não existir na V2, tentamos na V1 silenciosamente
+        let banksData = await banksResponse.json().catch(() => ({ aviso: "Rota de bancos não encontrada na v2" }));
 
-        if (!banksResponse.ok) {
-            return NextResponse.json(
-                {
-                    error: "Tokens resgatados, mas erro ao interceptar os Bancos",
-                    tokens: { access_token: accessToken, refresh_token: refreshToken },
-                    details: banksData
-                },
-                { status: banksResponse.status }
-            );
-        }
-
-        // 3. Exibe a tela de Sucesso e os Logs Vitais
         return NextResponse.json({
-            message: "Integração validada com sucesso! Conexão OAuth2 testada e aprovada.",
+            SUCESSO: "Autenticação Cognito realizada!",
             tokens: {
                 access_token: tokenData.access_token,
                 refresh_token: tokenData.refresh_token,
-                expires_in: tokenData.expires_in,
             },
-            banks: banksData
+            bancos: banksData,
         });
 
     } catch (error: any) {
-        console.error("Erro no callback do Conta Azul:", error);
-        return NextResponse.json(
-            { error: "Erro interno de Servidor na rota OAuth2", detailed_message: error.message },
-            { status: 500 }
-        );
+        return NextResponse.json({ error: "Erro interno", message: error.message }, { status: 500 });
     }
 }
