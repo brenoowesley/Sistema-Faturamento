@@ -131,7 +131,7 @@ export async function POST(req: Request) {
             };
 
             try {
-                const response = await fetch("https://api.contaazul.com/v1/sales", {
+                const response = await fetch("https://api-v2.contaazul.com/v1/sales", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
@@ -142,8 +142,14 @@ export async function POST(req: Request) {
                 
                 // Tratar o Payload Response se negativo
                 if (!response.ok) {
-                    const errObj = await response.json().catch(() => ({}));
-                    throw new Error(`Erro API (${response.status}): ${errObj.message || response.statusText}`);
+                    const rawText = await response.text();
+                    let errMsg = response.statusText;
+                    try {
+                        const errObj = JSON.parse(rawText);
+                        errMsg = errObj.message || errObj.error_description || errObj.error || rawText;
+                    } catch { errMsg = rawText || response.statusText; }
+                    console.error(`🚨 Conta Azul API Error [${response.status}]:`, errMsg);
+                    throw new Error(`Erro API (${response.status}): ${errMsg}`);
                 }
 
                 // Considerar um delay para respeitar Rate Limits da API

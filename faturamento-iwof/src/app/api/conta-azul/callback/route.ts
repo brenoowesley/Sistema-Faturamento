@@ -1,4 +1,11 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } }
+);
 
 export async function GET(request: Request) {
     try {
@@ -41,6 +48,27 @@ export async function GET(request: Request) {
             return NextResponse.json({ error: "Falha Nova API", details: tokenData }, { status: tokenResponse.status });
         }
 
+        // ── Persistir o refresh_token no Supabase ───────────────────────────
+        // Upsert garante que cria se não existir, ou atualiza se já existir
+        if (tokenData.refresh_token) {
+            const { error: upsertErr } = await supabaseAdmin
+                .from("conta_azul_tokens")
+                .upsert({
+                    id: "padrao",
+                    refresh_token: tokenData.refresh_token,
+                    updated_at: new Date().toISOString(),
+                }, { onConflict: "id" });
+
+            if (upsertErr) {
+                console.error("🚨 Falha ao salvar refresh_token no banco:", upsertErr);
+                return NextResponse.json({
+                    error: "Token obtido mas falha ao persistir no banco.",
+                    details: upsertErr,
+                    tokens: tokenData, // Retorna pra poder salvar manualmente como fallback
+                }, { status: 500 });
+            }
+        }
+
         // Buscar bancos na API V2
         const banksResponse = await fetch("https://api-v2.contaazul.com/v1/banks", {
             method: "GET",
@@ -51,11 +79,8 @@ export async function GET(request: Request) {
         let banksData = await banksResponse.json().catch(() => ({ aviso: "Rota de bancos não encontrada na v2" }));
 
         return NextResponse.json({
-            SUCESSO: "Autenticação Cognito realizada!",
-            tokens: {
-                access_token: tokenData.access_token,
-                refresh_token: tokenData.refresh_token,
-            },
+            SUCESSO: "Autenticação Cognito realizada! Token salvo automaticamente no banco.",
+            token_salvo: true,
             bancos: banksData,
         });
 
