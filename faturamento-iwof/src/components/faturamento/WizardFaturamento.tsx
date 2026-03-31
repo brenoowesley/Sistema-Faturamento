@@ -95,8 +95,10 @@ function WizardContent() {
 
                 setLoteId(loteRes.id);
                 // Garantir formato YYYY-MM-DD para os inputs <input type="date" />
-                const compValue = loteRes.data_competencia ? (loteRes.data_competencia.length === 7 ? `${loteRes.data_competencia}-01` : loteRes.data_competencia) : "";
-                const compFim = loteRes.data_fim_ciclo ? (loteRes.data_fim_ciclo.length === 7 ? `${loteRes.data_fim_ciclo}-01` : loteRes.data_fim_ciclo) : "";
+                const extractDate = (val: string) => val ? val.split("T")[0] : "";
+                
+                const compValue = extractDate(loteRes.data_competencia);
+                const compFim = extractDate(loteRes.data_fim_ciclo);
                 
                 setPeriodoInicio(compValue);
                 setPeriodoFim(compFim);
@@ -104,9 +106,9 @@ function WizardContent() {
                 if (loteRes.ciclo_faturamento_id) setSelectedCicloIds([loteRes.ciclo_faturamento_id]);
                 if (loteRes.queiroz_split_date) {
                     setQueirozConfig({
-                        splitDate: loteRes.queiroz_split_date,
-                        compAnterior: loteRes.queiroz_comp_anterior || "",
-                        compAtual: loteRes.queiroz_comp_atual || ""
+                        splitDate: extractDate(loteRes.queiroz_split_date),
+                        compAnterior: extractDate(loteRes.queiroz_comp_anterior),
+                        compAtual: extractDate(loteRes.queiroz_comp_atual)
                     });
                 }
                 setHasRestoredData(true);
@@ -141,11 +143,29 @@ function WizardContent() {
                     }
                 }
 
+                // Buscar clientes ativos no banco para suportar Dropdowns / Vinculação manual na Stage 2
+                const { data: dbClientesRes } = await supabase
+                    .from("clientes")
+                    .select("id, razao_social, nome_fantasia, nome_conta_azul, cnpj, ciclo_faturamento_id, boleto_unificado")
+                    .eq("status", true);
+
+                if (dbClientesRes) {
+                    setDbClientes(dbClientesRes as unknown as ClienteDB[]);
+                }
+
                 // Map to Agendamento state format
                 const restoredAgendamentos: Agendamento[] = allAgendamentos.map(a => {
                     const cliente = a.clientes || {};
-                    const isQueirozSufixo = a.nome_profissional?.includes('(Mês');
-                    const nomeLojaDisplay = isQueirozSufixo ? a.nome_profissional : (cliente.razao_social || a.cnpj_loja || "Loja");
+                    
+                    let nomeLojaDisplay = cliente.razao_social || a.cnpj_loja || "Loja";
+                    if (loteRes.queiroz_split_date && nomeLojaDisplay.toUpperCase().includes('QUEIROZ')) {
+                        const compAgt = extractDate(a.data_competencia);
+                        const compAnt = extractDate(loteRes.queiroz_comp_anterior);
+                        const compAtu = extractDate(loteRes.queiroz_comp_atual);
+                        
+                        if (compAgt === compAnt) nomeLojaDisplay += " (Mês Anterior)";
+                        else if (compAgt === compAtu) nomeLojaDisplay += " (Mês Atual)";
+                    }
 
                     return {
                         id: a.id,
