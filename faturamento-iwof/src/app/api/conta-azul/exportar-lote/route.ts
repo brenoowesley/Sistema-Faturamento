@@ -204,9 +204,8 @@ export async function POST(req: Request) {
         const contatoCache = new Map<string, string | null>();
 
         // 4. Integração Principal — API v2 Financeiro (Contas a Receber)
-        // Endpoint: POST /v1/financeiro/eventos-financeiros/contas-a-receber
-        // Spec: EventoFinanceiroRequest
-        const ENDPOINT = "/v1/financeiro/eventos-financeiros/contas-a-receber";
+        // Endpoint oficial para contas a receber (bancos de terceiros / Sicredi)
+        const ENDPOINT = "/v1/financeiro/contas-a-receber";
 
         for (const item of rows) {
             if (!item.valor || item.valor <= 0) {
@@ -260,6 +259,7 @@ export async function POST(req: Request) {
                             data_vencimento: item.dataVencimento,
                             nota: item.observacoes || "",
                             conta_financeira: bankAccountId,
+                            metodo_pagamento: "BOLETO_BANCARIO",
                             detalhe_valor: {
                                 valor_bruto: item.valor,
                                 valor_liquido: item.valor
