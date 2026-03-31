@@ -17,6 +17,8 @@
     "ejs": "^4.0.1",
     "fast-xml-parser": "^5.3.6",
     "googleapis": "^171.4.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
     "jszip": "^3.10.1",
     "lucide-react": "^0.574.0",
     "multer": "^2.0.2",

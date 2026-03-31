@@ -19,12 +19,19 @@ import {
     Eye,
     Pencil,
     Upload,
-    AlertTriangle
+    AlertTriangle,
+    FileText,
+    FileArchive,
+    Filter
 } from "lucide-react";
 import { useDropzone } from "react-dropzone";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
 import Modal from "@/components/Modal";
+import { RelatorioTemplate } from "./RelatorioTemplate";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
+import JSZip from "jszip";
 
 /* ================================================================
    TYPES
@@ -247,10 +254,21 @@ export default function AjustesPage() {
     const supabase = createClient();
 
     // State
+    const [activeMainTab, setActiveMainTab] = useState<"gestao" | "relatorios">("gestao");
     const [activeTab, setActiveTab] = useState<"descontos" | "acrescimos" | "historico">("descontos");
     const [ajustes, setAjustes] = useState<Ajuste[]>([]);
     const [clientes, setClientes] = useState<ClienteDB[]>([]);
     const [loading, setLoading] = useState(true);
+
+    // Relatorios State
+    const [ciclosOptions, setCiclosOptions] = useState<{ id: string, nome: string }[]>([]);
+    const [razoesSociais, setRazoesSociais] = useState<string[]>([]);
+    const [filtroCiclo, setFiltroCiclo] = useState("");
+    const [filtroRazaoSocial, setFiltroRazaoSocial] = useState("");
+    const [filtroMesAno, setFiltroMesAno] = useState(new Date().toISOString().substring(0, 7));
+    const [relatoriosData, setRelatoriosData] = useState<any[]>([]);
+    const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+    const [isGeneratingZip, setIsGeneratingZip] = useState(false);
 
     // Modal state
     const [showModalDesconto, setShowModalDesconto] = useState(false);
@@ -372,13 +390,22 @@ export default function AjustesPage() {
             .eq("status", true)
             .order("nome_conta_azul", { ascending: true });
 
-        if (error) console.error("Error fetching clientes:", error);
-        else setClientes(data || []);
+        if (!error && data) {
+            setClientes(data);
+            const uniqueRazoes = Array.from(new Set(data.map(c => c.razao_social).filter(Boolean)));
+            setRazoesSociais(uniqueRazoes.sort());
+        }
+    }, [supabase]);
+
+    const fetchCiclos = useCallback(async () => {
+        const { data } = await supabase.from("ciclos_faturamento").select("id, nome").order("nome");
+        if (data) setCiclosOptions(data);
     }, [supabase]);
 
     useEffect(() => {
         fetchAjustes();
         fetchClientes();
+        fetchCiclos();
         const fetchRole = async () => {
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
@@ -680,6 +707,134 @@ export default function AjustesPage() {
         }
     };
 
+    // REPORTS GENERATION LOGIC
+    const handleBuscarRelatorios = async () => {
+        if (!filtroRazaoSocial) {
+            alert("Selecione um Agrupador (Empresa/Razão Social) para buscar os relatórios.");
+            return;
+        }
+
+        setLoading(true);
+        let query = supabase
+            .from("faturamento_consolidados")
+            .select(`
+                *,
+                faturamentos_lote ( data_inicio_ciclo, data_fim_ciclo ),
+                clientes!inner ( id, razao_social, nome_fantasia, cnpj, ciclo_faturamento_id, ciclos_faturamento (nome) )
+            `)
+            .eq("clientes.razao_social", filtroRazaoSocial)
+            .eq("status", "FECHADO");
+
+        if (filtroCiclo) query = query.eq("clientes.ciclo_faturamento_id", filtroCiclo);
+
+        const { data, error } = await query;
+        if (error) {
+            console.error("Erro buscar relatorios", error);
+            alert("Erro ao buscar dados consolidados: " + error.message);
+        } else {
+            const yearMonth = filtroMesAno;
+            const finalData = data.filter((d: any) => {
+                const dataAvaliada = d.data_competencia || d.created_at;
+                return dataAvaliada && dataAvaliada.startsWith(yearMonth);
+            });
+
+            const validData = finalData.map((d: any) => ({
+                ...d,
+                valor_bruto: Number(d.valor_bruto || 0),
+                acrescimos: Number(d.acrescimos || 0),
+                descontos: Number(d.descontos || 0),
+                valor_liquido_boleto: Number(d.valor_liquido_boleto || 0)
+            })).sort((a,b) => (a.clientes?.nome_fantasia || "").localeCompare(b.clientes?.nome_fantasia || ""));
+
+            setRelatoriosData(validData);
+            if (validData.length === 0) alert("Nenhuma loja processada encontrada neste Agrupador para a competência informada.");
+        }
+        setLoading(false);
+    };
+
+    const generatePdfBlobForStore = async (lojaId: string) => {
+        const el = document.getElementById(`pdf-content-${lojaId}`);
+        if (!el) throw new Error("Template not found for " + lojaId);
+        
+        el.style.left = "0px";
+        el.style.top = "0px";
+        el.style.zIndex = "-10";
+        el.style.opacity = "1";
+
+        const canvas = await html2canvas(el, { scale: 2, useCORS: true, logging: false });
+        
+        el.style.left = "-9999px";
+        
+        const imgData = canvas.toDataURL("image/png");
+        const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+        pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+        
+        return pdf.output("blob");
+    };
+
+    const gerarRelatorioZip = async () => {
+        if (relatoriosData.length === 0) return;
+        setIsGeneratingZip(true);
+        try {
+            const zip = new JSZip();
+            for (const rel of relatoriosData) {
+                const blob = await generatePdfBlobForStore(rel.clientes?.id);
+                const rawName = rel.clientes?.nome_fantasia || rel.clientes?.razao_social || "Loja";
+                const cleanName = rawName.replace(/[^a-zA-Z0-9_-]/g, '_');
+                const fileName = `Relatorio_${cleanName}_${filtroMesAno}.pdf`;
+                zip.file(fileName, blob);
+            }
+            const content = await zip.generateAsync({ type: "blob" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(content);
+            link.download = `Relatorios_${filtroRazaoSocial.replace(/[^a-zA-Z0-9_-]/g, '_')}_${filtroMesAno}.zip`;
+            link.click();
+        } catch (e: any) {
+            console.error(e);
+            alert("Erro na geração do ZIP");
+        } finally {
+            setIsGeneratingZip(false);
+        }
+    };
+
+    const gerarRelatorioUnificado = async () => {
+        if (relatoriosData.length === 0) return;
+        setIsGeneratingPdf(true);
+        try {
+            const unifiedPdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+            
+            for (let i = 0; i < relatoriosData.length; i++) {
+                const rel = relatoriosData[i];
+                const el = document.getElementById(`pdf-content-${rel.clientes?.id}`);
+                if (!el) continue;
+                
+                el.style.left = "0px";
+                el.style.top = "0px";
+                el.style.zIndex = "-10";
+                
+                const canvas = await html2canvas(el, { scale: 2, useCORS: true, logging: false });
+                
+                el.style.left = "-9999px";
+                
+                const imgData = canvas.toDataURL("image/png");
+                const pdfWidth = unifiedPdf.internal.pageSize.getWidth();
+                const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+                
+                if (i > 0) unifiedPdf.addPage();
+                unifiedPdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+            }
+            
+            unifiedPdf.save(`Relatorio_Unificado_${filtroRazaoSocial.replace(/[^a-zA-Z0-9_-]/g, '_')}_${filtroMesAno}.pdf`);
+        } catch (e) {
+            console.error(e);
+            alert("Erro na geração do PDF Único");
+        } finally {
+            setIsGeneratingPdf(false);
+        }
+    };
+
     // Filtered data
     const descontosPendentes = applyFilters(ajustes.filter(a => a.tipo === "DESCONTO" && !a.status_aplicacao));
     const acrescimosPendentes = applyFilters(ajustes.filter(a => a.tipo === "ACRESCIMO" && !a.status_aplicacao));
@@ -689,20 +844,38 @@ export default function AjustesPage() {
     const totalAcrescimos = acrescimosPendentes.reduce((acc, curr) => acc + curr.valor, 0);
 
     return (
-        <div className="min-h-screen bg-[var(--bg-main)] p-8">
-            <div className="max-w-7xl mx-auto space-y-8">
+        <div className="min-h-screen bg-[var(--bg-main)] p-8 overflow-hidden">
+            <div className="max-w-7xl mx-auto space-y-8 relative">
 
-                {/* Header */}
-                <div className="flex justify-between items-center bg-[var(--bg-card)] p-6 rounded-2xl border border-[var(--border)] shadow-xl">
-                    <div>
-                        <h1 className="text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-3">
-                            <History className="text-[var(--primary)]" size={28} />
-                            Central de Ajustes
-                        </h1>
-                        <p className="text-[var(--fg-dim)] text-sm mt-1">
-                            Gestão de descontos e acréscimos manuais para faturamento contínuo.
-                        </p>
-                    </div>
+                {/* GLOBAL TABS VIEW */}
+                <div className="flex gap-4 mb-4 border-b border-[var(--border)] pb-4">
+                    <button
+                        onClick={() => setActiveMainTab("gestao")}
+                        className={`text-lg font-bold uppercase tracking-wider px-6 py-3 rounded-lg transition-all flex items-center gap-2 ${activeMainTab === 'gestao' ? 'bg-[var(--primary)] text-white shadow-[0_0_15px_var(--primary)]' : 'text-[var(--fg-dim)] hover:bg-[var(--bg-card)] hover:text-white'}`}
+                    >
+                        <History size={20} /> Gestão de Ajustes
+                    </button>
+                    <button
+                        onClick={() => setActiveMainTab("relatorios")}
+                        className={`text-lg font-bold uppercase tracking-wider px-6 py-3 rounded-lg transition-all flex items-center gap-2 ${activeMainTab === 'relatorios' ? 'bg-indigo-600 text-white shadow-[0_0_15px_rgba(79,70,229,0.5)]' : 'text-[var(--fg-dim)] hover:bg-[var(--bg-card)] hover:text-white'}`}
+                    >
+                        <FileText size={20} /> Central de Relatórios
+                    </button>
+                </div>
+
+                {activeMainTab === "gestao" && (
+                    <div className="space-y-8 animate-in fade-in zoom-in-95 duration-200">
+                        {/* Header */}
+                        <div className="flex justify-between items-center bg-[var(--bg-card)] p-6 rounded-2xl border border-[var(--border)] shadow-xl">
+                            <div>
+                                <h1 className="text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-3">
+                                    <History className="text-[var(--primary)]" size={28} />
+                                    Central de Ajustes
+                                </h1>
+                                <p className="text-[var(--fg-dim)] text-sm mt-1">
+                                    Gestão de descontos e acréscimos manuais para faturamento contínuo.
+                                </p>
+                            </div>
                     <div className="flex gap-4">
                         <button
                             onClick={() => { resetForm(); setShowModalDesconto(true); }}
@@ -1127,6 +1300,146 @@ export default function AjustesPage() {
                         )}
                     </div>
                 </div>
+                </div>
+                )}
+
+                {activeMainTab === "relatorios" && (
+                    <div className="space-y-8 animate-in fade-in zoom-in-95 duration-200">
+                        <div className="flex justify-between items-center bg-[var(--bg-card)] p-6 rounded-2xl border border-[var(--border)] shadow-xl">
+                            <div>
+                                <h1 className="text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-3">
+                                    <FileText className="text-indigo-500" size={28} />
+                                    Relatórios de Faturamento
+                                </h1>
+                                <p className="text-[var(--fg-dim)] text-sm mt-1">
+                                    Gere extratos detalhados consolidados em layout profissional PDF para entregar aos seus clientes.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Filtros da Central de Relatórios */}
+                        <div className="bg-[var(--bg-card)] p-5 rounded-2xl border border-[var(--border)] shadow-xl flex flex-col gap-6">
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Agrupador (Razão Social)</label>
+                                    <select
+                                        className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white p-2.5 rounded-xl text-sm outline-none focus:border-indigo-500"
+                                        value={filtroRazaoSocial}
+                                        onChange={e => setFiltroRazaoSocial(e.target.value)}
+                                    >
+                                        <option value="">Selecione uma Empresa-Mãe...</option>
+                                        {razoesSociais.map(r => <option key={r} value={r}>{r}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Competência</label>
+                                    <input
+                                        type="month"
+                                        className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white p-2.5 rounded-xl text-sm outline-none focus:border-indigo-500"
+                                        value={filtroMesAno}
+                                        onChange={e => setFiltroMesAno(e.target.value)}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Ciclo Escopo (Opcional)</label>
+                                    <select
+                                        className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white p-2.5 rounded-xl text-sm outline-none focus:border-indigo-500"
+                                        value={filtroCiclo}
+                                        onChange={e => setFiltroCiclo(e.target.value)}
+                                    >
+                                        <option value="">Todos os Ciclos</option>
+                                        {ciclosOptions.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <button 
+                                        onClick={handleBuscarRelatorios}
+                                        disabled={loading}
+                                        className="btn bg-indigo-600 hover:bg-indigo-700 w-full rounded-xl border-none text-white font-bold h-[42px] flex items-center justify-center gap-2 transition-all shadow-lg shadow-indigo-600/20"
+                                    >
+                                        {loading ? <span className="loading loading-spinner loading-sm"></span> : <Search size={18} />}
+                                        Buscar Faturados
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Tabela Intermediária e Ações */}
+                        {relatoriosData.length > 0 && (
+                            <div className="bg-[var(--bg-card)] rounded-2xl border border-[var(--border)] overflow-hidden shadow-xl animate-in slide-in-from-bottom-4">
+                                <div className="p-6 border-b border-[var(--border)] bg-indigo-900/10 flex justify-between items-center">
+                                    <div>
+                                        <h3 className="text-white font-black text-lg">Prévia do Pacote</h3>
+                                        <p className="text-[var(--fg-dim)] text-sm">{relatoriosData.length} unidades encontradas desta Raiz.</p>
+                                    </div>
+                                    <div className="flex gap-4">
+                                        <button 
+                                            onClick={gerarRelatorioZip}
+                                            disabled={isGeneratingZip || isGeneratingPdf}
+                                            className="btn bg-amber-600 hover:bg-amber-700 text-white rounded-xl border-none flex items-center gap-2 transition-all"
+                                        >
+                                            {isGeneratingZip ? <span className="loading loading-spinner loading-sm"></span> : <FileArchive size={18} />}
+                                            Baixar ZIP Separado
+                                        </button>
+                                        <button 
+                                            onClick={gerarRelatorioUnificado}
+                                            disabled={isGeneratingPdf || isGeneratingZip}
+                                            className="btn bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl border-none flex items-center gap-2 transition-all"
+                                        >
+                                            {isGeneratingPdf ? <span className="loading loading-spinner loading-sm"></span> : <FileText size={18} />}
+                                            Gerar PDF Unificado
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="max-h-[500px] overflow-y-auto">
+                                    <table className="w-full">
+                                        <thead className="sticky top-0 bg-[var(--bg-card)] shadow-sm z-10 border-b border-[var(--border)]">
+                                            <tr>
+                                                <th className="py-3 px-4 text-left text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Loja / Fantasia</th>
+                                                <th className="py-3 px-4 text-left text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">CNPJ</th>
+                                                <th className="py-3 px-4 text-right text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Acréscimos</th>
+                                                <th className="py-3 px-4 text-right text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Descontos</th>
+                                                <th className="py-3 px-4 text-right text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Líquido Final</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {relatoriosData.map((r, i) => (
+                                                <tr key={i} className="hover:bg-white/[0.02] border-b border-[var(--border)]/30">
+                                                    <td className="py-3 px-4 text-sm font-bold text-white">{r.clientes?.nome_fantasia || r.clientes?.razao_social}</td>
+                                                    <td className="py-3 px-4 text-sm font-mono text-[var(--fg-dim)]">{r.clientes?.cnpj}</td>
+                                                    <td className="py-3 px-4 text-sm font-mono text-right text-emerald-500">+{fmtCurrency(r.acrescimos)}</td>
+                                                    <td className="py-3 px-4 text-sm font-mono text-right text-red-500">-{fmtCurrency(r.descontos)}</td>
+                                                    <td className="py-3 px-4 text-sm font-mono text-right font-black text-white">{fmtCurrency(r.valor_liquido_boleto)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Templates Ocultos */}
+                        <div className="absolute top-0 left-[-9999px] print:hidden -z-50 pointer-events-none opacity-0">
+                            {relatoriosData.map(rel => (
+                                <RelatorioTemplate
+                                    key={rel.id}
+                                    lojaId={rel.clientes?.id}
+                                    razaoSocial={rel.clientes?.razao_social}
+                                    nomeFantasia={rel.clientes?.nome_fantasia}
+                                    cnpj={rel.clientes?.cnpj}
+                                    competencia={filtroMesAno}
+                                    ciclo={rel.clientes?.ciclos_faturamento?.nome || "-"}
+                                    valorBruto={rel.valor_bruto}
+                                    acrescimos={rel.acrescimos}
+                                    descontos={rel.descontos}
+                                    valorLiquido={rel.valor_liquido_boleto}
+                                    observacaoReport={rel.observacao_report}
+                                />
+                            ))}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* MODAL NOVO DESCONTO */}
