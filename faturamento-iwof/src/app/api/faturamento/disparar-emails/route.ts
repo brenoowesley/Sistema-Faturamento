@@ -20,10 +20,10 @@ export async function POST(request: Request) {
         const { loteId, assunto } = await request.json();
         if (!loteId) throw new Error("ID do Lote não fornecido.");
 
-        // 1. Buscar o lote (para nome_pasta)
+        // 1. Buscar o lote (para nome_pasta e data_competencia)
         const { data: lote, error: loteErr } = await supabaseAdmin
             .from('faturamentos_lote')
-            .select('nome_pasta')
+            .select('nome_pasta, data_competencia')
             .eq('id', loteId)
             .single();
 
@@ -47,10 +47,16 @@ export async function POST(request: Request) {
         const mes = (now.getMonth() + 1).toString().padStart(2, '0');
         const ano = now.getFullYear().toString();
 
-        // 3. Loop de publicação (Producer)
+        // Pega a competência do lote (Ex: de "2026-03-31" vira "03/2026")
+        // Se por algum motivo não houver data, usa o mês/ano atual
+        const periodoFaturado = lote.data_competencia
+            ? `${lote.data_competencia.split('-')[1]}/${lote.data_competencia.split('-')[0]}`
+            : `${mes}/${ano}`;
+
+        // 3. Loop de publicação (Um E-mail por Unidade/Loja)
         for (const item of consolidados) {
             const cliente: any = Array.isArray(item.clientes) ? item.clientes[0] : item.clientes;
-            
+
             if (!cliente || !cliente.emails_faturamento) continue;
 
             const destinatarios = cliente.emails_faturamento;
@@ -59,9 +65,23 @@ export async function POST(request: Request) {
             const razaoSocial = cliente.razao_social || "";
             const nomeContaAzul = cliente.nome_conta_azul || "";
 
-            // Gerar HTML via template (unificado com o worker)
+            // 🎯 A MÁGICA 1: Define o nome exato da loja
+            const nomeDaLoja = nomeContaAzul || razaoSocial || clienteNome;
+
+            // 🚀 A MÁGICA 2: Replace das Variáveis no Assunto
+            // Se o usuário não mandou nada do frontend, assume o seu padrão oficial
+            const assuntoBase = assunto || "Faturamento iWof {Período faturado} | {Loja}";
+
+            // Aplica as substituições (o "gi" faz buscar ignorando maiúsculas/minúsculas)
+            const assuntoFinal = assuntoBase
+                .replace(/{Loja}/gi, nomeDaLoja)
+                .replace(/{Período faturado}/gi, periodoFaturado)
+                .replace(/{Periodo faturado}/gi, periodoFaturado) // Fallback sem acento
+                .replace(/{Ciclo}/gi, cicloNome); // Adicionei essa caso queira colocar "{Ciclo}" no front!
+
+            // Gerar HTML via template usando o NOME DA LOJA para saudação
             const htmlBody = getBillingTemplate({
-                clienteNome,
+                clienteNome: nomeDaLoja,
                 cicloNome,
                 mes,
                 ano
@@ -75,7 +95,7 @@ export async function POST(request: Request) {
                 nomeContaAzul,
                 cicloNome,
                 destinatarios,
-                assunto: assunto || `Faturamento Mensal - ${razaoSocial || clienteNome}`,
+                assunto: assuntoFinal, // Passa o assunto modificado com as tags substituídas!
                 htmlBody,
                 nomePastaLote: lote.nome_pasta,
                 mes,
@@ -89,17 +109,17 @@ export async function POST(request: Request) {
         // 4. Disparo simultâneo para o Pub/Sub
         if (publishPromises.length > 0) {
             await Promise.all(publishPromises);
-            
-            // 5. Atualizar status do lote (Integridade do Fluxo)
+
+            // 5. Atualizar status do lote
             await supabaseAdmin
                 .from('faturamentos_lote')
                 .update({ status: 'ENVIANDO' })
                 .eq('id', loteId);
         }
 
-        return NextResponse.json({ 
-            success: true, 
-            message: `Disparo de ${publishPromises.length} e-mails iniciado via GCP Pub/Sub!` 
+        return NextResponse.json({
+            success: true,
+            message: `Disparo de ${publishPromises.length} e-mails (separados por unidade) iniciado via GCP Pub/Sub!`
         });
 
     } catch (error: any) {
