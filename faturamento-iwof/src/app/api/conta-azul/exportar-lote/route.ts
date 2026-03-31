@@ -131,12 +131,40 @@ async function resolverContatoPorCNPJ(
 
 // ─── Mapeamento de Categoria por Ciclo ──────────────────────────
 
+/**
+ * Resolve o UUID da categoria financeira a partir do nome do ciclo.
+ *
+ * Estratégia (em ordem):
+ * 1. Extrai a chave de dentro dos parênteses: "FATURAMENTO (QUEIROZ)" → "QUEIROZ"
+ *    e busca CA_CATEGORY_QUEIROZ no .env.
+ * 2. Verificações explícitas para os ciclos padrão (SEMANAL, QUINZENAL, MENSAL).
+ * 3. Fallback genérico: CA_CATEGORY_DEFAULT.
+ *
+ * Para adicionar um novo ciclo, basta criar a env var no Vercel:
+ *   CA_CATEGORY_QUEIROZ=<uuid>
+ *   CA_CATEGORY_NORDESTAO=<uuid>
+ *   etc.
+ */
 function getCategoriaEnv(categoriaString: string): string {
-    const str = (categoriaString || "").toUpperCase();
-    if (str.includes("SEMANAL")) return process.env.CA_CATEGORY_SEMANAL || "";
+    const str = (categoriaString || "").toUpperCase().trim();
+
+    // 1. Tenta extrair a chave do interior dos parênteses: "FATURAMENTO (QUEIROZ)"
+    const match = str.match(/\(([^)]+)\)/);
+    if (match) {
+        // Normaliza: remove espaços/acentos incompatíveis com nomes de env vars
+        const chave = match[1].trim().replace(/\s+/g, "_");
+        const envKey = `CA_CATEGORY_${chave}`;
+        const valor = process.env[envKey];
+        if (valor) return valor;
+    }
+
+    // 2. Aliases explícitos para ciclos padrão (compatibilidade retroativa)
+    if (str.includes("SEMANAL"))   return process.env.CA_CATEGORY_SEMANAL   || "";
     if (str.includes("QUINZENAL")) return process.env.CA_CATEGORY_QUINZENAL || "";
-    if (str.includes("MENSAL")) return process.env.CA_CATEGORY_MENSAL || "";
-    return process.env.CONTA_AZUL_CATEGORY_ID || "";
+    if (str.includes("MENSAL"))    return process.env.CA_CATEGORY_MENSAL    || "";
+
+    // 3. Fallback genérico
+    return process.env.CA_CATEGORY_DEFAULT || "";
 }
 
 // ─── Handler Principal ──────────────────────────────────────────
@@ -229,7 +257,8 @@ export async function POST(req: Request) {
                             nota: item.observacoes || "",                // string (required)
                             conta_financeira: bankAccountId,             // UUID (required)
                             detalhe_valor: {
-                                valor_bruto: item.valor                  // number (required)
+                                valor_bruto: item.valor,   // number (required)
+                                valor_liquido: item.valor  // required na prática (mesmo valor quando não há desconto)
                             }
                         }
                     ]
