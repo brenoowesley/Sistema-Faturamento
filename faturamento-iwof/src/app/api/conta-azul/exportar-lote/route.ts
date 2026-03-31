@@ -1,13 +1,31 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } }
+);
 
 async function getValidToken() {
     const clientId = process.env.CA_CLIENT_ID?.trim();
     const clientSecret = process.env.CA_CLIENT_SECRET?.trim();
-    const refreshToken = process.env.CA_REFRESH_TOKEN?.trim();
 
-    if (!clientId || !clientSecret || !refreshToken) {
-        throw new Error("Credenciais do Conta Azul (Client ID, Secret ou Refresh Token) estão ausentes no servidor.");
+    if (!clientId || !clientSecret) {
+        throw new Error("Credenciais do Conta Azul (Client ID ou Secret) estão ausentes no servidor.");
     }
+
+    const { data: tokenData, error: tokenErr } = await supabaseAdmin
+        .from('conta_azul_tokens')
+        .select('refresh_token')
+        .eq('id', 'padrao')
+        .single();
+
+    if (tokenErr || !tokenData?.refresh_token) {
+        throw new Error("Refresh token não encontrado no banco de dados.");
+    }
+
+    const refreshToken = tokenData.refresh_token;
 
     const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
@@ -30,6 +48,16 @@ async function getValidToken() {
 
     if (!response.ok) {
         throw new Error(`Falha ao renovar token OAuth2 Conta Azul: ${data.error_description || data.error || response.statusText}`);
+    }
+
+    if (data.refresh_token) {
+        await supabaseAdmin
+            .from('conta_azul_tokens')
+            .update({ 
+                refresh_token: data.refresh_token, 
+                updated_at: new Date().toISOString() 
+            })
+            .eq('id', 'padrao');
     }
 
     return data.access_token;
