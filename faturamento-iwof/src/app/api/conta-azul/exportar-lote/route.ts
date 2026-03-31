@@ -51,13 +51,17 @@ async function getValidToken() {
     }
 
     if (data.refresh_token) {
-        await supabaseAdmin
+        const { error: updateErr } = await supabaseAdmin
             .from('conta_azul_tokens')
             .update({ 
                 refresh_token: data.refresh_token, 
                 updated_at: new Date().toISOString() 
             })
             .eq('id', 'padrao');
+
+        if (updateErr) {
+            console.error("🚨 CRÍTICO: Falha ao salvar novo refresh_token no banco. O token antigo já foi consumido!", updateErr);
+        }
     }
 
     return data.access_token;
