@@ -129,6 +129,69 @@ async function resolverContatoPorCNPJ(
     }
 }
 
+// ─── Resolução Centro de Custo (Nome → UUID) ───────────────────
+
+/**
+ * Busca o UUID do centro de custo no Conta Azul pelo nome (ex: "Paraíba").
+ * Usa GET /v1/centro-de-custo?busca={nome}
+ * Retorna o UUID ou null se não encontrar.
+ */
+async function resolverCentroCustoPorNome(
+    nome: string,
+    accessToken: string,
+    cache: Map<string, string | null>
+): Promise<string | null> {
+    const nomeLimpo = (nome || "").trim();
+    if (!nomeLimpo) return null;
+
+    if (cache.has(nomeLimpo)) return cache.get(nomeLimpo)!;
+
+    try {
+        const params = new URLSearchParams({
+            pagina: "1",
+            tamanho_pagina: "100",
+            busca: nomeLimpo,
+            filtro_rapido: "ATIVO"
+        });
+        const url = `${API_BASE}/v1/centro-de-custo?${params}`;
+        const response = await fetch(url, {
+            headers: {
+                "Authorization": `Bearer ${accessToken}`,
+                "Content-Type": "application/json"
+            }
+        });
+
+        if (!response.ok) {
+            console.error(`⚠️ Falha ao buscar centro de custo "${nomeLimpo}": ${response.status}`);
+            cache.set(nomeLimpo, null);
+            return null;
+        }
+
+        const data = await response.json();
+        const items = data.items || [];
+
+        // Busca match exato por nome (case-insensitive)
+        const match = items.find((cc: any) =>
+            cc.nome?.toLowerCase() === nomeLimpo.toLowerCase()
+        ) || items[0]; // Fallback para o primeiro resultado
+
+        if (match) {
+            console.log(`✅ Centro de custo "${nomeLimpo}" → UUID ${match.id} (${match.nome})`);
+            cache.set(nomeLimpo, match.id);
+            return match.id;
+        }
+
+        console.warn(`⚠️ Nenhum centro de custo encontrado para: "${nomeLimpo}"`);
+        cache.set(nomeLimpo, null);
+        return null;
+
+    } catch (err) {
+        console.error(`❌ Erro ao buscar centro de custo "${nomeLimpo}":`, err);
+        cache.set(nomeLimpo, null);
+        return null;
+    }
+}
+
 // ─── Mapeamento de Categoria por Ciclo ──────────────────────────
 
 /**
@@ -200,8 +263,9 @@ export async function POST(req: Request) {
         let errorCount = 0;
         const errors: { id: string; cliente: string; erro: string }[] = [];
 
-        // 3. Cache de resolução CNPJ → UUID (evita chamadas duplicadas)
+        // 3. Caches de resolução (evitam chamadas duplicadas)
         const contatoCache = new Map<string, string | null>();
+        const centroCustoCache = new Map<string, string | null>();
 
         // 4. Integração Principal — API v2 Financeiro (Contas a Receber)
         // Endpoint oficial: POST /v1/financeiro/eventos-financeiros/contas-a-receber
@@ -238,7 +302,27 @@ export async function POST(req: Request) {
                 continue;
             }
 
-            // 4c. Monta o payload conforme OpenAPI spec (EventoFinanceiroRequest)
+            // 4c. Resolve Centro de Custo (nome do estado → UUID)
+            const centroCustoUUID = await resolverCentroCustoPorNome(
+                item.centroCusto, accessToken, centroCustoCache
+            );
+
+            // 4d. Monta o rateio com categoria + centro de custo (se disponível)
+            const rateioItem: any = {
+                id_categoria: categoryId,
+                valor: item.valor
+            };
+
+            if (centroCustoUUID) {
+                rateioItem.rateio_centro_custo = [
+                    {
+                        id_centro_custo: centroCustoUUID,
+                        valor: item.valor
+                    }
+                ];
+            }
+
+            // 4e. Monta o payload conforme OpenAPI spec (EventoFinanceiroRequest)
             const payload = {
                 data_competencia: item.dataCompetencia,
                 valor: item.valor,
@@ -246,12 +330,7 @@ export async function POST(req: Request) {
                 descricao: item.descricao || "Prestação de serviço",
                 contato: contatoUUID,
                 conta_financeira: bankAccountId,
-                rateio: [
-                    {
-                        id_categoria: categoryId,
-                        valor: item.valor
-                    }
-                ],
+                rateio: [rateioItem],
                 condicao_pagamento: {
                     parcelas: [
                         {
@@ -259,7 +338,6 @@ export async function POST(req: Request) {
                             data_vencimento: item.dataVencimento,
                             nota: item.observacoes || "",
                             conta_financeira: bankAccountId,
-                            metodo_pagamento: "BOLETO_BANCARIO",
                             detalhe_valor: {
                                 valor_bruto: item.valor,
                                 valor_liquido: item.valor
