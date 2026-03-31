@@ -13,7 +13,8 @@ async function getValidToken() {
 
     const body = new URLSearchParams({
         grant_type: "refresh_token",
-        refresh_token: refreshToken
+        refresh_token: refreshToken,
+        client_id: clientId
     });
 
     const response = await fetch("https://auth.contaazul.com/oauth2/token", {
