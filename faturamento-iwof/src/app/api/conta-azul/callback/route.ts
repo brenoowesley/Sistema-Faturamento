@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
 
         // 1. Solicita os Tokens usando o Authorization Code nativamente
         const base64Auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-        
+
         const params = new URLSearchParams({
             grant_type: "authorization_code",
             redirect_uri: "https://faturamento-iwof.vercel.app/api/conta-azul/callback",
@@ -65,10 +65,10 @@ export async function GET(request: NextRequest) {
 
         if (!banksResponse.ok) {
             return NextResponse.json(
-                { 
-                    error: "Tokens resgatados, mas erro ao interceptar os Bancos", 
+                {
+                    error: "Tokens resgatados, mas erro ao interceptar os Bancos",
                     tokens: { access_token: accessToken, refresh_token: refreshToken },
-                    details: banksData 
+                    details: banksData
                 },
                 { status: banksResponse.status }
             );
