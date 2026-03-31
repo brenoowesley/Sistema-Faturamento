@@ -15,7 +15,8 @@ import {
     Filter,
     ArrowRight,
     Edit3,
-    FileSpreadsheet
+    FileSpreadsheet,
+    CloudUpload
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import * as xlsx from "xlsx";
@@ -75,6 +76,7 @@ export default function ContaAzulStagingPage() {
     const [lote, setLote] = useState<Lote | null>(null);
     const [data, setData] = useState<ContaAzulRow[]>([]);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [isExporting, setIsExporting] = useState(false);
 
     // Filters
     const [searchTerm, setSearchTerm] = useState("");
@@ -346,6 +348,42 @@ export default function ContaAzulStagingPage() {
         if (selectedIds.size > 0) setSelectedIds(new Set());
     };
 
+    const handleSincronizarContaAzul = async () => {
+        const payload = selectedIds.size > 0
+            ? data.filter(r => selectedIds.has(r.id))
+            : filteredData;
+
+        if (payload.length === 0) {
+            alert("Nenhuma linha para sincronizar.");
+            return;
+        }
+
+        const confirmSync = confirm(`Você deseja sincronizar ${payload.length} registro(s) com o Conta Azul?`);
+        if (!confirmSync) return;
+
+        setIsExporting(true);
+        try {
+            const response = await fetch("/api/conta-azul/exportar-lote", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result.error || "Erro ao conectar com API Conta Azul.");
+            }
+
+            alert(`Sincronização concluída!\n\nSucesso: ${result.successCount}\nErros: ${result.errorCount}`);
+        } catch (error: any) {
+            console.error("Erro na sincronização:", error);
+            alert(`Erro: ${error.message}`);
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
     const handleExport = () => {
         const fmtDateExt = (iso: string) => {
             if (!iso) return "";
@@ -401,8 +439,24 @@ export default function ContaAzulStagingPage() {
                     </div>
                     <div className="flex items-center gap-3">
                         <button
+                            onClick={handleSincronizarContaAzul}
+                            disabled={isExporting}
+                            className="btn btn-primary bg-[#3b82f6] hover:bg-[#2563eb] border-none flex items-center gap-2 px-8 py-3 rounded-xl font-bold uppercase tracking-tight transition-all hover:scale-105 active:scale-95 shadow-[0_4px_20px_rgba(59,130,246,0.3)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                        >
+                            {isExporting ? (
+                                <>
+                                    <span className="animate-spin w-4 h-4 border-2 border-white/20 border-t-white rounded-full"></span>
+                                    Sincronizando...
+                                </>
+                            ) : (
+                                <>
+                                    <CloudUpload size={18} /> Sincronizar com Conta Azul
+                                </>
+                            )}
+                        </button>
+                        <button
                             onClick={handleExport}
-                            className="btn btn-primary bg-emerald-600 hover:bg-emerald-500 border-none flex items-center gap-2 px-8 py-3 rounded-xl font-bold uppercase tracking-tight transition-all hover:scale-105 active:scale-95 shadow-[0_4px_20px_rgba(16,185,129,0.3)]"
+                            className="btn btn-primary bg-emerald-600 hover:bg-emerald-500 border-none flex items-center gap-2 px-8 py-3 rounded-xl font-bold text-white uppercase tracking-tight transition-all hover:scale-105 active:scale-95 shadow-[0_4px_20px_rgba(16,185,129,0.3)] disabled:opacity-50"
                         >
                             <Download size={18} /> Exportar Conta Azul (.xlsx)
                         </button>
