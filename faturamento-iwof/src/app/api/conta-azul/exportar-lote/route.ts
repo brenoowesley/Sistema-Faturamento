@@ -1,5 +1,47 @@
 import { NextResponse } from "next/server";
 
+async function getValidToken() {
+    const clientId = process.env.CA_CLIENT_ID?.trim();
+    const clientSecret = process.env.CA_CLIENT_SECRET?.trim();
+    const refreshToken = process.env.CA_REFRESH_TOKEN?.trim();
+
+    if (!clientId || !clientSecret || !refreshToken) {
+        throw new Error("Credenciais do Conta Azul (Client ID, Secret ou Refresh Token) estão ausentes no servidor.");
+    }
+
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+
+    const body = new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken
+    });
+
+    const response = await fetch("https://auth.contaazul.com/oauth2/token", {
+        method: "POST",
+        headers: {
+            "Authorization": `Basic ${credentials}`,
+            "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: body.toString()
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw new Error(`Falha ao renovar token OAuth2 Conta Azul: ${data.error_description || data.error || response.statusText}`);
+    }
+
+    return data.access_token;
+}
+
+function getCategoriaEnv(categoriaString: string): string {
+    const str = (categoriaString || "").toUpperCase();
+    if (str.includes("SEMANAL")) return process.env.CA_CATEGORY_SEMANAL || "";
+    if (str.includes("QUINZENAL")) return process.env.CA_CATEGORY_QUINZENAL || "";
+    if (str.includes("MENSAL")) return process.env.CA_CATEGORY_MENSAL || "";
+    return process.env.CONTA_AZUL_CATEGORY_ID || "1"; // Fallback caso não ache
+}
+
 export async function POST(req: Request) {
     try {
         const rows = await req.json();
@@ -8,48 +50,71 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "O payload deve ser um array." }, { status: 400 });
         }
 
-        const categoryId = process.env.CONTA_AZUL_CATEGORY_ID || "1";
-        const bankAccountId = process.env.CONTA_AZUL_BANK_ACCOUNT_ID || "1";
-        const contaAzulApiToken = process.env.CONTA_AZUL_API_TOKEN || "SEU_TOKEN_AQUI"; // Para futura autenticação real
+        // 1. O Motor de Renovação - Busca Token Fresco
+        let accessToken: string;
+        try {
+            accessToken = await getValidToken();
+        } catch (tokenErr: any) {
+            console.error("Erro na autenticação:", tokenErr);
+            return NextResponse.json({ error: tokenErr.message }, { status: 401 });
+        }
+
+        const bankAccountId = process.env.CONTA_AZUL_BANK_ACCOUNT_ID;
+        if (!bankAccountId) {
+            return NextResponse.json({ error: "CONTA_AZUL_BANK_ACCOUNT_ID não está configurado." }, { status: 500 });
+        }
 
         let successCount = 0;
         let errorCount = 0;
         const errors = [];
 
+        // 2. Integração Principal
         for (const item of rows) {
             if (!item.valor || item.valor <= 0) {
                 continue;
             }
 
+            // Define a categoria baseada na string "FATURAMENTO (MENSAL)" originada no frontend
+            const categoryId = getCategoriaEnv(item.categoria);
+
+            if (!categoryId) {
+                errorCount++;
+                errors.push({ id: item.id, cliente: item.cliente, erro: `A Categoria Financeira para o ciclo (${item.categoria}) não está configurada no .env.local` });
+                continue;
+            }
+
+            // O formato /v1/sales é tipicamente usado para emitir faturamento
+            // A API de Vendas (Sales/Invoices) aceita esses campos. Se for lançamento via Financial, o endpoint seria outro e body diferente. 
+            // O conta azul geralmente usa /v1/sales para vendas e financeiro atrelado
             const payload = {
-                date: item.dataCompetencia,
-                expected_payment_date: item.dataVencimento,
+                date: new Date(item.dataCompetencia).toISOString(),
+                expected_payment_date: new Date(item.dataVencimento).toISOString(),
                 value: item.valor,
-                customer_id: item.cnpj || item.cliente, // Usando CNPJ provisoriamente
+                customer_id: item.cnpj || item.cliente, 
                 category_id: categoryId,
                 bank_account_id: bankAccountId,
-                description: item.descricao || "Faturamento"
+                seller_id: null,
+                notes: item.descricao || "Faturamento"
             };
 
             try {
-                // EXTT: Simulação robusta da chamada real (Remova ou ajuste com a URL oficial)
-                /* 
                 const response = await fetch("https://api.contaazul.com/v1/sales", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
-                        "Authorization": `Bearer ${contaAzulApiToken}`
+                        "Authorization": `Bearer ${accessToken}`
                     },
                     body: JSON.stringify(payload)
                 });
                 
+                // Tratar o Payload Response se negativo
                 if (!response.ok) {
-                    throw new Error(`Erro API: ${response.statusText}`);
+                    const errObj = await response.json().catch(() => ({}));
+                    throw new Error(`Erro API (${response.status}): ${errObj.message || response.statusText}`);
                 }
-                */
 
-                // Simulando um delay/sucesso para desenvolvimento
-                await new Promise(resolve => setTimeout(resolve, 100));
+                // Considerar um delay para respeitar Rate Limits da API
+                await new Promise(resolve => setTimeout(resolve, 150));
 
                 successCount++;
             } catch (err: any) {
