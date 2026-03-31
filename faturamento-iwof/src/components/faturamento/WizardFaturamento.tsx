@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
     Ciclo, ClienteDB, Agendamento, ConciliationResult, ValidationStatus
@@ -14,6 +15,18 @@ import EmissaoNotas from "./steps/EmissaoNotas";
 import FechamentoLote from "./steps/FechamentoLote";
 
 export default function WizardFaturamento() {
+    return (
+        <Suspense fallback={<div className="min-h-[500px] flex items-center justify-center"><span className="loading loading-spinner text-primary loading-lg"></span></div>}>
+            <WizardContent />
+        </Suspense>
+    );
+}
+
+function WizardContent() {
+    const searchParams = useSearchParams();
+    const router = useRouter();
+    const loteIdParam = searchParams.get("loteId");
+
     const supabase = createClient();
 
     const [currentStep, setCurrentStep] = useState(1);
@@ -60,6 +73,128 @@ export default function WizardFaturamento() {
             });
         return () => { isMounted = false; };
     }, [supabase]);
+
+    // Restore state from URL param
+    useEffect(() => {
+        if (!loteIdParam || loteId) return; // Prevent double fetch if loteId is already set
+
+        const loadLoteData = async () => {
+            setProcessing(true);
+            try {
+                // Fetch Lote
+                const { data: loteRes, error: loteErr } = await supabase
+                    .from("faturamentos_lote")
+                    .select("*")
+                    .eq("id", loteIdParam)
+                    .single();
+
+                if (loteErr) throw loteErr;
+
+                setLoteId(loteRes.id);
+                setPeriodoInicio(loteRes.data_competencia || "");
+                setPeriodoFim(loteRes.data_fim_ciclo || "");
+                if (loteRes.nome_pasta) setNomePasta(loteRes.nome_pasta);
+                if (loteRes.ciclo_faturamento_id) setSelectedCicloIds([loteRes.ciclo_faturamento_id]);
+                if (loteRes.queiroz_split_date) {
+                    setQueirozConfig({
+                        splitDate: loteRes.queiroz_split_date,
+                        compAnterior: loteRes.queiroz_comp_anterior || "",
+                        compAtual: loteRes.queiroz_comp_atual || ""
+                    });
+                }
+
+                // Fetch Agendamentos
+                let allAgendamentos: any[] = [];
+                let from = 0;
+                const stepAmount = 1000;
+                let hasMore = true;
+
+                while (hasMore) {
+                    const { data: chunk, error: agdsError } = await supabase
+                        .from("agendamentos_brutos")
+                        .select("*, clientes(*, ciclos_faturamento(nome))")
+                        .eq("lote_id", loteIdParam)
+                        .range(from, from + stepAmount - 1);
+
+                    if (agdsError) {
+                        console.error("Erro ao buscar agendamentos do lote:", agdsError);
+                        break;
+                    }
+
+                    if (chunk && chunk.length > 0) {
+                        allAgendamentos = [...allAgendamentos, ...chunk];
+                        from += stepAmount;
+                    } else {
+                        hasMore = false;
+                    }
+
+                    if (chunk && chunk.length < stepAmount) {
+                        hasMore = false;
+                    }
+                }
+
+                // Map to Agendamento state format
+                const restoredAgendamentos: Agendamento[] = allAgendamentos.map(a => {
+                    const cliente = a.clientes || {};
+                    const isQueirozSufixo = a.nome_profissional?.includes('(Mês');
+                    const nomeLojaDisplay = isQueirozSufixo ? a.nome_profissional : (cliente.razao_social || a.cnpj_loja || "Loja");
+
+                    return {
+                        id: a.id,
+                        nome: a.nome_profissional || "N/A",
+                        telefone: "",
+                        estado: "",
+                        loja: nomeLojaDisplay,
+                        vaga: a.vaga || "",
+                        inicio: a.data_inicio ? new Date(a.data_inicio) : null,
+                        termino: a.data_fim ? new Date(a.data_fim) : null,
+                        refAgendamento: "",
+                        agendadoEm: null,
+                        iniciadoEm: null,
+                        concluidoEm: null,
+                        valorIwof: a.valor_iwof,
+                        fracaoHora: a.fracao_hora || 0,
+                        statusAgendamento: a.status_validacao || "VALIDADO",
+                        dataCancelamento: null,
+                        motivoCancelamento: "",
+                        responsavelCancelamento: "",
+                        status: (a.status_validacao === "VALIDADO" || a.status_validacao === "CORREÇÃO") ? a.status_validacao : "OK",
+                        status_match: "sucesso",
+                        clienteId: a.loja_id,
+                        razaoSocial: cliente.razao_social || null,
+                        cnpj: a.cnpj_loja || cliente.cnpj || null,
+                        cicloNome: cliente.ciclos_faturamento?.nome || null,
+                        nome_conta_azul: cliente.nome_conta_azul || null,
+                        ciclo: cliente.ciclos_faturamento?.nome || null,
+                        boleto_unificado: cliente.boleto_unificado || false,
+                        rawRow: { data_competencia: a.data_competencia },
+                        data_competencia: a.data_competencia,
+                        dataCompetencia: a.data_competencia
+                    } as Agendamento;
+                });
+
+                setAgendamentos(restoredAgendamentos);
+
+                // Set step automatically based on status
+                if (loteRes.status === "RASCUNHO") {
+                    setCurrentStep(3); // Seleção Fiscal
+                } else if (loteRes.status === "AGUARDANDO_XML" || loteRes.status === "EM_ESPERA") {
+                    setCurrentStep(4); // Emissão / Retorno upload
+                } else if (loteRes.status === "PENDENTE") { 
+                    setCurrentStep(3); // Could also be earlier stages
+                } else {
+                    setCurrentStep(5); // Completed or fechado
+                }
+
+                setProcessing(false);
+            } catch (err) {
+                console.error("Failed to restore lote", err);
+                setProcessing(false);
+            }
+        };
+
+        loadLoteData();
+    }, [loteIdParam, loteId, supabase]);
 
     const financialSummary = useMemo(() => {
         if (agendamentos.length === 0) return { summaryArr: [], globalFaturadas: 0, globalRejeitadas: 0 };
@@ -638,6 +773,9 @@ export default function WizardFaturamento() {
                     throw new Error("Falha ao salvar agendamentos: " + insErr.message);
                 }
             }
+
+            // INJETA O ID NA URL SEM RECARREGAR
+            window.history.pushState(null, '', `/faturamento/novo?loteId=${loteObj.id}`);
 
             setCurrentStep(3);
         } catch (e: any) {

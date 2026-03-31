@@ -114,7 +114,7 @@ export default function LoteHistoryPage() {
     };
 
     const handleOpenLote = (id: string) => {
-        router.push(`/faturamento/lote/${id}`);
+        router.push(`/faturamento/novo?loteId=${id}`);
     };
 
     const filteredLotes = lotes.filter(l =>
