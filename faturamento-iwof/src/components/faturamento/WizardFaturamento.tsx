@@ -186,7 +186,7 @@ function WizardContent() {
                         dataCancelamento: null,
                         motivoCancelamento: "",
                         responsavelCancelamento: "",
-                        status: (a.status_validacao === "VALIDADO" || a.status_validacao === "CORREÇÃO") ? a.status_validacao : "OK",
+                        status: a.status_validacao === "VALIDADO" ? "OK" : a.status_validacao,
                         status_match: "sucesso",
                         clienteId: a.loja_id,
                         razaoSocial: cliente.razao_social || null,
@@ -206,16 +206,16 @@ function WizardContent() {
                 // Set step automatically based on status and available data
                 if (loteRes.status === "RASCUNHO") {
                     if (allAgendamentos.length > 0) {
-                        setCurrentStep(2); // Avança pro resumo se já existirem os brutos
+                        setCurrentStep(3); // Já salvou os brutos (Etapa 2 concluída), vai direto para Seleção Fiscal
                     } else {
-                        setCurrentStep(1); // Permanece no setup se não tiver brutos importados
+                        setCurrentStep(1); // Não tem brutos, permanece no setup
                     }
+                } else if (loteRes.status === "PENDENTE") {
+                    setCurrentStep(4); // Consolidados gerados (Etapa 3 concluída), vai para Emissão de Notas
                 } else if (loteRes.status === "AGUARDANDO_XML" || loteRes.status === "EM_ESPERA") {
-                    setCurrentStep(4); // Emissão / Retorno upload
-                } else if (loteRes.status === "PENDENTE") { 
-                    setCurrentStep(3); // Seleção Fiscal / Lote Gerado
+                    setCurrentStep(5); // Retorno de upload / Fechamento de Lote
                 } else {
-                    setCurrentStep(5); // Completed or fechado
+                    setCurrentStep(5); // Concluído
                 }
 
                 setProcessing(false);
