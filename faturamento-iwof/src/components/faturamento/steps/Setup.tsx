@@ -23,6 +23,7 @@ interface SetupProps {
     setFileName: (name: string) => void;
     queirozConfig: { splitDate: string; compAnterior: string; compAtual: string; } | null;
     setQueirozConfig: React.Dispatch<React.SetStateAction<{ splitDate: string; compAnterior: string; compAtual: string; } | null>>;
+    hasRestoredData?: boolean;
 }
 
 export default function Setup({
@@ -40,7 +41,8 @@ export default function Setup({
     processing,
     setFileName,
     queirozConfig,
-    setQueirozConfig
+    setQueirozConfig,
+    hasRestoredData
 }: SetupProps) {
     const [files, setFiles] = useState<File[]>([]);
 
@@ -64,7 +66,12 @@ export default function Setup({
     });
 
     const handleProcess = async () => {
-        if (files.length === 0) return;
+        if (files.length === 0) {
+            if (hasRestoredData) {
+                setCurrentStep(2);
+            }
+            return;
+        }
 
         let allRows: Record<string, string>[] = [];
 
@@ -118,7 +125,7 @@ export default function Setup({
     const isCrossMonth = d1_check && d2_check && (d1_check.getMonth() !== d2_check.getMonth() || d1_check.getFullYear() !== d2_check.getFullYear());
     const showQueirozPanel = isCrossMonth && isQueirozSelected;
 
-    const isReady = files.length > 0 && periodoInicio && periodoFim && selectedCicloIds.length > 0 && nomePasta.trim().length > 0 && (!showQueirozPanel || (queirozConfig?.splitDate && queirozConfig?.compAnterior && queirozConfig?.compAtual));
+    const isReady = (files.length > 0 || hasRestoredData) && periodoInicio && periodoFim && selectedCicloIds.length > 0 && nomePasta.trim().length > 0 && (!showQueirozPanel || (queirozConfig?.splitDate && queirozConfig?.compAnterior && queirozConfig?.compAtual));
 
     return (
         <div className="flex flex-col gap-6 max-w-4xl mx-auto">
@@ -283,8 +290,17 @@ export default function Setup({
                             <UploadCloud size={32} className={isDragActive ? "animate-bounce" : ""} />
                         </div>
                         <div>
-                            <p className="font-bold text-[var(--fg)] text-lg mb-1">Arraste a Planilha da Iwof</p>
-                            <p className="text-sm text-[var(--fg-dim)]">.csv ou .xlsx gerado pelo Admin</p>
+                            {hasRestoredData ? (
+                                <>
+                                    <p className="font-bold text-[var(--fg)] text-lg mb-1">Dados Resturados com Sucesso</p>
+                                    <p className="text-sm text-[var(--fg-dim)]">Não é necessário enviar o arquivo novamente. Clique em Avançar.</p>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="font-bold text-[var(--fg)] text-lg mb-1">Arraste a Planilha da Iwof</p>
+                                    <p className="text-sm text-[var(--fg-dim)]">.csv ou .xlsx gerado pelo Admin</p>
+                                </>
+                            )}
                         </div>
                     </div>
                 )}

@@ -61,6 +61,9 @@ function WizardContent() {
     /* --- New Steps State --- */
     const [lojasSemNf, setLojasSemNf] = useState<Set<string>>(new Set());
     const [nfseFiles, setNfseFiles] = useState<{ name: string; blob: Blob; buffer: ArrayBuffer }[]>([]);
+    
+    // Indica se os dados foram hidratados a partir da URL (já tem lote na base)
+    const [hasRestoredData, setHasRestoredData] = useState(false);
 
     useEffect(() => {
         let isMounted = true;
@@ -91,8 +94,12 @@ function WizardContent() {
                 if (loteErr) throw loteErr;
 
                 setLoteId(loteRes.id);
-                setPeriodoInicio(loteRes.data_competencia || "");
-                setPeriodoFim(loteRes.data_fim_ciclo || "");
+                // Garantir formato YYYY-MM-DD para os inputs <input type="date" />
+                const compValue = loteRes.data_competencia ? (loteRes.data_competencia.length === 7 ? `${loteRes.data_competencia}-01` : loteRes.data_competencia) : "";
+                const compFim = loteRes.data_fim_ciclo ? (loteRes.data_fim_ciclo.length === 7 ? `${loteRes.data_fim_ciclo}-01` : loteRes.data_fim_ciclo) : "";
+                
+                setPeriodoInicio(compValue);
+                setPeriodoFim(compFim);
                 if (loteRes.nome_pasta) setNomePasta(loteRes.nome_pasta);
                 if (loteRes.ciclo_faturamento_id) setSelectedCicloIds([loteRes.ciclo_faturamento_id]);
                 if (loteRes.queiroz_split_date) {
@@ -102,6 +109,7 @@ function WizardContent() {
                         compAtual: loteRes.queiroz_comp_atual || ""
                     });
                 }
+                setHasRestoredData(true);
 
                 // Fetch Agendamentos
                 let allAgendamentos: any[] = [];
@@ -175,13 +183,17 @@ function WizardContent() {
 
                 setAgendamentos(restoredAgendamentos);
 
-                // Set step automatically based on status
+                // Set step automatically based on status and available data
                 if (loteRes.status === "RASCUNHO") {
-                    setCurrentStep(3); // Seleção Fiscal
+                    if (allAgendamentos.length > 0) {
+                        setCurrentStep(2); // Avança pro resumo se já existirem os brutos
+                    } else {
+                        setCurrentStep(1); // Permanece no setup se não tiver brutos importados
+                    }
                 } else if (loteRes.status === "AGUARDANDO_XML" || loteRes.status === "EM_ESPERA") {
                     setCurrentStep(4); // Emissão / Retorno upload
                 } else if (loteRes.status === "PENDENTE") { 
-                    setCurrentStep(3); // Could also be earlier stages
+                    setCurrentStep(3); // Seleção Fiscal / Lote Gerado
                 } else {
                     setCurrentStep(5); // Completed or fechado
                 }
@@ -811,7 +823,8 @@ function WizardContent() {
         saving,
         saveResult,
         loteId,
-        setLoteId
+        setLoteId,
+        hasRestoredData
     };
 
     return (
