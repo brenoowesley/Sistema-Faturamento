@@ -266,6 +266,7 @@ export async function POST(req: Request) {
             };
 
             try {
+                // ── PASSO 1: Cria o evento financeiro (Conta a Receber) ──────────
                 const response = await fetch(`${API_BASE}${ENDPOINT}`, {
                     method: "POST",
                     headers: {
@@ -281,7 +282,6 @@ export async function POST(req: Request) {
                     let errMsg = response.statusText;
                     try {
                         const errObj = JSON.parse(rawText);
-                        // Serializa corretamente objetos aninhados para evitar [object Object]
                         errMsg = typeof errObj.message === "string" 
                             ? errObj.message 
                             : JSON.stringify(errObj.message || errObj.errors || errObj);
@@ -290,14 +290,83 @@ export async function POST(req: Request) {
                     throw new Error(`Erro API (${response.status}): ${errMsg}`);
                 }
 
-                // Log do protocolo retornado (protocolId, status)
-                try {
-                    const result = await response.json();
-                    console.log(`✅ Evento criado para ${item.cliente}: protocolId=${result.protocolId}, status=${result.status}`);
-                } catch { /* response pode não ter body */ }
+                const eventoResult = await response.json().catch(() => ({}));
+                console.log(`✅ Evento criado para ${item.cliente}: protocolId=${eventoResult.protocolId}, status=${eventoResult.status}`);
 
-                // Rate Limit: delay entre chamadas
-                await new Promise(resolve => setTimeout(resolve, 250));
+                // ── PASSO 2: Aguarda processamento assíncrono (202 é enfileirado) ──
+                // A criação é assíncrona — aguardamos antes de buscar a parcela
+                await new Promise(resolve => setTimeout(resolve, 3000));
+
+                // ── PASSO 3: Busca o id da parcela recém-criada ──────────────────
+                // Filtra por data de vencimento e contato para achar a parcela correta
+                const buscaParams = new URLSearchParams({
+                    pagina: "1",
+                    tamanho_pagina: "10",
+                    data_vencimento_de: item.dataVencimento,
+                    data_vencimento_ate: item.dataVencimento,
+                    ids_clientes: contatoUUID
+                });
+
+                const buscaRes = await fetch(
+                    `${API_BASE}/v1/financeiro/eventos-financeiros/contas-a-receber/buscar?${buscaParams}`,
+                    {
+                        headers: {
+                            "Authorization": `Bearer ${accessToken}`,
+                            "Content-Type": "application/json"
+                        }
+                    }
+                );
+
+                let idParcela: string | null = null;
+
+                if (buscaRes.ok) {
+                    const buscaData = await buscaRes.json();
+                    const parcelas: any[] = buscaData.itens || [];
+                    // Pega a parcela mais recente (última inserida) com o valor correto
+                    const parcelaMatch = parcelas.find(p => 
+                        Math.abs(p.total - item.valor) < 0.01
+                    );
+                    idParcela = parcelaMatch?.id || null;
+                    if (idParcela) {
+                        console.log(`📋 Parcela encontrada para ${item.cliente}: id=${idParcela}`);
+                    } else {
+                        console.warn(`⚠️ Parcela não encontrada para ${item.cliente} (venc: ${item.dataVencimento}, valor: ${item.valor})`);
+                    }
+                } else {
+                    console.warn(`⚠️ Falha ao buscar parcelas para ${item.cliente}: ${buscaRes.status}`);
+                }
+
+                // ── PASSO 4: Gera o Boleto (não-fatal se falhar) ─────────────────
+                if (idParcela) {
+                    const boletoPayload = {
+                        conta_bancaria: bankAccountId, // Mesmo ID da conta financeira
+                        descricao_fatura: item.descricao || `Faturamento ${item.cliente}`,
+                        id_parcela: idParcela,
+                        data_vencimento: item.dataVencimento,
+                        tipo: "BOLETO"
+                    };
+
+                    const boletoRes = await fetch(
+                        `${API_BASE}/v1/financeiro/eventos-financeiros/contas-a-receber/gerar-cobranca`,
+                        {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json",
+                                "Authorization": `Bearer ${accessToken}`
+                            },
+                            body: JSON.stringify(boletoPayload)
+                        }
+                    );
+
+                    if (boletoRes.ok) {
+                        const boletoData = await boletoRes.json().catch(() => ({}));
+                        console.log(`🎫 Boleto gerado para ${item.cliente}: id=${boletoData.id}, status=${boletoData.status}`);
+                    } else {
+                        const boletoErrText = await boletoRes.text().catch(() => "");
+                        // Boleto falhou — não é fatal, evento já foi criado com sucesso
+                        console.warn(`⚠️ Boleto não gerado para ${item.cliente} [${boletoRes.status}]: ${boletoErrText}`);
+                    }
+                }
 
                 successCount++;
             } catch (err: any) {
