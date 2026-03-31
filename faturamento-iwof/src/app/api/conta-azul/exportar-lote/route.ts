@@ -192,6 +192,10 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "CONTA_AZUL_BANK_ACCOUNT_ID não está configurado." }, { status: 500 });
         }
 
+        // Conta de cobranças (para emissão de boleto via CNAB)
+        // Pode ser diferente da conta financeira — configure CA_BOLETO_BANK_ACCOUNT_ID separadamente se necessário
+        const boletoAccountId = process.env.CA_BOLETO_BANK_ACCOUNT_ID || bankAccountId;
+
         let successCount = 0;
         let errorCount = 0;
         const errors: { id: string; cliente: string; erro: string }[] = [];
@@ -237,28 +241,28 @@ export async function POST(req: Request) {
 
             // 4c. Monta o payload conforme OpenAPI spec (EventoFinanceiroRequest)
             const payload = {
-                data_competencia: item.dataCompetencia,         // "2024-07-15" (ISO date)
-                valor: item.valor,                              // number
-                observacao: item.observacoes || "",              // string (required)
-                descricao: item.descricao || "Prestação de serviço", // string (required)
-                contato: contatoUUID,                           // UUID (required) — resolvido via API Pessoas
-                conta_financeira: bankAccountId,                // UUID (required)
+                data_competencia: item.dataCompetencia,
+                valor: item.valor,
+                observacao: item.observacoes || "",
+                descricao: item.descricao || "Prestação de serviço",
+                contato: contatoUUID,
+                conta_financeira: bankAccountId,
                 rateio: [
                     {
-                        id_categoria: categoryId,               // UUID da categoria
-                        valor: item.valor                       // valor do rateio = valor total
+                        id_categoria: categoryId,
+                        valor: item.valor
                     }
                 ],
                 condicao_pagamento: {
                     parcelas: [
                         {
-                            descricao: item.descricao || "Faturamento",  // string (required)
-                            data_vencimento: item.dataVencimento,        // "2024-07-15" (ISO date, required)
-                            nota: item.observacoes || "",                // string (required)
-                            conta_financeira: bankAccountId,             // UUID (required)
+                            descricao: item.descricao || "Faturamento",
+                            data_vencimento: item.dataVencimento,
+                            nota: item.observacoes || "",
+                            conta_financeira: bankAccountId,
                             detalhe_valor: {
-                                valor_bruto: item.valor,   // number (required)
-                                valor_liquido: item.valor  // required na prática (mesmo valor quando não há desconto)
+                                valor_bruto: item.valor,
+                                valor_liquido: item.valor
                             }
                         }
                     ]
@@ -293,80 +297,9 @@ export async function POST(req: Request) {
                 const eventoResult = await response.json().catch(() => ({}));
                 console.log(`✅ Evento criado para ${item.cliente}: protocolId=${eventoResult.protocolId}, status=${eventoResult.status}`);
 
-                // ── PASSO 2: Aguarda processamento assíncrono (202 é enfileirado) ──
-                // A criação é assíncrona — aguardamos antes de buscar a parcela
-                await new Promise(resolve => setTimeout(resolve, 3000));
-
-                // ── PASSO 3: Busca o id da parcela recém-criada ──────────────────
-                // Filtra por data de vencimento e contato para achar a parcela correta
-                const buscaParams = new URLSearchParams({
-                    pagina: "1",
-                    tamanho_pagina: "10",
-                    data_vencimento_de: item.dataVencimento,
-                    data_vencimento_ate: item.dataVencimento,
-                    ids_clientes: contatoUUID
-                });
-
-                const buscaRes = await fetch(
-                    `${API_BASE}/v1/financeiro/eventos-financeiros/contas-a-receber/buscar?${buscaParams}`,
-                    {
-                        headers: {
-                            "Authorization": `Bearer ${accessToken}`,
-                            "Content-Type": "application/json"
-                        }
-                    }
-                );
-
-                let idParcela: string | null = null;
-
-                if (buscaRes.ok) {
-                    const buscaData = await buscaRes.json();
-                    const parcelas: any[] = buscaData.itens || [];
-                    // Pega a parcela mais recente (última inserida) com o valor correto
-                    const parcelaMatch = parcelas.find(p => 
-                        Math.abs(p.total - item.valor) < 0.01
-                    );
-                    idParcela = parcelaMatch?.id || null;
-                    if (idParcela) {
-                        console.log(`📋 Parcela encontrada para ${item.cliente}: id=${idParcela}`);
-                    } else {
-                        console.warn(`⚠️ Parcela não encontrada para ${item.cliente} (venc: ${item.dataVencimento}, valor: ${item.valor})`);
-                    }
-                } else {
-                    console.warn(`⚠️ Falha ao buscar parcelas para ${item.cliente}: ${buscaRes.status}`);
-                }
-
-                // ── PASSO 4: Gera o Boleto (não-fatal se falhar) ─────────────────
-                if (idParcela) {
-                    const boletoPayload = {
-                        conta_bancaria: bankAccountId, // Mesmo ID da conta financeira
-                        descricao_fatura: item.descricao || `Faturamento ${item.cliente}`,
-                        id_parcela: idParcela,
-                        data_vencimento: item.dataVencimento,
-                        tipo: "BOLETO"
-                    };
-
-                    const boletoRes = await fetch(
-                        `${API_BASE}/v1/financeiro/eventos-financeiros/contas-a-receber/gerar-cobranca`,
-                        {
-                            method: "POST",
-                            headers: {
-                                "Content-Type": "application/json",
-                                "Authorization": `Bearer ${accessToken}`
-                            },
-                            body: JSON.stringify(boletoPayload)
-                        }
-                    );
-
-                    if (boletoRes.ok) {
-                        const boletoData = await boletoRes.json().catch(() => ({}));
-                        console.log(`🎫 Boleto gerado para ${item.cliente}: id=${boletoData.id}, status=${boletoData.status}`);
-                    } else {
-                        const boletoErrText = await boletoRes.text().catch(() => "");
-                        // Boleto falhou — não é fatal, evento já foi criado com sucesso
-                        console.warn(`⚠️ Boleto não gerado para ${item.cliente} [${boletoRes.status}]: ${boletoErrText}`);
-                    }
-                }
+                // Conta usa CNAB/Remessa — boleto gerado fora do Conta Azul Digital
+                // Rate limit: pequeno delay entre chamadas
+                await new Promise(resolve => setTimeout(resolve, 300));
 
                 successCount++;
             } catch (err: any) {
