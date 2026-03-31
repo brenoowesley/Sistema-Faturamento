@@ -240,25 +240,13 @@ export async function POST(req: NextRequest) {
             // ==========================================
             let periodoCustom = `${formatDataSegura(lote.data_inicio_ciclo)} à ${formatDataSegura(lote.data_fim_ciclo)}`;
 
-            if (isQueiroz && lote.queiroz_split_date) {
-                const splitDt = new Date(lote.queiroz_split_date + "T12:00:00");
-                
-                // Identificação Robusta: Nome ou Fallback por Dia (Anti-Colisão usa dia 02 para a 2ª parte)
-                const recLoja = cliente.nome_fantasia || cliente.razao_social;
-                const isNomeAnterior = recLoja?.includes('(Mês Anterior)') || cliente.razao_social?.includes('(Mês Anterior)');
-                const isNomeAtual = recLoja?.includes('(Mês Atual)') || cliente.razao_social?.includes('(Mês Atual)');
-                
-                let isActuallyAnterior = isNomeAnterior;
-                if (!isNomeAnterior && !isNomeAtual && cons.data_competencia) {
-                    const compDay = new Date(cons.data_competencia + "T12:00:00").getDate();
-                    isActuallyAnterior = (compDay === 1); 
-                }
-
-                if (isActuallyAnterior) {
+            if (lote.queiroz_split_date) {
+                if (cons.data_competencia === lote.queiroz_comp_anterior) {
                     // Fatura 1: data fim deve ser obrigatoriamente a dataCorte (inclusive)
                     periodoCustom = `${formatDataSegura(lote.data_inicio_ciclo)} à ${formatDataSegura(lote.queiroz_split_date)}`;
-                } else {
+                } else if (cons.data_competencia === lote.queiroz_comp_atual) {
                     // Fatura 2: data inicio deve ser a dataCorte + 1 dia
+                    const splitDt = new Date(lote.queiroz_split_date + "T12:00:00");
                     const nextDay = new Date(splitDt);
                     nextDay.setDate(splitDt.getDate() + 1);
                     periodoCustom = `${formatDataSegura(nextDay.toISOString())} à ${formatDataSegura(lote.data_fim_ciclo)}`;
