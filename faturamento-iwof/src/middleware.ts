@@ -71,6 +71,16 @@ export async function middleware(request: NextRequest) {
                 return NextResponse.redirect(new URL(CX_ALLOWED_PREFIX, request.url));
             }
         }
+
+        // ── Aplicar regras do USER ────────────────────────────────────────────
+        if (role === "USER") {
+            // USER não pode acessar gestão de usuários
+            const isUserBlocked = pathname.startsWith("/usuarios");
+
+            if (isUserBlocked) {
+                return NextResponse.redirect(new URL("/", request.url));
+            }
+        }
     }
 
     return response;

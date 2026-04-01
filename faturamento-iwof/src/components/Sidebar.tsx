@@ -29,11 +29,11 @@ const navItems = [
     { label: "Painel Principal",      href: "/",                      icon: LayoutDashboard, roles: ["ADMIN", "APROVADOR", "USER"],               exact: true },
     
     // Grupo: Faturamento
-    { label: "Novo Faturamento",      href: "/faturamento/novo",       icon: PlusCircle,       roles: ["ADMIN", "APROVADOR"], isPrimary: true },
+    { label: "Novo Faturamento",      href: "/faturamento/novo",       icon: PlusCircle,       roles: ["ADMIN", "APROVADOR", "USER"], isPrimary: true },
     { label: "Faturamento",           href: "/faturamento/lotes",      icon: Receipt,         roles: ["ADMIN", "APROVADOR", "USER"] },
-    { label: "Triagem",               href: "/triagem",               icon: Filter,          roles: ["ADMIN", "APROVADOR"] },
-    { label: "Lançamentos Parciais",  href: "/lancamentos-parciais",   icon: ListPlus,        roles: ["ADMIN", "APROVADOR"] },
-    { label: "Notas de Crédito",      href: "/notas-credito",          icon: FileText,        roles: ["ADMIN", "APROVADOR"] },
+    { label: "Triagem",               href: "/triagem",               icon: Filter,          roles: ["ADMIN", "APROVADOR", "USER"] },
+    { label: "Lançamentos Parciais",  href: "/lancamentos-parciais",   icon: ListPlus,        roles: ["ADMIN", "APROVADOR", "USER"] },
+    { label: "Notas de Crédito",      href: "/notas-credito",          icon: FileText,        roles: ["ADMIN", "APROVADOR", "USER"] },
 
     // Grupo: Saques
     { label: "Gestão de Saques",      href: "/saques",                 icon: Banknote,        roles: ["ADMIN", "APROVADOR", "USER"],               exact: true },
