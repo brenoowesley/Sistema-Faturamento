@@ -267,9 +267,8 @@ export async function POST(req: Request) {
         const contatoCache = new Map<string, string | null>();
         const centroCustoCache = new Map<string, string | null>();
 
-        // 4. Integração Principal — API v2 Financeiro (Contas a Receber)
-        // Endpoint oficial: POST /v1/financeiro/eventos-financeiros/contas-a-receber
-        const ENDPOINT = "/v1/financeiro/eventos-financeiros/contas-a-receber";
+        // 4. Integração Principal — API Pública de Vendas
+        // Endpoint oficial: POST /v1/sales (cria fatura + conta a receber associada)
 
         for (const item of rows) {
             if (!item.valor || item.valor <= 0) {
@@ -302,54 +301,42 @@ export async function POST(req: Request) {
                 continue;
             }
 
-            // 4c. Resolve Centro de Custo (nome do estado → UUID)
-            const centroCustoUUID = await resolverCentroCustoPorNome(
-                item.centroCusto, accessToken, centroCustoCache
-            );
-
-            // 4d. Monta o rateio com categoria + centro de custo (se disponível)
-            const rateioItem: any = {
-                id_categoria: categoryId,
-                valor: item.valor
-            };
-
-            if (centroCustoUUID) {
-                rateioItem.rateio_centro_custo = [
-                    {
-                        id_centro_custo: centroCustoUUID,
-                        valor: item.valor
-                    }
-                ];
-            }
-
-            // 4e. Monta o payload conforme OpenAPI spec (EventoFinanceiroRequest)
+            // 4c. Monta o payload compatível com o endpoint de Vendas (/v1/sales)
             const payload = {
-                data_competencia: item.dataCompetencia,
-                valor: item.valor,
-                observacao: item.observacoes || "",
-                descricao: item.descricao || "Prestação de serviço",
-                contato: contatoUUID,
-                conta_financeira: bankAccountId,
-                rateio: [rateioItem],
-                condicao_pagamento: {
-                    parcelas: [
+                emission: new Date(item.dataCompetencia).toISOString(),
+                status: "COMMITTED",
+                customer_id: contatoUUID,
+                services: [
+                    {
+                        description: item.descricao || "Faturamento Mensal",
+                        quantity: 1,
+                        value: item.valor
+                    }
+                ],
+                discount: {
+                    measure_unit: "VALUE",
+                    rate: 0
+                },
+                payment: {
+                    type: "TIMES",
+                    method: "BANK_SLIP",
+                    financial_account_id: bankAccountId,
+                    installments: [
                         {
-                            descricao: item.descricao || "Faturamento",
-                            data_vencimento: item.dataVencimento,
-                            nota: item.observacoes || "",
-                            conta_financeira: bankAccountId,
-                            detalhe_valor: {
-                                valor_bruto: item.valor,
-                                valor_liquido: item.valor
-                            }
+                            number: 1,
+                            value: item.valor,
+                            due_date: new Date(item.dataVencimento).toISOString(),
+                            status: "PENDING"
                         }
                     ]
-                }
+                },
+                notes: item.observacoes || "Gerado via Integração iWof",
+                category_id: categoryId
             };
 
             try {
-                // ── PASSO 1: Cria o evento financeiro (Conta a Receber) ──────────
-                const response = await fetch(`${API_BASE}${ENDPOINT}`, {
+                // ── Cria a venda (fatura + conta a receber) via API Pública ─────
+                const response = await fetch("https://api.contaazul.com/v1/sales", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
@@ -358,7 +345,6 @@ export async function POST(req: Request) {
                     body: JSON.stringify(payload)
                 });
                 
-                // A API retorna 202 (Accepted) em caso de sucesso
                 if (!response.ok) {
                     const rawText = await response.text();
                     let errMsg = response.statusText;
@@ -372,10 +358,9 @@ export async function POST(req: Request) {
                     throw new Error(`Erro API (${response.status}): ${errMsg}`);
                 }
 
-                const eventoResult = await response.json().catch(() => ({}));
-                console.log(`✅ Evento criado para ${item.cliente}: protocolId=${eventoResult.protocolId}, status=${eventoResult.status}`);
+                const saleResult = await response.json().catch(() => ({}));
+                console.log(`✅ Venda criada para ${item.cliente}: id=${saleResult.id}, status=${saleResult.status}`);
 
-                // Conta usa CNAB/Remessa — boleto gerado fora do Conta Azul Digital
                 // Rate limit: pequeno delay entre chamadas
                 await new Promise(resolve => setTimeout(resolve, 300));
 
