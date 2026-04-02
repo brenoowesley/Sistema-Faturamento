@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
             .filter(item => item.valor > 0)
             .map(item => {
                 const c = clienteMap.get(item.lojaIdentificadaId!) || {};
-                const valorNF = item.valor * 0.115;
+                const valorNF = item.valor;
 
                 return {
                     "CPF_CNPJ": c.cnpj ? c.cnpj.replace(/\D/g, "") : (item.cnpj || ""),
