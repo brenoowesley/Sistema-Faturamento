@@ -1,11 +1,11 @@
 /**
  * Evolution API v2.2.3 — HTTP Client
- * Base URL: http://localhost:8080
+ * Base URL: http://127.0.0.1:8080
  *
  * Documentação: https://doc.evolution-api.com/v2
  */
 
-const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || "http://localhost:8080";
+const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || "http://127.0.0.1:8080";
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || "";
 const EVOLUTION_INSTANCE = process.env.EVOLUTION_INSTANCE || "";
 
