@@ -234,6 +234,17 @@ export default function FechamentoLote({
                 });
                 setDbConsolidados(idMap);
             }
+
+            // Verificar se já existem logs de envio de e-mail para este lote (restaura estado ao revisitar)
+            const { data: emailLogs, error: emailErr } = await supabase
+                .from('logs_envio_email')
+                .select('id')
+                .eq('lote_id', currentLoteId)
+                .limit(1);
+
+            if (!emailErr && emailLogs && emailLogs.length > 0) {
+                setActionState(prev => ({ ...prev, emailsSuccess: true }));
+            }
         };
 
         fetchExisting();
