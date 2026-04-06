@@ -27,23 +27,48 @@ async function evolutionFetch(
   options: RequestInit = {}
 ): Promise<EvolutionResponse> {
   const url = `${EVOLUTION_API_URL}${endpoint}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      apikey: EVOLUTION_API_KEY,
-      ...options.headers,
-    },
-  });
 
-  if (!res.ok) {
-    const errorBody = await res.text();
-    throw new Error(
-      `Evolution API error [${res.status}]: ${errorBody}`
-    );
+  // 1. LOG DE PRÉ-VÔO: O que exatamente estamos tentando acessar?
+  console.log("=========================================");
+  console.log("🚀 [DEBUG EVOLUTION API] TENTANDO CONECTAR...");
+  console.log(`🔗 URL Exata: ${url}`);
+  console.log(`🔑 API Key (Primeiros 5 chars): ${EVOLUTION_API_KEY.substring(0, 5)}***`);
+  console.log(`📦 Método: ${options.method || "GET"}`);
+  console.log("=========================================");
+
+  try {
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        apikey: EVOLUTION_API_KEY,
+        ...options.headers,
+      },
+    });
+
+    if (!res.ok) {
+      const errorBody = await res.text();
+      console.error(`❌ [DEBUG] Erro da API HTTP ${res.status}:`, errorBody);
+      throw new Error(`Evolution API error [${res.status}]: ${errorBody}`);
+    }
+
+    console.log("✅ [DEBUG] Sucesso! A API respondeu.");
+    return res.json();
+
+  } catch (error: any) {
+    // 2. LOG DE ACIDENTE: Descobrindo a causa real do "fetch failed"
+    console.error("=========================================");
+    console.error("💥 [DEBUG FATAL] A REQUISIÇÃO FALHOU ANTES DE CHEGAR NA API!");
+    console.error(`Mensagem Genérica: ${error.message}`);
+
+    // Aqui está o ouro: o Node.js esconde o erro real dentro de 'cause'
+    if (error.cause) {
+      console.error(`🕵️ Causa Raiz (Código do Erro):`, error.cause.code);
+      console.error(`🕵️ Detalhes da Causa:`, error.cause);
+    }
+    console.error("=========================================");
+    throw error;
   }
-
-  return res.json();
 }
 
 /**
