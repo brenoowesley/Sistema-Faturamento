@@ -1,6 +1,6 @@
 /**
  * Evolution API v2.2.3 — HTTP Client
- * Base URL: http://127.0.0.1:8080
+ * Base URL: http://127.0.0.1:8080 (ou URL do Ngrok configurada no .env)
  *
  * Documentação: https://doc.evolution-api.com/v2
  */
@@ -72,11 +72,25 @@ async function evolutionFetch(
 }
 
 /**
+ * Utilitário: Formata o número garantindo o DDI 55 e removendo caracteres
+ */
+function formatWhatsAppNumber(phone: string): string {
+  let number = phone.replace(/\D/g, "");
+
+  // Blindagem: Se tiver 10 ou 11 dígitos (apenas DDD e número), adiciona o DDI do Brasil (55)
+  if (number.length === 10 || number.length === 11) {
+    number = `55${number}`;
+  }
+
+  return number;
+}
+
+/**
  * Envia uma mensagem de texto para um número.
  * Formato do número: "5511999999999" (código do país + DDD + número)
  */
 export async function sendText(phone: string, message: string) {
-  const number = phone.replace(/\D/g, "");
+  const number = formatWhatsAppNumber(phone);
 
   return evolutionFetch(`/message/sendText/${SAFE_INSTANCE}`, {
     method: "POST",
@@ -100,13 +114,14 @@ export async function sendPresence(
   phone: string,
   state: "composing" | "paused" | "recording" | "available" = "composing"
 ) {
-  const number = phone.replace(/\D/g, "");
+  const number = formatWhatsAppNumber(phone);
 
   return evolutionFetch(`/chat/sendPresence/${SAFE_INSTANCE}`, {
     method: "POST",
     body: JSON.stringify({
       number,
       presence: state,
+      delay: 1500 // CORREÇÃO: Tempo de delay exigido pela Evolution API v2.2.3
     }),
   });
 }
@@ -115,7 +130,7 @@ export async function sendPresence(
  * Verifica se um número é um número válido de WhatsApp.
  */
 export async function checkNumber(phone: string) {
-  const number = phone.replace(/\D/g, "");
+  const number = formatWhatsAppNumber(phone);
 
   return evolutionFetch(`/chat/whatsappNumbers/${SAFE_INSTANCE}`, {
     method: "POST",
