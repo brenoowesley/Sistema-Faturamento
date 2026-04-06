@@ -971,3 +971,652 @@ select.input {
   background-position: right 10px center;
   background-size: 16px;
 }
+
+/* ============================================================
+   CENTRAL DE DISPAROS — WhatsApp Mass Notification Module
+   ============================================================ */
+
+.disparo-header-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, #25d366, #128c7e);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  box-shadow: 0 0 24px rgba(37, 211, 102, 0.25);
+  flex-shrink: 0;
+}
+
+.disparo-badge-whatsapp {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(37, 211, 102, 0.12);
+  color: #25d366;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Layout Grid */
+.disparo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.disparo-col-left,
+.disparo-col-right {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+@media (max-width: 1200px) {
+  .disparo-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Section Cards */
+.disparo-section {
+  padding: 24px;
+}
+
+.disparo-section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.disparo-section-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.disparo-section-icon-blue {
+  background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.disparo-section-icon-green {
+  background: linear-gradient(135deg, #25d366, #128c7e);
+  box-shadow: 0 0 12px rgba(37, 211, 102, 0.25);
+}
+
+.disparo-section-icon-purple {
+  background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.25);
+}
+
+.disparo-section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.disparo-count-badge {
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(33, 118, 255, 0.1);
+  color: var(--accent);
+}
+
+/* Fields */
+.disparo-field {
+  margin-bottom: 16px;
+}
+
+.disparo-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+/* Select wrapper */
+.disparo-select-wrapper {
+  position: relative;
+}
+
+.disparo-select {
+  padding-left: 14px !important;
+  appearance: none;
+}
+
+.disparo-select-chevron {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-dim);
+  pointer-events: none;
+}
+
+/* Upload zone */
+.disparo-upload-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  border: 2px dashed var(--border-light);
+  border-radius: var(--radius);
+  background: var(--bg);
+  cursor: pointer;
+  transition: all 0.25s ease;
+  min-height: 80px;
+}
+
+.disparo-upload-zone:hover {
+  border-color: #25d366;
+  background: rgba(37, 211, 102, 0.04);
+}
+
+.disparo-upload-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.disparo-upload-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Search button */
+.disparo-btn-search {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* Search results */
+.disparo-search-results {
+  margin-top: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.disparo-search-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s ease;
+}
+
+.disparo-search-item:last-child {
+  border-bottom: none;
+}
+
+.disparo-search-item:hover {
+  background: var(--bg-card-hover);
+}
+
+.disparo-add-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(37, 211, 102, 0.12);
+  color: #25d366;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.disparo-add-btn:hover {
+  background: #25d366;
+  color: #fff;
+}
+
+/* Selected contacts */
+.disparo-selected-list {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.disparo-selected-scroll {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.disparo-selected-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 16px;
+  font-size: 11px;
+  background: rgba(33, 118, 255, 0.1);
+  color: var(--accent);
+  border: 1px solid rgba(33, 118, 255, 0.15);
+}
+
+.disparo-chip-remove {
+  background: none;
+  border: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+  padding: 0;
+  margin-left: 2px;
+  transition: color 0.15s ease;
+}
+
+.disparo-chip-remove:hover {
+  color: var(--danger);
+}
+
+/* Variable Buttons */
+.disparo-var-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.disparo-var-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.disparo-var-btn:hover {
+  border-color: #25d366;
+  background: rgba(37, 211, 102, 0.06);
+  transform: translateY(-1px);
+}
+
+.disparo-var-tag {
+  font-size: 9px;
+  font-family: monospace;
+  color: #25d366;
+  font-weight: 700;
+}
+
+.disparo-var-label {
+  font-size: 10px;
+  color: var(--fg-dim);
+}
+
+/* Textarea */
+.disparo-textarea {
+  width: 100%;
+  padding: 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  min-height: 160px;
+}
+
+.disparo-textarea:focus {
+  border-color: #25d366;
+  box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.15);
+}
+
+/* WhatsApp Preview */
+.disparo-preview-container {
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.disparo-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #075e54;
+}
+
+.disparo-preview-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.disparo-preview-body {
+  padding: 16px;
+  background: #0b141a;
+  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.02'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  min-height: 120px;
+}
+
+.disparo-preview-bubble {
+  display: inline-block;
+  max-width: 85%;
+  padding: 8px 12px;
+  background: #005c4b;
+  border-radius: 8px 8px 0 8px;
+  position: relative;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.disparo-preview-text {
+  font-size: 13px;
+  color: #e9edef;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.disparo-preview-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.disparo-preview-checks {
+  color: #53bdeb;
+  font-size: 12px;
+}
+
+/* Counters */
+.disparo-counters {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.disparo-counter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.disparo-counter-ok {
+  color: var(--success);
+}
+
+.disparo-counter-warn {
+  color: var(--warning);
+}
+
+.disparo-counter-flag {
+  color: var(--accent);
+}
+
+.disparo-counter-value {
+  display: block;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.disparo-counter-label {
+  display: block;
+  font-size: 10px;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+/* Table */
+.disparo-table-wrapper {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+}
+
+/* Empty state */
+.disparo-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  opacity: 0.6;
+  margin-bottom: 16px;
+}
+
+/* Progress */
+.disparo-progress-section {
+  margin-bottom: 16px;
+  padding: 16px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.disparo-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.disparo-progress-bar {
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.disparo-progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #25d366, #128c7e);
+  transition: width 0.5s ease;
+  position: relative;
+}
+
+.disparo-progress-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
+  animation: disparo-shimmer 1.5s infinite;
+}
+
+@keyframes disparo-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.disparo-progress-stats {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+/* Execution Log */
+.disparo-log-container {
+  margin-bottom: 16px;
+}
+
+.disparo-log-scroll {
+  max-height: 300px;
+  overflow-y: auto;
+  border-radius: var(--radius-sm);
+  background: #0a0e17;
+  border: 1px solid var(--border);
+  padding: 12px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+.disparo-log-entry {
+  display: flex;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 11px;
+  line-height: 1.6;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.disparo-log-entry:last-child {
+  border-bottom: none;
+}
+
+.disparo-log-time {
+  color: var(--fg-dim);
+  flex-shrink: 0;
+  font-size: 10px;
+}
+
+.disparo-log-msg {
+  color: var(--fg-muted);
+  word-break: break-word;
+}
+
+.disparo-log-sent .disparo-log-msg {
+  color: var(--success);
+}
+
+.disparo-log-error .disparo-log-msg,
+.disparo-log-fatal .disparo-log-msg {
+  color: var(--danger);
+}
+
+.disparo-log-composing .disparo-log-msg {
+  color: #25d366;
+}
+
+.disparo-log-waiting .disparo-log-msg,
+.disparo-log-rest_pause .disparo-log-msg {
+  color: var(--warning);
+}
+
+.disparo-log-skip .disparo-log-msg {
+  color: var(--fg-dim);
+}
+
+.disparo-log-complete .disparo-log-msg {
+  color: #25d366;
+  font-weight: 700;
+}
+
+.disparo-log-cancel .disparo-log-msg {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.disparo-log-start .disparo-log-msg {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* Action Buttons */
+.disparo-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.disparo-btn-send {
+  flex: 1;
+  padding: 14px 24px;
+  font-size: 15px;
+  background: linear-gradient(135deg, #25d366, #128c7e) !important;
+  box-shadow: 0 4px 16px rgba(37, 211, 102, 0.25) !important;
+}
+
+.disparo-btn-send:hover {
+  box-shadow: 0 6px 24px rgba(37, 211, 102, 0.35) !important;
+}
+
+.disparo-btn-cancel {
+  flex: 1;
+  padding: 14px 24px;
+  font-size: 15px;
+  background: var(--danger) !important;
+  color: #fff !important;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.disparo-btn-cancel:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}

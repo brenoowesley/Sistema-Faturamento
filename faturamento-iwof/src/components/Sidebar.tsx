@@ -22,6 +22,7 @@ import {
     ListPlus,
     BookOpen,
     PlusCircle,
+    MessageSquare,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
@@ -34,6 +35,7 @@ const navItems = [
     { label: "Triagem",               href: "/triagem",               icon: Filter,          roles: ["ADMIN", "APROVADOR", "USER"] },
     { label: "Lançamentos Parciais",  href: "/lancamentos-parciais",   icon: ListPlus,        roles: ["ADMIN", "APROVADOR", "USER"] },
     { label: "Notas de Crédito",      href: "/notas-credito",          icon: FileText,        roles: ["ADMIN", "APROVADOR", "USER"] },
+    { label: "Central de Disparos",   href: "/disparos",               icon: MessageSquare,   roles: ["ADMIN", "APROVADOR"] },
 
     // Grupo: Saques
     { label: "Gestão de Saques",      href: "/saques",                 icon: Banknote,        roles: ["ADMIN", "APROVADOR", "USER"],               exact: true },
