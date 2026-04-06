@@ -175,6 +175,27 @@ export default function CentralDisparosPage() {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
 
+  // ── LIVE PREVIEW (must be before any conditional returns) ──
+  const previewMessage = useMemo(() => {
+    if (!mensagem) return "Sua mensagem aparecerá aqui...";
+
+    const sample = destinatarios[0];
+    return mensagem
+      .replace(/\{\{nome_fantasia\}\}/gi, sample?.nomeFantasia || "Loja Exemplo")
+      .replace(/\{\{razao_social\}\}/gi, sample?.razaoSocial || "Empresa LTDA")
+      .replace(/\{\{primeiro_nome\}\}/gi, sample?.primeiroNome || "João")
+      .replace(
+        /\{\{valor_total\}\}/gi,
+        sample?.valorTotal
+          ? new Intl.NumberFormat("pt-BR", {
+              minimumFractionDigits: 2,
+            }).format(sample.valorTotal)
+          : "1.250,00"
+      )
+      .replace(/\{\{vencimento\}\}/gi, sample?.vencimento || "15/04/2026")
+      .replace(/\{\{nome_lote\}\}/gi, nomeLote || "Lote Mensal");
+  }, [mensagem, destinatarios, nomeLote]);
+
   // ── PERMISSÃO ──
   if (loading) {
     return (
@@ -311,27 +332,6 @@ export default function CentralDisparosPage() {
       textarea.setSelectionRange(start + tag.length, start + tag.length);
     }, 0);
   };
-
-  // ── LIVE PREVIEW ──
-  const previewMessage = useMemo(() => {
-    if (!mensagem) return "Sua mensagem aparecerá aqui...";
-
-    const sample = destinatarios[0];
-    return mensagem
-      .replace(/\{\{nome_fantasia\}\}/gi, sample?.nomeFantasia || "Loja Exemplo")
-      .replace(/\{\{razao_social\}\}/gi, sample?.razaoSocial || "Empresa LTDA")
-      .replace(/\{\{primeiro_nome\}\}/gi, sample?.primeiroNome || "João")
-      .replace(
-        /\{\{valor_total\}\}/gi,
-        sample?.valorTotal
-          ? new Intl.NumberFormat("pt-BR", {
-              minimumFractionDigits: 2,
-            }).format(sample.valorTotal)
-          : "1.250,00"
-      )
-      .replace(/\{\{vencimento\}\}/gi, sample?.vencimento || "15/04/2026")
-      .replace(/\{\{nome_lote\}\}/gi, nomeLote || "Lote Mensal");
-  }, [mensagem, destinatarios, nomeLote]);
 
   // ── DISPARO ──
   const handleIniciarDisparo = async () => {
