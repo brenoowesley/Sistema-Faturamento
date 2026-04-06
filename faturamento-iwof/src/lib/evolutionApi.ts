@@ -9,6 +9,9 @@ const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || "http://127.0.0.1:808
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || "";
 const EVOLUTION_INSTANCE = process.env.EVOLUTION_INSTANCE || "";
 
+// Encodando a instância para evitar quebra de URL (ex: "Disparos - Financeiro" vira "Disparos%20-%20Financeiro")
+const SAFE_INSTANCE = encodeURIComponent(EVOLUTION_INSTANCE);
+
 interface EvolutionResponse {
   key?: { remoteJid: string; fromMe: boolean; id: string };
   message?: Record<string, unknown>;
@@ -50,11 +53,16 @@ async function evolutionFetch(
 export async function sendText(phone: string, message: string) {
   const number = phone.replace(/\D/g, "");
 
-  return evolutionFetch(`/message/sendText/${EVOLUTION_INSTANCE}`, {
+  return evolutionFetch(`/message/sendText/${SAFE_INSTANCE}`, {
     method: "POST",
     body: JSON.stringify({
       number,
       text: message,
+      // Otimização: A própria Evolution já cuida de simular o "digitando..." se passarmos as opções aqui!
+      options: {
+        delay: 1500,
+        presence: "composing"
+      }
     }),
   });
 }
@@ -69,7 +77,7 @@ export async function sendPresence(
 ) {
   const number = phone.replace(/\D/g, "");
 
-  return evolutionFetch(`/chat/sendPresence/${EVOLUTION_INSTANCE}`, {
+  return evolutionFetch(`/chat/sendPresence/${SAFE_INSTANCE}`, {
     method: "POST",
     body: JSON.stringify({
       number,
@@ -84,7 +92,7 @@ export async function sendPresence(
 export async function checkNumber(phone: string) {
   const number = phone.replace(/\D/g, "");
 
-  return evolutionFetch(`/chat/whatsappNumbers/${EVOLUTION_INSTANCE}`, {
+  return evolutionFetch(`/chat/whatsappNumbers/${SAFE_INSTANCE}`, {
     method: "POST",
     body: JSON.stringify({
       numbers: [number],
