@@ -1,31 +1,36 @@
 /**
- * Cloud Function: consumer-disparo-emails
- * =========================================
- * Triggered by Pub/Sub topic: topic-disparo-emails
+ * Cloud Run Service: consumer-disparo-emails
+ * ============================================
+ * Triggered by Pub/Sub push subscription → Cloud Run HTTP endpoint
  * 
  * ANTI-LOOP DESIGN:
- * 1. SEMPRE retorna sem erro (nunca faz o Pub/Sub re-entregar)
+ * 1. SEMPRE retorna 2xx (nunca faz o Pub/Sub re-entregar)
  * 2. Checa idempotência via logs_envio_email ANTES de processar
- * 3. Erros internos são capturados e gravados no Supabase como log de "Erro"
- * 4. A mensagem é sempre considerada "processada" pelo Pub/Sub
+ * 3. Checa se o lote foi CANCELADO antes de enviar
+ * 4. Erros internos são capturados e gravados no Supabase como log de "Erro"
+ * 5. A mensagem é sempre considerada "processada" pelo Pub/Sub
  * 
- * Deploy:
- *   gcloud functions deploy consumer-disparo-emails \
- *     --gen2 \
- *     --runtime=nodejs20 \
- *     --region=us-central1 \
+ * Deploy (Cloud Run):
+ *   gcloud run deploy consumer-disparo-emails \
  *     --source=./cloud-functions/consumer-disparo-emails \
- *     --entry-point=processarEmail \
- *     --trigger-topic=topic-disparo-emails \
- *     --memory=512MiB \
+ *     --region=us-central1 \
+ *     --memory=512Mi \
  *     --timeout=120s \
  *     --max-instances=5 \
  *     --set-env-vars="SUPABASE_URL=...,SUPABASE_SERVICE_KEY=...,GOOGLE_CLIENT_EMAIL=...,GOOGLE_PRIVATE_KEY=...,SMTP_HOST=...,SMTP_PORT=...,SMTP_USER=...,SMTP_PASS=...,GOOGLE_DRIVE_ROOT_FOLDER_ID=..."
  */
 
+const express = require('express');
 const { google } = require('googleapis');
 const nodemailer = require('nodemailer');
 const { createClient } = require('@supabase/supabase-js');
+
+// ═══════════════════════════════════════
+// EXPRESS SERVER
+// ═══════════════════════════════════════
+
+const app = express();
+app.use(express.json());
 
 // ═══════════════════════════════════════
 // CONFIGURAÇÃO
@@ -172,31 +177,48 @@ function getEmailTemplate(clienteNome, cicloNome, mes, ano) {
 }
 
 // ═══════════════════════════════════════
-// ENTRY POINT: Pub/Sub Consumer
+// ENTRY POINT: Pub/Sub Push → HTTP POST
 // ═══════════════════════════════════════
 
 /**
- * @param {object} cloudEvent - CloudEvent do Pub/Sub (Gen2)
+ * Cloud Run recebe POST do Pub/Sub push subscription.
+ * O body contém: { message: { data: "base64...", messageId: "..." }, subscription: "..." }
  * 
- * ⚠️  REGRA DE OURO: NUNCA lançar exceção não-tratada.
- *     Se a função "falha" (throw), o Pub/Sub re-entrega a mensagem → LOOP.
- *     Qualquer erro DEVE ser capturado, logado no Supabase, e a função retorna normalmente.
+ * ⚠️  REGRA DE OURO: NUNCA retornar 4xx/5xx por erro de negócio.
+ *     Se a função "falha" (non-2xx), o Pub/Sub re-entrega a mensagem → LOOP.
+ *     Qualquer erro DEVE ser capturado, logado no Supabase, e respondemos 204.
  */
-exports.processarEmail = async (cloudEvent) => {
+app.post('/', async (req, res) => {
     let payload;
 
     try {
-        // 1. Decodificar mensagem do Pub/Sub
-        const rawData = cloudEvent.data?.message?.data;
+        // 1. Decodificar mensagem do Pub/Sub push
+        const rawData = req.body?.message?.data;
         if (!rawData) {
-            console.error('[CONSUMER] Mensagem sem data. Ignorando.');
-            return; // ACK implícito — não reprocessar
+            console.error('[CONSUMER] Mensagem sem data. Ignorando.', JSON.stringify(req.body || {}).substring(0, 500));
+            return res.status(204).send();
         }
 
         payload = JSON.parse(Buffer.from(rawData, 'base64').toString('utf-8'));
         const { loteId, clienteId, clienteNome, razaoSocial, nomeContaAzul, cicloNome, destinatarios, assunto, nomePastaLote, mes, ano } = payload;
 
         console.log(`[CONSUMER] Processando: ${razaoSocial || clienteNome} (ID: ${clienteId})`);
+
+        // ═══════════════════════════════════════
+        // 1.5. CANCELAMENTO: Checar se o lote foi parado
+        // ═══════════════════════════════════════
+        if (loteId) {
+            const { data: loteCheck } = await supabaseAdmin
+                .from('faturamentos_lote')
+                .select('status')
+                .eq('id', loteId)
+                .single();
+
+            if (loteCheck?.status === 'CANCELADO') {
+                console.log(`[CONSUMER] ⛔ Lote ${loteId.slice(0, 8)} CANCELADO. Ignorando envio para ${razaoSocial || clienteNome}.`);
+                return res.status(204).send();
+            }
+        }
 
         // ═══════════════════════════════════════
         // 2. IDEMPOTÊNCIA: Checar se já processou
@@ -211,7 +233,7 @@ exports.processarEmail = async (cloudEvent) => {
 
         if (existingLog) {
             console.log(`[CONSUMER] ⏭️ Já processado (status: ${existingLog.status}). Pulando.`);
-            return; // ACK implícito — não reprocessar
+            return res.status(204).send();
         }
 
         // ═══════════════════════════════════════
@@ -287,10 +309,12 @@ exports.processarEmail = async (cloudEvent) => {
             status: 'Sucesso',
         });
 
+        return res.status(204).send();
+
     } catch (error) {
         // ═══════════════════════════════════════
         // ⚠️  CAPTURA TOTAL DE ERROS
-        //     NUNCA deixar a função "crashar" — isso causa re-entrega no Pub/Sub (LOOP)
+        //     NUNCA retornar non-2xx — isso causa re-entrega no Pub/Sub (LOOP)
         // ═══════════════════════════════════════
         console.error(`[CONSUMER] ❌ ERRO:`, error.message || error);
 
@@ -312,7 +336,20 @@ exports.processarEmail = async (cloudEvent) => {
             console.error(`[CONSUMER] Falha ao gravar log de erro:`, logError.message);
         }
 
-        // ⚠️  RETORNA NORMALMENTE — o Pub/Sub dá ACK e NÃO reenvia
-        return;
+        // ⚠️  RETORNA 204 — o Pub/Sub dá ACK e NÃO reenvia
+        return res.status(204).send();
     }
-};
+});
+
+// Health check endpoint
+app.get('/', (req, res) => {
+    res.status(200).send('OK');
+});
+
+// ═══════════════════════════════════════
+// START SERVER
+// ═══════════════════════════════════════
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => {
+    console.log(`[CONSUMER] 🚀 Servidor Express rodando na porta ${PORT}`);
+});

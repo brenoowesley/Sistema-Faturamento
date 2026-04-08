@@ -2,7 +2,7 @@
 
 import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CheckCircle, XCircle, Activity, Mail, Clock, Loader2, RefreshCw, Send, X, PlayCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Activity, Mail, Clock, Loader2, RefreshCw, Send, X, PlayCircle, StopCircle, Ban, AlertTriangle } from "lucide-react";
 
 /* ================================================================
    TYPES
@@ -69,6 +69,34 @@ export default function LogsEnvioPage({ params }: { params: Promise<{ loteId: st
     const [showContinuarModal, setShowContinuarModal] = useState(false);
     const [continuarAssunto, setContinuarAssunto] = useState("");
     const [pendentesLoading, setPendentesLoading] = useState(false);
+    const [stopping, setStopping] = useState(false);
+    const [cancelled, setCancelled] = useState(false);
+    const [showPararModal, setShowPararModal] = useState(false);
+
+    /* ── Parar Envio ── */
+    const handlePararEnvio = async () => {
+        setStopping(true);
+        setShowPararModal(false);
+        try {
+            const res = await fetch('/api/faturamento/parar-envio', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ loteId }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                setCancelled(true);
+                setIsPolling(false);
+                alert(`⛔ ${data.message}`);
+            } else {
+                alert(`❌ Erro: ${data.error}`);
+            }
+        } catch (err: any) {
+            alert(`❌ Erro de rede: ${err.message}`);
+        } finally {
+            setStopping(false);
+        }
+    };
 
     /* ── Reenviar Lote Completo ── */
     const handleConfirmarReenvio = async () => {
@@ -261,9 +289,30 @@ export default function LogsEnvioPage({ params }: { params: Promise<{ loteId: st
                             <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
                             Atualizar
                         </button>
+                        {/* Botão PARAR ENVIO — só aparece enquanto há fila e não foi cancelado */}
+                        {statusData.fila > 0 && !cancelled && (
+                            <button
+                                onClick={() => setShowPararModal(true)}
+                                disabled={stopping}
+                                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-red-700 to-red-600 text-white hover:from-red-600 hover:to-red-500 transition-all duration-200 shadow-lg shadow-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {stopping ? (
+                                    <Loader2 size={16} className="animate-spin" />
+                                ) : (
+                                    <StopCircle size={16} />
+                                )}
+                                {stopping ? 'Parando...' : 'Parar Envio'}
+                            </button>
+                        )}
+                        {cancelled && (
+                            <span className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-red-500/10 border border-red-500/30 text-red-400">
+                                <Ban size={16} />
+                                Envio Cancelado
+                            </span>
+                        )}
                         <button
                             onClick={handleAbrirContinuar}
-                            disabled={continuing || pendentesLoading}
+                            disabled={continuing || pendentesLoading || cancelled}
                             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-amber-600 to-amber-500 text-white hover:from-amber-500 hover:to-amber-400 transition-all duration-200 shadow-lg shadow-amber-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {continuing ? (
@@ -275,7 +324,7 @@ export default function LogsEnvioPage({ params }: { params: Promise<{ loteId: st
                         </button>
                         <button
                             onClick={() => { setReenvioAssunto(''); setShowReenvioModal(true); }}
-                            disabled={resending}
+                            disabled={resending || cancelled}
                             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-500 hover:to-blue-400 transition-all duration-200 shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {resending ? (
@@ -653,6 +702,69 @@ export default function LogsEnvioPage({ params }: { params: Promise<{ loteId: st
                             >
                                 <PlayCircle size={16} />
                                 Disparar {statusData.naoEnviados.length} pendentes
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ═══════════════ MODAL PARAR ENVIO ═══════════════ */}
+            {showPararModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-[var(--bg-card)] border border-red-500/30 rounded-2xl w-full max-w-lg mx-4 shadow-2xl shadow-red-500/10 animate-in zoom-in-95 duration-200">
+                        {/* Header */}
+                        <div className="flex items-center justify-between p-5 border-b border-red-500/20">
+                            <h3 className="text-lg font-bold text-red-400 flex items-center gap-2">
+                                <StopCircle size={20} />
+                                Parar Envio de E-mails
+                            </h3>
+                            <button
+                                onClick={() => setShowPararModal(false)}
+                                className="p-1.5 rounded-lg hover:bg-[var(--bg-card-hover)] text-[var(--fg-dim)] transition-colors"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        {/* Body */}
+                        <div className="p-5 space-y-4">
+                            <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-start gap-3">
+                                <AlertTriangle size={20} className="text-red-400 flex-shrink-0 mt-0.5" />
+                                <div className="text-sm text-red-300">
+                                    <p className="font-bold mb-1">Tem certeza que deseja parar o envio?</p>
+                                    <p className="text-red-300/80 text-xs leading-relaxed">
+                                        Os <strong>{statusData.sucesso}</strong> e-mails já enviados com sucesso <strong>não serão revertidos</strong>.
+                                        Os <strong>{statusData.fila}</strong> e-mails pendentes na fila <strong>não serão enviados</strong>.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="bg-[var(--bg)] rounded-xl p-3 border border-[var(--border)] text-center">
+                                    <span className="text-2xl font-black text-emerald-400">{statusData.sucesso}</span>
+                                    <p className="text-[10px] uppercase tracking-wider text-[var(--fg-dim)] font-bold mt-1">Já enviados</p>
+                                </div>
+                                <div className="bg-[var(--bg)] rounded-xl p-3 border border-red-500/20 text-center">
+                                    <span className="text-2xl font-black text-red-400">{statusData.fila}</span>
+                                    <p className="text-[10px] uppercase tracking-wider text-[var(--fg-dim)] font-bold mt-1">Serão cancelados</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="flex items-center gap-3 p-5 border-t border-[var(--border)]">
+                            <button
+                                onClick={() => setShowPararModal(false)}
+                                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold border border-[var(--border)] text-[var(--fg-dim)] hover:bg-[var(--bg-card-hover)] transition-all"
+                            >
+                                Voltar
+                            </button>
+                            <button
+                                onClick={handlePararEnvio}
+                                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-red-700 to-red-600 text-white hover:from-red-600 hover:to-red-500 transition-all shadow-lg shadow-red-500/20"
+                            >
+                                <StopCircle size={16} />
+                                Confirmar Cancelamento
                             </button>
                         </div>
                     </div>
