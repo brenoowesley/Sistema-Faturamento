@@ -263,6 +263,7 @@ export async function prepareEmailData(
         // 5. Registrar no Supabase (Log)
         await supabaseAdmin.from('logs_envio_email').insert({
             lote_id: loteId,
+            cliente_id: clienteId,
             cliente_nome: razaoSocial || clienteNome,
             destinatarios,
             assunto: mailOptions.subject,
@@ -275,6 +276,7 @@ export async function prepareEmailData(
         console.error(`[DEBUG] ERRO NO DISPARO REAL:`, error);
         await supabaseAdmin.from('logs_envio_email').insert({
             lote_id: loteId,
+            cliente_id: clienteId,
             cliente_nome: razaoSocial || clienteNome,
             destinatarios,
             assunto: mailOptions.subject,

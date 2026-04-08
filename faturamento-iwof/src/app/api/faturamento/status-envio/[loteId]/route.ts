@@ -45,7 +45,7 @@ export async function GET(
         // 2. Buscar logs já processados
         const { data: logs, error } = await supabaseAdmin
             .from('logs_envio_email')
-            .select('cliente_nome, destinatarios, status, mensagem_erro, created_at')
+            .select('cliente_id, cliente_nome, destinatarios, status, mensagem_erro, created_at')
             .eq('lote_id', loteId)
             .order('created_at', { ascending: false });
 
@@ -57,12 +57,17 @@ export async function GET(
         const logsErro = (logs || []).filter(log => log.status === 'Erro');
 
         // 3. Calcular quem ainda está na fila (não tem log de sucesso nem erro)
+        //    Prioridade: compara por cliente_id (UUID, confiável).
+        //    Fallback: compara por nome para logs antigos sem cliente_id.
+        const idsProcessados = new Set(
+            (logs || []).filter(l => l.cliente_id).map(l => l.cliente_id)
+        );
         const nomesProcessados = new Set(
-            (logs || []).map(l => l.cliente_nome?.trim().toLowerCase())
+            (logs || []).filter(l => !l.cliente_id).map(l => l.cliente_nome?.trim().toLowerCase())
         );
 
         const logsFila = todosDestinatarios.filter(
-            (d: any) => !nomesProcessados.has(d.cliente_nome?.trim().toLowerCase())
+            (d: any) => !idsProcessados.has(d.cliente_id) && !nomesProcessados.has(d.cliente_nome?.trim().toLowerCase())
         );
 
         return NextResponse.json({

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CheckCircle, XCircle, Activity, Mail, Clock, Loader2 } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Activity, Mail, Clock, Loader2, RefreshCw, Send, X } from "lucide-react";
 
 /* ================================================================
    TYPES
@@ -59,6 +59,65 @@ export default function LogsEnvioPage({ params }: { params: Promise<{ loteId: st
     
     const [loading, setLoading] = useState(true);
     const [isPolling, setIsPolling] = useState(true);
+    const [resending, setResending] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
+    const [showReenvioModal, setShowReenvioModal] = useState(false);
+    const [reenvioAssunto, setReenvioAssunto] = useState("");
+
+    /* ── Reenviar Lote Completo ── */
+    const handleConfirmarReenvio = async () => {
+        setResending(true);
+        setShowReenvioModal(false);
+        try {
+            const res = await fetch('/api/faturamento/disparar-emails', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    loteId,
+                    ...(reenvioAssunto.trim() ? { assunto: reenvioAssunto.trim() } : {})
+                }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                alert(`✅ ${data.message}`);
+                setIsPolling(true);
+            } else {
+                alert(`❌ Erro: ${data.error}`);
+            }
+        } catch (err: any) {
+            alert(`❌ Erro de rede: ${err.message}`);
+        } finally {
+            setResending(false);
+        }
+    };
+
+    /* ── Refresh Manual ── */
+    const handleRefresh = async () => {
+        setRefreshing(true);
+        try {
+            const res = await fetch(`/api/faturamento/status-envio/${loteId}`);
+            if (!res.ok) throw new Error("Erro na rede");
+            const data = await res.json();
+            if (data.success) {
+                setStatusData({
+                    success: true,
+                    totalEsperado: data.totalEsperado,
+                    total: data.total,
+                    sucesso: data.sucesso,
+                    erros: data.erros,
+                    fila: data.fila,
+                    logsFila: data.logsFila || [],
+                    logsSucesso: data.logsSucesso || [],
+                    logsErro: data.logsErro || []
+                });
+                if (data.fila === 0 && data.total > 0) setIsPolling(false);
+            }
+        } catch (err) {
+            console.error("Erro ao atualizar:", err);
+        } finally {
+            setRefreshing(false);
+        }
+    };
 
     useEffect(() => {
         if (!loteId) return;
@@ -136,6 +195,29 @@ export default function LogsEnvioPage({ params }: { params: Promise<{ loteId: st
                                 )}
                             </p>
                         </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={handleRefresh}
+                            disabled={refreshing}
+                            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border border-[var(--border)] text-[var(--fg-dim)] hover:bg-[var(--bg-card-hover)] hover:text-[var(--fg)] transition-all duration-200 disabled:opacity-50"
+                            title="Atualizar status"
+                        >
+                            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+                            Atualizar
+                        </button>
+                        <button
+                            onClick={() => { setReenvioAssunto(''); setShowReenvioModal(true); }}
+                            disabled={resending}
+                            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-500 hover:to-blue-400 transition-all duration-200 shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {resending ? (
+                                <Loader2 size={16} className="animate-spin" />
+                            ) : (
+                                <Send size={16} />
+                            )}
+                            {resending ? 'Reenviando...' : 'Reenviar Lote'}
+                        </button>
                     </div>
                 </div>
 
@@ -336,6 +418,70 @@ export default function LogsEnvioPage({ params }: { params: Promise<{ loteId: st
                 </div>
 
             </div>
+
+            {/* ═══════════════ MODAL REENVIO ═══════════════ */}
+            {showReenvioModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl w-full max-w-lg mx-4 shadow-2xl shadow-black/40 animate-in zoom-in-95 duration-200">
+                        {/* Header */}
+                        <div className="flex items-center justify-between p-5 border-b border-[var(--border)]">
+                            <h3 className="text-lg font-bold text-[var(--fg)] flex items-center gap-2">
+                                <Send size={18} className="text-blue-400" />
+                                Reenviar E-mails do Lote
+                            </h3>
+                            <button
+                                onClick={() => setShowReenvioModal(false)}
+                                className="p-1.5 rounded-lg hover:bg-[var(--bg-card-hover)] text-[var(--fg-dim)] transition-colors"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        {/* Body */}
+                        <div className="p-5 space-y-4">
+                            <div>
+                                <label className="block text-xs font-semibold text-[var(--fg-muted)] uppercase tracking-wider mb-2">
+                                    Assunto do E-mail (opcional)
+                                </label>
+                                <input
+                                    type="text"
+                                    value={reenvioAssunto}
+                                    onChange={(e) => setReenvioAssunto(e.target.value)}
+                                    placeholder="Ex: Faturamento iWof {Período faturado} | {Loja}"
+                                    className="w-full px-4 py-3 rounded-xl bg-[var(--bg)] border border-[var(--border)] text-[var(--fg)] text-sm placeholder:text-[var(--fg-dim)]/50 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/40 transition-all"
+                                />
+                                <p className="text-[11px] text-[var(--fg-dim)] mt-2">
+                                    Deixe vazio para usar o assunto padrão. Variáveis disponíveis: <code className="text-blue-400/80 bg-blue-400/5 px-1 rounded">{'{Loja}'}</code> <code className="text-blue-400/80 bg-blue-400/5 px-1 rounded">{'{Período faturado}'}</code> <code className="text-blue-400/80 bg-blue-400/5 px-1 rounded">{'{Ciclo}'}</code>
+                                </p>
+                            </div>
+
+                            <div className="bg-blue-500/5 border border-blue-500/10 rounded-xl p-3">
+                                <p className="text-xs text-blue-300/80">
+                                    <strong>ℹ️ Nota:</strong> Todos os demais dados (destinatários, anexos, template) serão mantidos conforme o envio original.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="flex items-center gap-3 p-5 border-t border-[var(--border)]">
+                            <button
+                                onClick={() => setShowReenvioModal(false)}
+                                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold border border-[var(--border)] text-[var(--fg-dim)] hover:bg-[var(--bg-card-hover)] transition-all"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleConfirmarReenvio}
+                                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-500 hover:to-blue-400 transition-all shadow-lg shadow-blue-500/20"
+                            >
+                                <Send size={16} />
+                                Confirmar Reenvio
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
         </div>
     );
 }
