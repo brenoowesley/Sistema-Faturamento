@@ -17,8 +17,17 @@ export async function POST(request: Request) {
                 private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
             },
         });
-        const { loteId, assunto } = await request.json();
+        const { loteId, assunto, continuar } = await request.json();
         if (!loteId) throw new Error("ID do Lote não fornecido.");
+
+        // Se "Continuar Envio": limpar logs de Erro da última tentativa para re-processá-los
+        if (continuar) {
+            await supabaseAdmin
+                .from('logs_envio_email')
+                .delete()
+                .eq('lote_id', loteId)
+                .eq('status', 'Erro');
+        }
 
         // 1. Buscar o lote (para nome_pasta e data_competencia)
         const { data: lote, error: loteErr } = await supabaseAdmin
@@ -41,6 +50,18 @@ export async function POST(request: Request) {
 
         if (consErr || !consolidados) throw new Error(`Erro ao buscar consolidados: ${consErr?.message}`);
 
+        // 3. Buscar logs já processados para idempotência (não republicar quem já recebeu)
+        const { data: logsExistentes } = await supabaseAdmin
+            .from('logs_envio_email')
+            .select('cliente_id, status')
+            .eq('lote_id', loteId);
+
+        const clientesJaProcessados = new Set(
+            (logsExistentes || [])
+                .filter(l => l.cliente_id)
+                .map(l => l.cliente_id)
+        );
+
         const topic = pubsub.topic('topic-disparo-emails');
         const publishPromises: Promise<string>[] = [];
         const now = new Date();
@@ -48,44 +69,53 @@ export async function POST(request: Request) {
         const ano = now.getFullYear().toString();
 
         // Pega a competência do lote (Ex: de "2026-03-31" vira "03/2026")
-        // Se por algum motivo não houver data, usa o mês/ano atual
         const periodoFaturado = lote.data_competencia
             ? `${lote.data_competencia.split('-')[1]}/${lote.data_competencia.split('-')[0]}`
             : `${mes}/${ano}`;
 
-        // 3. Loop de publicação (Um E-mail por Unidade/Loja)
+        let skippedCount = 0;
+        let alreadySentCount = 0;
+
+        // 4. Loop de publicação (Um E-mail por Unidade/Loja)
         for (const item of consolidados) {
             const cliente: any = Array.isArray(item.clientes) ? item.clientes[0] : item.clientes;
+            const nomeParaLog = cliente?.nome_conta_azul || cliente?.razao_social || cliente?.nome || '—';
 
-            if (!cliente || !cliente.emails_faturamento) continue;
+            // Idempotência: pular quem já tem log (sucesso ou erro)
+            if (clientesJaProcessados.has(item.cliente_id)) {
+                alreadySentCount++;
+                continue;
+            }
+
+            // Sem e-mail configurado → registrar como falha imediatamente (não vai pro Pub/Sub)
+            if (!cliente || !cliente.emails_faturamento || cliente.emails_faturamento.trim() === '') {
+                await supabaseAdmin.from('logs_envio_email').insert({
+                    lote_id: loteId,
+                    cliente_id: item.cliente_id,
+                    cliente_nome: nomeParaLog,
+                    destinatarios: '',
+                    assunto: '',
+                    status: 'Erro',
+                    mensagem_erro: 'Campo emails_faturamento vazio — cadastro sem e-mail configurado.'
+                });
+                skippedCount++;
+                continue;
+            }
 
             const destinatarios = cliente.emails_faturamento;
             const cicloNome = cliente.ciclos_faturamento?.nome || "Geral";
             const clienteNome = cliente.nome || "";
             const razaoSocial = cliente.razao_social || "";
             const nomeContaAzul = cliente.nome_conta_azul || "";
-
-            // 🎯 A MÁGICA 1: Define o nome exato da loja
             const nomeDaLoja = nomeContaAzul || razaoSocial || clienteNome;
 
-            // 🚀 A MÁGICA 2: Replace das Variáveis no Assunto
-            // Se o usuário não mandou nada do frontend, assume o seu padrão oficial
+            // Montar assunto com variáveis
             const assuntoBase = assunto || "Faturamento iWof {Período faturado} | {Loja}";
-
-            // Aplica as substituições (o "gi" faz buscar ignorando maiúsculas/minúsculas)
             const assuntoFinal = assuntoBase
                 .replace(/{Loja}/gi, nomeDaLoja)
                 .replace(/{Período faturado}/gi, periodoFaturado)
-                .replace(/{Periodo faturado}/gi, periodoFaturado) // Fallback sem acento
-                .replace(/{Ciclo}/gi, cicloNome); // Adicionei essa caso queira colocar "{Ciclo}" no front!
-
-            // Gerar HTML via template usando o NOME DA LOJA para saudação
-            const htmlBody = getBillingTemplate({
-                clienteNome: nomeDaLoja,
-                cicloNome,
-                mes,
-                ano
-            });
+                .replace(/{Periodo faturado}/gi, periodoFaturado)
+                .replace(/{Ciclo}/gi, cicloNome);
 
             const payload = {
                 loteId,
@@ -95,8 +125,7 @@ export async function POST(request: Request) {
                 nomeContaAzul,
                 cicloNome,
                 destinatarios,
-                assunto: assuntoFinal, // Passa o assunto modificado com as tags substituídas!
-                htmlBody,
+                assunto: assuntoFinal,
                 nomePastaLote: lote.nome_pasta,
                 mes,
                 ano
@@ -106,11 +135,10 @@ export async function POST(request: Request) {
             publishPromises.push(topic.publishMessage({ data: dataBuffer }));
         }
 
-        // 4. Disparo simultâneo para o Pub/Sub
+        // 5. Disparo simultâneo para o Pub/Sub
         if (publishPromises.length > 0) {
             await Promise.all(publishPromises);
 
-            // 5. Atualizar status do lote
             await supabaseAdmin
                 .from('faturamentos_lote')
                 .update({ status: 'ENVIANDO' })
@@ -119,11 +147,11 @@ export async function POST(request: Request) {
 
         return NextResponse.json({
             success: true,
-            message: `Disparo de ${publishPromises.length} e-mails (separados por unidade) iniciado via GCP Pub/Sub!`
+            message: `Disparo de ${publishPromises.length} e-mails iniciado via GCP!${skippedCount > 0 ? ` (${skippedCount} sem e-mail registrados como falha)` : ''}${alreadySentCount > 0 ? ` (${alreadySentCount} já processados anteriormente)` : ''}`
         });
 
     } catch (error: any) {
-        console.error("🚨 Erro na API de Pub/Sub Producer:", error);
+        console.error("🚨 Erro na API de Disparo de E-mails:", error);
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 }

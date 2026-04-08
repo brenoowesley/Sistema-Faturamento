@@ -2,7 +2,7 @@
 
 import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CheckCircle, XCircle, Activity, Mail, Clock, Loader2, RefreshCw, Send, X } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Activity, Mail, Clock, Loader2, RefreshCw, Send, X, PlayCircle } from "lucide-react";
 
 /* ================================================================
    TYPES
@@ -32,6 +32,7 @@ interface StatusResponse {
     logsFila: FilaItem[];
     logsSucesso: LogEnvio[];
     logsErro: LogEnvio[];
+    naoEnviados: FilaItem[];
 }
 
 /* ================================================================
@@ -54,7 +55,8 @@ export default function LogsEnvioPage({ params }: { params: Promise<{ loteId: st
         fila: 0,
         logsFila: [],
         logsSucesso: [],
-        logsErro: []
+        logsErro: [],
+        naoEnviados: []
     });
     
     const [loading, setLoading] = useState(true);
@@ -63,6 +65,10 @@ export default function LogsEnvioPage({ params }: { params: Promise<{ loteId: st
     const [refreshing, setRefreshing] = useState(false);
     const [showReenvioModal, setShowReenvioModal] = useState(false);
     const [reenvioAssunto, setReenvioAssunto] = useState("");
+    const [continuing, setContinuing] = useState(false);
+    const [showContinuarModal, setShowContinuarModal] = useState(false);
+    const [continuarAssunto, setContinuarAssunto] = useState("");
+    const [pendentesLoading, setPendentesLoading] = useState(false);
 
     /* ── Reenviar Lote Completo ── */
     const handleConfirmarReenvio = async () => {
@@ -91,6 +97,53 @@ export default function LogsEnvioPage({ params }: { params: Promise<{ loteId: st
         }
     };
 
+    /* ── Continuar Envio: Abrir modal com lista de pendentes ── */
+    const handleAbrirContinuar = async () => {
+        setContinuarAssunto('');
+        setPendentesLoading(true);
+        setShowContinuarModal(true);
+        try {
+            const res = await fetch(`/api/faturamento/status-envio/${loteId}`);
+            if (!res.ok) throw new Error('Erro na rede');
+            const data = await res.json();
+            if (data.success) {
+                setStatusData(prev => ({ ...prev, naoEnviados: data.naoEnviados || [] }));
+            }
+        } catch (err) {
+            console.error('Erro ao buscar pendentes:', err);
+        } finally {
+            setPendentesLoading(false);
+        }
+    };
+
+    /* ── Continuar Envio: Confirmar disparo ── */
+    const handleConfirmarContinuar = async () => {
+        setContinuing(true);
+        setShowContinuarModal(false);
+        try {
+            const res = await fetch('/api/faturamento/disparar-emails', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    loteId,
+                    continuar: true,
+                    ...(continuarAssunto.trim() ? { assunto: continuarAssunto.trim() } : {})
+                }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                alert(`✅ ${data.message}`);
+                setIsPolling(true);
+            } else {
+                alert(`❌ Erro: ${data.error}`);
+            }
+        } catch (err: any) {
+            alert(`❌ Erro de rede: ${err.message}`);
+        } finally {
+            setContinuing(false);
+        }
+    };
+
     /* ── Refresh Manual ── */
     const handleRefresh = async () => {
         setRefreshing(true);
@@ -108,7 +161,8 @@ export default function LogsEnvioPage({ params }: { params: Promise<{ loteId: st
                     fila: data.fila,
                     logsFila: data.logsFila || [],
                     logsSucesso: data.logsSucesso || [],
-                    logsErro: data.logsErro || []
+                    logsErro: data.logsErro || [],
+                    naoEnviados: data.naoEnviados || []
                 });
                 if (data.fila === 0 && data.total > 0) setIsPolling(false);
             }
@@ -138,7 +192,8 @@ export default function LogsEnvioPage({ params }: { params: Promise<{ loteId: st
                         fila: data.fila,
                         logsFila: data.logsFila || [],
                         logsSucesso: data.logsSucesso || [],
-                        logsErro: data.logsErro || []
+                        logsErro: data.logsErro || [],
+                        naoEnviados: data.naoEnviados || []
                     });
 
                     // Se fila zerou, parar polling
@@ -206,6 +261,20 @@ export default function LogsEnvioPage({ params }: { params: Promise<{ loteId: st
                             <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
                             Atualizar
                         </button>
+                        {statusData.sucesso < statusData.totalEsperado && (
+                            <button
+                                onClick={handleAbrirContinuar}
+                                disabled={continuing}
+                                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-amber-600 to-amber-500 text-white hover:from-amber-500 hover:to-amber-400 transition-all duration-200 shadow-lg shadow-amber-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {continuing ? (
+                                    <Loader2 size={16} className="animate-spin" />
+                                ) : (
+                                    <PlayCircle size={16} />
+                                )}
+                                {continuing ? 'Continuando...' : 'Continuar Envio'}
+                            </button>
+                        )}
                         <button
                             onClick={() => { setReenvioAssunto(''); setShowReenvioModal(true); }}
                             disabled={resending}
@@ -476,6 +545,116 @@ export default function LogsEnvioPage({ params }: { params: Promise<{ loteId: st
                             >
                                 <Send size={16} />
                                 Confirmar Reenvio
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* ═══════════════ MODAL CONTINUAR ENVIO ═══════════════ */}
+            {showContinuarModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl w-full max-w-2xl mx-4 shadow-2xl shadow-black/40 animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
+                        {/* Header */}
+                        <div className="flex items-center justify-between p-5 border-b border-[var(--border)] flex-shrink-0">
+                            <h3 className="text-lg font-bold text-[var(--fg)] flex items-center gap-2">
+                                <PlayCircle size={18} className="text-amber-400" />
+                                Continuar Envio
+                            </h3>
+                            <div className="flex items-center gap-3">
+                                <span className="text-[10px] font-bold text-amber-400 bg-amber-400/10 px-2.5 py-1 rounded-full uppercase tracking-wider">
+                                    {statusData.naoEnviados.length} pendentes
+                                </span>
+                                <button
+                                    onClick={() => setShowContinuarModal(false)}
+                                    className="p-1.5 rounded-lg hover:bg-[var(--bg-card-hover)] text-[var(--fg-dim)] transition-colors"
+                                >
+                                    <X size={18} />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Body (scrollable) */}
+                        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                            {/* Lista de empresas não enviadas */}
+                            <div>
+                                <label className="block text-xs font-semibold text-[var(--fg-muted)] uppercase tracking-wider mb-3">
+                                    Empresas que não receberam o e-mail
+                                </label>
+                                {pendentesLoading ? (
+                                    <div className="flex items-center justify-center py-8 text-[var(--fg-dim)]">
+                                        <Loader2 size={24} className="animate-spin mr-2" />
+                                        <span className="text-sm">Buscando pendentes...</span>
+                                    </div>
+                                ) : statusData.naoEnviados.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center py-8 text-[var(--fg-dim)] opacity-50">
+                                        <CheckCircle size={32} />
+                                        <p className="text-sm mt-2 font-semibold">Todos os e-mails foram enviados!</p>
+                                    </div>
+                                ) : (
+                                    <div className="bg-[var(--bg)] rounded-xl border border-[var(--border)] max-h-[280px] overflow-y-auto">
+                                        <ul className="divide-y divide-[var(--border)]">
+                                            {statusData.naoEnviados.map((item, i) => (
+                                                <li key={item.cliente_id || i} className="px-4 py-3 flex items-center gap-3 hover:bg-[var(--bg-card-hover)] transition-colors">
+                                                    <div className="p-1.5 bg-amber-500/10 rounded-md flex-shrink-0">
+                                                        <Mail size={12} className="text-amber-400" />
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <span className="font-semibold text-sm text-[var(--fg)] block truncate">
+                                                            {item.cliente_nome}
+                                                        </span>
+                                                        <span className="text-[11px] text-[var(--fg-dim)] font-mono block truncate mt-0.5">
+                                                            {item.emails || "Sem e-mail configurado"}
+                                                        </span>
+                                                    </div>
+                                                    <span className="text-[9px] font-bold text-amber-400/70 bg-amber-400/5 px-2 py-0.5 rounded-full uppercase flex-shrink-0">
+                                                        Pendente
+                                                    </span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Assunto */}
+                            <div>
+                                <label className="block text-xs font-semibold text-[var(--fg-muted)] uppercase tracking-wider mb-2">
+                                    Assunto do E-mail (opcional)
+                                </label>
+                                <input
+                                    type="text"
+                                    value={continuarAssunto}
+                                    onChange={(e) => setContinuarAssunto(e.target.value)}
+                                    placeholder="Ex: Faturamento iWof {Período faturado} | {Loja}"
+                                    className="w-full px-4 py-3 rounded-xl bg-[var(--bg)] border border-[var(--border)] text-[var(--fg)] text-sm placeholder:text-[var(--fg-dim)]/50 focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500/40 transition-all"
+                                />
+                                <p className="text-[11px] text-[var(--fg-dim)] mt-2">
+                                    Deixe vazio para usar o assunto padrão. Variáveis: <code className="text-amber-400/80 bg-amber-400/5 px-1 rounded">{'{Loja}'}</code> <code className="text-amber-400/80 bg-amber-400/5 px-1 rounded">{'{Período faturado}'}</code> <code className="text-amber-400/80 bg-amber-400/5 px-1 rounded">{'{Ciclo}'}</code>
+                                </p>
+                            </div>
+
+                            <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-3">
+                                <p className="text-xs text-amber-300/80">
+                                    <strong>⚡ Como funciona:</strong> Logs de erro anteriores serão limpos e somente os <strong>{statusData.naoEnviados.length}</strong> clientes listados acima serão processados. Os <strong>{statusData.sucesso}</strong> já enviados com sucesso serão preservados.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="flex items-center gap-3 p-5 border-t border-[var(--border)] flex-shrink-0">
+                            <button
+                                onClick={() => setShowContinuarModal(false)}
+                                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold border border-[var(--border)] text-[var(--fg-dim)] hover:bg-[var(--bg-card-hover)] transition-all"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleConfirmarContinuar}
+                                disabled={statusData.naoEnviados.length === 0 || pendentesLoading}
+                                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-amber-600 to-amber-500 text-white hover:from-amber-500 hover:to-amber-400 transition-all shadow-lg shadow-amber-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <PlayCircle size={16} />
+                                Disparar {statusData.naoEnviados.length} pendentes
                             </button>
                         </div>
                     </div>

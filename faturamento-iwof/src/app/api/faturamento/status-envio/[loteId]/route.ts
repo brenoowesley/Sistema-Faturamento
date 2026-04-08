@@ -70,6 +70,19 @@ export async function GET(
             (d: any) => !idsProcessados.has(d.cliente_id) && !nomesProcessados.has(d.cliente_nome?.trim().toLowerCase())
         );
 
+        // 4. Calcular "Não Enviados" = todos que NÃO têm log de Sucesso
+        //    (inclui fila + erros — para o "Continuar Envio")
+        const idsSucesso = new Set(
+            logsSucesso.filter(l => l.cliente_id).map(l => l.cliente_id)
+        );
+        const nomesSucesso = new Set(
+            logsSucesso.filter(l => !l.cliente_id).map(l => l.cliente_nome?.trim().toLowerCase())
+        );
+
+        const naoEnviados = todosDestinatarios.filter(
+            (d: any) => !idsSucesso.has(d.cliente_id) && !nomesSucesso.has(d.cliente_nome?.trim().toLowerCase())
+        );
+
         return NextResponse.json({
             success: true,
             totalEsperado: todosDestinatarios.length,
@@ -79,7 +92,8 @@ export async function GET(
             fila: logsFila.length,
             logsFila,
             logsSucesso,
-            logsErro
+            logsErro,
+            naoEnviados
         });
 
     } catch (error: any) {
