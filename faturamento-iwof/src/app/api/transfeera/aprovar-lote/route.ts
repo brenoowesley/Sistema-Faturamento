@@ -34,15 +34,20 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Lote não encontrado." }, { status: 404 });
         }
 
+        console.log(`[AprovarLote] 🔍 Buscando itens APROVADOS do lote ${lote_id} | user: ${user.id}`);
         const { data: items, error: itemsError } = await supabase
             .from("itens_saque")
             .select("*")
             .eq("lote_id", lote_id)
-            .eq("status_item", "APROVADO");
+            .eq("status_item", "APROVADO")
+            .range(0, 9999); // Evita truncamento padrão de 1.000 linhas do PostgREST
 
         if (itemsError) {
+            console.error(`[AprovarLote] ❌ Erro ao buscar itens | lote: ${lote_id} | user: ${user.id} | Mensagem: ${itemsError.message}`, itemsError);
             return NextResponse.json({ error: "Erro ao buscar itens do lote." }, { status: 500 });
         }
+
+        console.log(`[AprovarLote] ✅ ${items?.length ?? 0} itens APROVADOS encontrados para lote ${lote_id} | user: ${user.id}`);
 
         const itensValidos = (items || []).filter((item: any) => Number(item.valor) > 0);
 

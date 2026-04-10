@@ -347,9 +347,15 @@ app.get('/', (req, res) => {
 });
 
 // ═══════════════════════════════════════
-// START SERVER
+// EXPORT & START SERVER
 // ═══════════════════════════════════════
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-    console.log(`[CONSUMER] 🚀 Servidor Express rodando na porta ${PORT}`);
-});
+// Para Cloud Functions Gen2 (que espera a função processarEmail)
+exports.processarEmail = app;
+
+// Para rodar localmente ou via docker direto (Cloud Run custom)
+if (require.main === module) {
+    const PORT = process.env.PORT || 8080;
+    app.listen(PORT, () => {
+        console.log(`[CONSUMER] 🚀 Servidor Express rodando na porta ${PORT}`);
+    });
+}

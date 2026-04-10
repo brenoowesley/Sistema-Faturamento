@@ -8,6 +8,6 @@ DROP CONSTRAINT IF EXISTS faturamentos_lote_status_check;
 
 ALTER TABLE public.faturamentos_lote
 ADD CONSTRAINT faturamentos_lote_status_check 
-CHECK (status IN ('PENDENTE', 'CONSOLIDADO', 'FISCAL', 'PROCESSING', 'ENVIANDO', 'CANCELADO'));
+CHECK (status IN ('PENDENTE', 'RASCUNHO', 'CONSOLIDADO', 'FISCAL', 'PROCESSING', 'ENVIANDO', 'FECHADO', 'CANCELADO'));
 
 COMMENT ON COLUMN public.faturamentos_lote.status IS 'Status do lote: PENDENTE, CONSOLIDADO, FISCAL, PROCESSING (Cálculo), ENVIANDO (Disparo E-mails), CANCELADO (Envio interrompido)';

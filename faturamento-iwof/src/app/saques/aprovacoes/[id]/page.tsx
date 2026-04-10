@@ -118,11 +118,18 @@ export default function LoteDetalhePage() {
 
             if (loteData) setLote(loteData as LoteDetalhe);
 
-            const { data: itensData } = await supabase
+            const { data: itensData, error: itensError } = await supabase
                 .from("itens_saque")
                 .select("*")
                 .eq("lote_id", id)
-                .order("nome_usuario", { ascending: true });
+                .order("nome_usuario", { ascending: true })
+                .range(0, 9999); // Evita truncamento padrão de 1.000 linhas do PostgREST
+
+            if (itensError) {
+                console.error(`[Aprovacoes] ❌ Erro ao buscar itens do lote ${id} | user: ${user?.id} | Mensagem: ${itensError.message}`, itensError);
+            } else {
+                console.log(`[Aprovacoes] ✅ ${itensData?.length ?? 0} itens carregados para lote ${id} | user: ${user?.id}`);
+            }
 
             if (itensData) setItems(itensData as ItemSaque[]);
         } catch (err) {

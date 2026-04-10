@@ -886,8 +886,20 @@ function LotePanel({
                 motivo_bloqueio: i.motivo_bloqueio ?? null,
                 chave_corrigida_automaticamente: i.chave_corrigida_automaticamente,
             }));
-            const { error: itemsErr } = await supabase.from("itens_saque").insert(itens);
-            if (itemsErr) throw itemsErr;
+            // ── INSERT em chunks de 500 (evita limite de payload do PostgREST) ──
+            const CHUNK_SIZE = 500;
+            console.log(`[GestaoSaques] 📦 Iniciando insert de ${itens.length} itens para lote "${lote.nome}" (lote_id: ${loteDb.id}) em chunks de ${CHUNK_SIZE}`);
+            for (let i = 0; i < itens.length; i += CHUNK_SIZE) {
+                const chunk = itens.slice(i, i + CHUNK_SIZE);
+                console.log(`[GestaoSaques] ⬆️  Chunk ${Math.floor(i / CHUNK_SIZE) + 1}/${Math.ceil(itens.length / CHUNK_SIZE)} — enviando ${chunk.length} itens (índices ${i}–${i + chunk.length - 1})`);
+                const { error: itemsErr } = await supabase.from("itens_saque").insert(chunk);
+                if (itemsErr) {
+                    console.error(`[GestaoSaques] ❌ Erro no chunk ${Math.floor(i / CHUNK_SIZE) + 1} — lote: "${lote.nome}" (lote_id: ${loteDb.id}) | Mensagem: ${itemsErr.message} | Detalhe:`, itemsErr);
+                    throw itemsErr;
+                }
+                console.log(`[GestaoSaques] ✅ Chunk ${Math.floor(i / CHUNK_SIZE) + 1} inserido com sucesso.`);
+            }
+            console.log(`[GestaoSaques] 🎉 Todos os ${itens.length} itens inseridos com sucesso no lote "${lote.nome}".`);
 
             // Sinaliza sucesso isolado para o lote atual sem afetar os demais
             onLoteSent(lote.tipo_saque);
