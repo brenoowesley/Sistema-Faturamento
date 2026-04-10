@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -94,6 +94,8 @@ export default function LoteDetalhePage() {
     const [actionMsg, setActionMsg] = useState<{ type: "success" | "error" | "warning"; text: string } | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editForm, setEditForm] = useState<Partial<ItemSaque>>({});
+    // Ref-based guard para evitar duplo envio antes do re-render do state
+    const isApprovingRef = useRef(false);
 
     const loadData = useCallback(async () => {
         setLoading(true);
@@ -118,20 +120,43 @@ export default function LoteDetalhePage() {
 
             if (loteData) setLote(loteData as LoteDetalhe);
 
-            const { data: itensData, error: itensError } = await supabase
-                .from("itens_saque")
-                .select("*")
-                .eq("lote_id", id)
-                .order("nome_usuario", { ascending: true })
-                .range(0, 9999); // Evita truncamento padrão de 1.000 linhas do PostgREST
+            // Paginação para superar o limite de 1.000 linhas do PostgREST
+            const PAGE_SIZE = 1000;
+            let page = 0;
+            let allItems: ItemSaque[] = [];
+            let fetchError = null;
 
-            if (itensError) {
-                console.error(`[Aprovacoes] ❌ Erro ao buscar itens do lote ${id} | user: ${user?.id} | Mensagem: ${itensError.message}`, itensError);
-            } else {
-                console.log(`[Aprovacoes] ✅ ${itensData?.length ?? 0} itens carregados para lote ${id} | user: ${user?.id}`);
+            while (true) {
+                const from = page * PAGE_SIZE;
+                const to = from + PAGE_SIZE - 1;
+                const { data: pageData, error: pageError } = await supabase
+                    .from("itens_saque")
+                    .select("*")
+                    .eq("lote_id", id)
+                    .order("nome_usuario", { ascending: true })
+                    .range(from, to);
+
+                if (pageError) {
+                    fetchError = pageError;
+                    break;
+                }
+
+                if (pageData && pageData.length > 0) {
+                    allItems = allItems.concat(pageData as ItemSaque[]);
+                }
+
+                // Se retornou menos que PAGE_SIZE, chegamos ao fim
+                if (!pageData || pageData.length < PAGE_SIZE) break;
+                page++;
             }
 
-            if (itensData) setItems(itensData as ItemSaque[]);
+            if (fetchError) {
+                console.error(`[Aprovacoes] ❌ Erro ao buscar itens do lote ${id} | user: ${user?.id} | Mensagem: ${fetchError.message}`, fetchError);
+            } else {
+                console.log(`[Aprovacoes] ✅ ${allItems.length} itens carregados para lote ${id} | user: ${user?.id} (${page + 1} página(s))`);
+            }
+
+            if (!fetchError) setItems(allItems);
         } catch (err) {
             console.error("Erro ao carregar detalhe do lote:", err);
         } finally {
@@ -187,9 +212,14 @@ export default function LoteDetalhePage() {
     }
 
     async function handleApprove() {
+        // Guarda dupla: ref (síncrona) + state (assíncrona) para evitar envios múltiplos
+        if (isApprovingRef.current || processingAction) return;
         if (!confirm("Tem certeza que deseja aprovar este lote e enviar para a Transfeera?\n\nModelo: Tudo ou Nada — se houver qualquer erro, o lote inteiro será rejeitado.")) return;
+
+        isApprovingRef.current = true;
         setProcessingAction(true);
         setActionMsg(null);
+        console.log(`[AprovarLote] 🚀 Enviando lote ${id} para aprovação...`);
         try {
             const res = await fetch("/api/transfeera/aprovar-lote", {
                 method: "POST",
@@ -211,6 +241,7 @@ export default function LoteDetalhePage() {
             setActionMsg({ type: "error", text: err.message });
         } finally {
             setProcessingAction(false);
+            isApprovingRef.current = false;
         }
     }
 
