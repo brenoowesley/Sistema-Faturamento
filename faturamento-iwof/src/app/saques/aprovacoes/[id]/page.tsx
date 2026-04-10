@@ -27,6 +27,16 @@ export const dynamic = "force-dynamic";
 type PixType = "EMAIL" | "CPF" | "CNPJ" | "CHAVE_ALEATORIA" | "TELEFONE";
 const PIX_TYPE_OPTIONS: PixType[] = ["EMAIL", "CPF", "CNPJ", "CHAVE_ALEATORIA", "TELEFONE"];
 
+interface ValidationError {
+    id: string;
+    nome_usuario: string;
+    cpf_favorecido: string;
+    chave_pix: string;
+    tipo_pix: string;
+    valor: number;
+    motivo: string;
+}
+
 interface ItemSaque {
     id: string;
     nome_usuario: string;
@@ -94,6 +104,7 @@ export default function LoteDetalhePage() {
     const [actionMsg, setActionMsg] = useState<{ type: "success" | "error" | "warning"; text: string } | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editForm, setEditForm] = useState<Partial<ItemSaque>>({});
+    const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
     // Ref-based guard para evitar duplo envio antes do re-render do state
     const isApprovingRef = useRef(false);
 
@@ -219,6 +230,7 @@ export default function LoteDetalhePage() {
         isApprovingRef.current = true;
         setProcessingAction(true);
         setActionMsg(null);
+        setValidationErrors([]);
         console.log(`[AprovarLote] 🚀 Enviando lote ${id} para aprovação...`);
         try {
             const res = await fetch("/api/transfeera/aprovar-lote", {
@@ -229,6 +241,14 @@ export default function LoteDetalhePage() {
             const data = await res.json();
 
             if (!res.ok) {
+                // Erros de validação local (tipo PIX inválido, etc.)
+                if (data.validation_errors && data.validation_errors.length > 0) {
+                    setValidationErrors(data.validation_errors);
+                    setActionMsg({ type: "warning", text: data.error });
+                    // Atualiza a tabela para refletir os novos status BLOQUEADO
+                    loadData();
+                    return;
+                }
                 const detail = data.transfeera_error
                     ? (typeof data.transfeera_error === "string" ? data.transfeera_error : JSON.stringify(data.transfeera_error))
                     : "";
@@ -363,6 +383,61 @@ export default function LoteDetalhePage() {
                     <p className="text-sm" style={{ color: actionMsg.type === "success" ? "#22c55e" : actionMsg.type === "warning" ? "#f97316" : "#ef4444" }}>
                         {actionMsg.text}
                     </p>
+                </div>
+            )}
+
+            {/* Painel de Erros de Validação PIX */}
+            {validationErrors.length > 0 && (
+                <div className="card overflow-hidden" style={{ borderColor: "rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.03)" }}>
+                    <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(239,68,68,0.15)", display: "flex", alignItems: "center", gap: 10 }}>
+                        <ShieldAlert size={16} className="text-red-400" />
+                        <span style={{ fontWeight: 700, fontSize: 13, color: "#f87171" }}>
+                            {validationErrors.length} item(ns) bloqueado(s) — Tipo PIX inválido
+                        </span>
+                        <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--fg-dim)" }}>
+                            Corrija os itens abaixo e tente enviar novamente
+                        </span>
+                        <button
+                            onClick={() => setValidationErrors([])}
+                            className="btn btn-ghost"
+                            style={{ padding: "2px 6px", color: "var(--fg-dim)" }}
+                            title="Fechar"
+                        >
+                            <X size={14} />
+                        </button>
+                    </div>
+                    <div style={{ overflowX: "auto" }}>
+                        <table className="data-table" style={{ width: "100%" }}>
+                            <thead>
+                                <tr>
+                                    <th>Nome</th>
+                                    <th>CPF</th>
+                                    <th>Chave PIX</th>
+                                    <th>Tipo PIX (inválido)</th>
+                                    <th>Valor</th>
+                                    <th>Motivo</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {validationErrors.map((ve) => (
+                                    <tr key={ve.id} style={{ backgroundColor: "rgba(239,68,68,0.05)" }}>
+                                        <td style={{ fontSize: 12, color: "var(--fg-dim)" }}>{ve.nome_usuario || "—"}</td>
+                                        <td className="table-mono" style={{ fontSize: 12 }}>{ve.cpf_favorecido || "—"}</td>
+                                        <td className="table-mono" style={{ fontSize: 11 }}>{ve.chave_pix || "—"}</td>
+                                        <td>
+                                            <span style={{ background: "rgba(239,68,68,0.12)", color: "#f87171", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700 }}>
+                                                {ve.tipo_pix || "(vazio)"}
+                                            </span>
+                                        </td>
+                                        <td style={{ fontWeight: 600, color: "#f87171" }}>
+                                            R$ {Number(ve.valor).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                                        </td>
+                                        <td style={{ fontSize: 11, color: "var(--fg-dim)", maxWidth: 280 }}>{ve.motivo}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             )}
 

@@ -34,25 +34,75 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Lote não encontrado." }, { status: 404 });
         }
 
+        // ─── Busca paginada para superar o limite de 1.000 rows do PostgREST ─────
         console.log(`[AprovarLote] 🔍 Buscando itens APROVADOS do lote ${lote_id} | user: ${user.id}`);
-        const { data: items, error: itemsError } = await supabase
-            .from("itens_saque")
-            .select("*")
-            .eq("lote_id", lote_id)
-            .eq("status_item", "APROVADO")
-            .range(0, 9999); // Evita truncamento padrão de 1.000 linhas do PostgREST
+        const PAGE_SIZE = 1000;
+        let page = 0;
+        let allItems: any[] = [];
+        let fetchError = null;
 
-        if (itemsError) {
-            console.error(`[AprovarLote] ❌ Erro ao buscar itens | lote: ${lote_id} | user: ${user.id} | Mensagem: ${itemsError.message}`, itemsError);
-            return NextResponse.json({ error: "Erro ao buscar itens do lote." }, { status: 500 });
+        while (true) {
+            const from = page * PAGE_SIZE;
+            const to = from + PAGE_SIZE - 1;
+            const { data: pageData, error: pageError } = await supabase
+                .from("itens_saque")
+                .select("*")
+                .eq("lote_id", lote_id)
+                .eq("status_item", "APROVADO")
+                .range(from, to);
+
+            if (pageError) { fetchError = pageError; break; }
+            if (pageData && pageData.length > 0) allItems = allItems.concat(pageData);
+            if (!pageData || pageData.length < PAGE_SIZE) break;
+            page++;
         }
 
-        console.log(`[AprovarLote] ✅ ${items?.length ?? 0} itens APROVADOS encontrados para lote ${lote_id} | user: ${user.id}`);
+        if (fetchError) {
+            console.error(`[AprovarLote] ❌ Erro ao buscar itens | lote: ${lote_id} | Mensagem: ${fetchError.message}`);
+            return NextResponse.json({ error: "Erro ao buscar itens do lote." }, { status: 500 });
+        }
+        console.log(`[AprovarLote] ✅ ${allItems.length} itens APROVADOS carregados (${page + 1} página(s)) | lote: ${lote_id}`);
 
-        const itensValidos = (items || []).filter((item: any) => Number(item.valor) > 0);
+        const itensValidos = allItems.filter((item: any) => Number(item.valor) > 0);
 
         if (itensValidos.length === 0) {
             return NextResponse.json({ error: "Nenhum item válido (valor > 0) encontrado para envio." }, { status: 400 });
+        }
+
+        // ─── Pré-validação local: tipo PIX mapeável ────────────────────────────
+        const TIPOS_PIX_VALIDOS = new Set(["EMAIL", "CPF", "CNPJ", "TELEFONE", "CHAVE_ALEATORIA", "EVP", "ALEATORIO"]);
+        const itensComTipoInvalido = itensValidos.filter((item: any) => {
+            const tipo = (item.tipo_pix || "").toUpperCase().trim();
+            return !tipo || !TIPOS_PIX_VALIDOS.has(tipo);
+        });
+
+        if (itensComTipoInvalido.length > 0) {
+            console.warn(`[AprovarLote] ⚠️ ${itensComTipoInvalido.length} item(ns) com tipo PIX inválido detectados. Marcando como BLOQUEADO...`);
+
+            // Marca os itens inválidos como BLOQUEADO no banco
+            const bloqueioPromises = itensComTipoInvalido.map((item: any) =>
+                supabase
+                    .from("itens_saque")
+                    .update({
+                        status_item: "BLOQUEADO",
+                        motivo_bloqueio: `Tipo PIX inválido: "${item.tipo_pix || "(vazio)"}" — não reconhecido pela Transfeera`,
+                    })
+                    .eq("id", item.id)
+            );
+            await Promise.all(bloqueioPromises);
+
+            return NextResponse.json({
+                error: `${itensComTipoInvalido.length} item(ns) com tipo de chave PIX inválido foram bloqueados. Corrija-os e tente novamente.`,
+                validation_errors: itensComTipoInvalido.map((item: any) => ({
+                    id: item.id,
+                    nome_usuario: item.nome_usuario,
+                    cpf_favorecido: item.cpf_favorecido,
+                    chave_pix: item.chave_pix,
+                    tipo_pix: item.tipo_pix,
+                    valor: item.valor,
+                    motivo: `Tipo PIX "${item.tipo_pix || "(vazio)"}" não é aceito pela Transfeera`,
+                })),
+            }, { status: 400 });
         }
 
         // ═══ PASSO 2: Montagem do Payload Bulk ════════════════════════════════
