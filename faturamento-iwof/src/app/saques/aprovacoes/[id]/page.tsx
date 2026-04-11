@@ -241,13 +241,17 @@ export default function LoteDetalhePage() {
             const data = await res.json();
 
             if (!res.ok) {
-                // Erros de validação local (tipo PIX inválido, etc.)
+                // Erros de validação local OU da Transfeera com itens identificados
                 if (data.validation_errors && data.validation_errors.length > 0) {
                     setValidationErrors(data.validation_errors);
                     setActionMsg({ type: "warning", text: data.error });
                     // Atualiza a tabela para refletir os novos status BLOQUEADO
                     loadData();
                     return;
+                }
+                // Fallback: Transfeera rejeitou sem indicar itens específicos
+                if (data.transfeera_raw) {
+                    console.error("[AprovarLote] ❌ Corpo completo do erro Transfeera:", data.transfeera_raw);
                 }
                 const detail = data.transfeera_error
                     ? (typeof data.transfeera_error === "string" ? data.transfeera_error : JSON.stringify(data.transfeera_error))

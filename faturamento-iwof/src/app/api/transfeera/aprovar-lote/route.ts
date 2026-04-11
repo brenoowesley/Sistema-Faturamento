@@ -139,10 +139,85 @@ export async function POST(req: NextRequest) {
 
         // ═══ PASSO 4: Tratamento 'Tudo ou Nada' ══════════════════════════════
         if (!batchRes.ok) {
-            console.error("❌ [Transfeera Bulk] Erro ao criar batch:", JSON.stringify(batchBody, null, 2));
+            console.error("❌ [Transfeera Bulk] Erro ao criar batch — resposta completa da Transfeera:", JSON.stringify(batchBody, null, 2));
+
+            // Tenta extrair itens específicos a partir de errors[] ou transfers[] na resposta
+            // A Transfeera pode retornar paths como: "transfers[42].destination_bank_account.pix_key_type"
+            const transfeeraErrors: any[] = batchBody.errors || batchBody.violations || [];
+            const failedIndexes = new Set<number>();
+
+            for (const err of transfeeraErrors) {
+                // Ex: "transfers[42].destination_bank_account.pix_key_type"
+                const match = (err.field || err.path || err.property || "").match(/transfers\[(\d+)\]/);
+                if (match) failedIndexes.add(Number(match[1]));
+            }
+
+            // Também verifica se a própria resposta já tem os transfers com errors embutidos
+            const transfersWithErrors = (batchBody.transfers || []).filter((t: any) =>
+                t.error || t.errors || t.status === "ERRO" || t.status === "INVALID"
+            );
+            transfersWithErrors.forEach((t: any, idx: number) => {
+                // Tenta achar pelo integration_id no payload original
+                const originalIdx = transfersPayload.findIndex((p: any) => p.integration_id === t.integration_id);
+                if (originalIdx !== -1) failedIndexes.add(originalIdx);
+            });
+
+            let validationErrors: any[] = [];
+
+            if (failedIndexes.size > 0) {
+                // Mapeia índices → itens originais
+                const itensFalhos = [...failedIndexes]
+                    .filter(idx => idx < itensValidos.length)
+                    .map(idx => itensValidos[idx]);
+
+                // Busca a mensagem de erro correspondente por transfer
+                const errosPorIndex = new Map<number, string>();
+                for (const err of transfeeraErrors) {
+                    const match = (err.field || err.path || err.property || "").match(/transfers\[(\d+)\]/);
+                    if (match) {
+                        const idx = Number(match[1]);
+                        errosPorIndex.set(idx, err.message || err.description || "Erro de validação Transfeera");
+                    }
+                }
+
+                // Marca esses itens como BLOQUEADO no banco
+                const bloqueioPromises = itensFalhos.map((item: any) => {
+                    const idx = itensValidos.indexOf(item);
+                    const motivo = errosPorIndex.get(idx) || batchBody.message || "Rejeitado pela Transfeera";
+                    return supabase
+                        .from("itens_saque")
+                        .update({ status_item: "BLOQUEADO", motivo_bloqueio: `Transfeera: ${motivo}` })
+                        .eq("id", item.id);
+                });
+                await Promise.all(bloqueioPromises);
+
+                validationErrors = itensFalhos.map((item: any) => {
+                    const idx = itensValidos.indexOf(item);
+                    return {
+                        id: item.id,
+                        nome_usuario: item.nome_usuario,
+                        cpf_favorecido: item.cpf_favorecido,
+                        chave_pix: item.chave_pix,
+                        tipo_pix: item.tipo_pix,
+                        valor: item.valor,
+                        motivo: errosPorIndex.get(idx) || batchBody.message || "Rejeitado pela Transfeera",
+                    };
+                });
+
+                console.warn(`[AprovarLote] ⚠️ ${validationErrors.length} item(ns) identificados como inválidos pela Transfeera e marcados como BLOQUEADO.`);
+
+                return NextResponse.json({
+                    error: `A Transfeera rejeitou ${validationErrors.length} item(ns). Eles foram bloqueados — corrija e tente novamente.`,
+                    validation_errors: validationErrors,
+                    transfeera_raw: batchBody,
+                }, { status: 400 });
+            }
+
+            // Fallback: Transfeera rejeitou mas não indicou itens específicos
             return NextResponse.json({
                 error: "A Transfeera rejeitou o lote. Corrija os itens inválidos e tente novamente.",
-                transfeera_error: batchBody.message || batchBody,
+                transfeera_error: batchBody.message || JSON.stringify(batchBody),
+                transfeera_raw: batchBody,
             }, { status: 400 });
         }
 
