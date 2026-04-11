@@ -35,6 +35,8 @@ interface ValidationError {
     tipo_pix: string;
     valor: number;
     motivo: string;
+    error_code?: string;
+    field?: string;
 }
 
 interface ItemSaque {
@@ -396,7 +398,7 @@ export default function LoteDetalhePage() {
                     <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(239,68,68,0.15)", display: "flex", alignItems: "center", gap: 10 }}>
                         <ShieldAlert size={16} className="text-red-400" />
                         <span style={{ fontWeight: 700, fontSize: 13, color: "#f87171" }}>
-                            {validationErrors.length} item(ns) bloqueado(s) — Tipo PIX inválido
+                            {validationErrors.length} item(ns) bloqueado(s) — Chave PIX inválida
                         </span>
                         <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--fg-dim)" }}>
                             Corrija os itens abaixo e tente enviar novamente
@@ -417,9 +419,9 @@ export default function LoteDetalhePage() {
                                     <th>Nome</th>
                                     <th>CPF</th>
                                     <th>Chave PIX</th>
-                                    <th>Tipo PIX (inválido)</th>
+                                    <th>Tipo PIX</th>
                                     <th>Valor</th>
-                                    <th>Motivo</th>
+                                    <th>Erro / Motivo</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -436,7 +438,14 @@ export default function LoteDetalhePage() {
                                         <td style={{ fontWeight: 600, color: "#f87171" }}>
                                             R$ {Number(ve.valor).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
                                         </td>
-                                        <td style={{ fontSize: 11, color: "var(--fg-dim)", maxWidth: 280 }}>{ve.motivo}</td>
+                                        <td style={{ fontSize: 11, color: "var(--fg-dim)", maxWidth: 320 }}>
+                                            {ve.error_code && (
+                                                <span style={{ background: "rgba(239,68,68,0.15)", color: "#fca5a5", padding: "1px 6px", borderRadius: 4, fontSize: 10, fontWeight: 700, marginRight: 6 }}>
+                                                    {ve.error_code}
+                                                </span>
+                                            )}
+                                            {ve.motivo}
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
