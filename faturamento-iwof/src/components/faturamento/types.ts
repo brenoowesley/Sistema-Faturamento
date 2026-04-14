@@ -3,6 +3,12 @@ export interface Ciclo {
     nome: string;
 }
 
+export interface Produto {
+    id: string;
+    nome: string;
+    porcentagem_nf: number;
+}
+
 export interface ClienteDB {
     id: string;
     razao_social: string;
@@ -18,6 +24,8 @@ export interface ClienteDB {
     estado?: string | null;
     ciclo_faturamento_id: string | null;
     ciclos_faturamento?: { nome: string } | null;
+    produto_id?: string | null;
+    produtos_faturamento?: Produto | null;
     status: boolean;
     boleto_unificado?: boolean;
 }
@@ -57,6 +65,7 @@ export interface Agendamento {
     data_competencia?: string;
     dataCompetencia?: string;     // assigned period (YYYY-MM-DD or YYYY-MM)
     boleto_unificado?: boolean;
+    porcentagemNF?: number;
     status_match?: "sucesso" | "pendente" | "vinculado_manual";
     rawRow: Record<string, string>;
 

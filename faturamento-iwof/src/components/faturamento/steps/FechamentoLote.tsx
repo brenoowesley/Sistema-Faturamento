@@ -291,6 +291,7 @@ export default function FechamentoLote({
         xmlValorServicos?: number;
         pdfNfMatch?: any;
         boletoUnificado: boolean;
+        porcentagemNF: number;
     }
 
 
@@ -326,7 +327,8 @@ export default function FechamentoLote({
                     valorAcrescimos: 0,
                     valorDescontos: 0,
                     isXmlMatched: false,
-                    boletoUnificado: a.boleto_unificado ?? false
+                    boletoUnificado: a.boleto_unificado ?? false,
+                    porcentagemNF: (a as any).porcentagemNF ?? 11.5
                 });
             }
 
@@ -630,7 +632,8 @@ export default function FechamentoLote({
                     finalDescontos,
                     r.descontoIR || 0,
                     r.statusNF === 'EMITIDA',
-                    r.boletoUnificado ?? true
+                    r.boletoUnificado ?? true,
+                    r.porcentagemNF ?? 11.5
                 );
 
 

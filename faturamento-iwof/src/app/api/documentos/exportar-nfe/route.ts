@@ -27,7 +27,8 @@ export async function GET(req: NextRequest) {
                     razao_social, cnpj, email_principal, emails_faturamento, nome_conta_azul,
                     endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge,
                     loja_mae_id,
-                    ciclos_faturamento(nome)
+                    ciclos_faturamento(nome),
+                    produtos_faturamento(porcentagem_nf)
                 )
             `)
             .eq("lote_id", loteId);
@@ -131,10 +132,11 @@ export async function GET(req: NextRequest) {
             records = Array.from(finalAgrupado.values()).map(r => {
                 const baseResumo = (r.valor_bruto + r.acrescimos) - r.descontos;
                 const isSemNF = lojasSemNF.includes(r.cliente_id) || lojasSemNF.includes(r.clientes?.loja_mae_id);
+                const porcentagemNF = r.clientes?.produtos_faturamento?.porcentagem_nf ?? 11.5;
                 return {
                     ...r,
                     valor_base_calculo: baseResumo,
-                    valor_nf_emitida: isSemNF ? 0 : Math.max(0, baseResumo * 0.115)
+                    valor_nf_emitida: isSemNF ? 0 : Math.max(0, baseResumo * (porcentagemNF / 100))
                 };
             });
         }

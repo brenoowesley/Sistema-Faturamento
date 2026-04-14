@@ -52,6 +52,7 @@ interface LojaConsolidada {
     ajustesDetalhes: AjusteItem[];
     active: boolean;
     ciclo: string;
+    porcentagemNF: number;
 }
 
 /* ================================================================
@@ -119,7 +120,7 @@ export default function LoteFechamentoPage() {
             while (hasMore) {
                 const { data: chunk, error } = await supabase
                     .from("agendamentos_brutos")
-                    .select("loja_id, valor_iwof, clientes(*, ciclos_faturamento(nome))")
+                    .select("loja_id, valor_iwof, clientes(*, ciclos_faturamento(nome), produtos_faturamento(porcentagem_nf))")
                     .eq("lote_id", loteId)
                     .eq("status_validacao", "VALIDADO")
                     .range(from, from + step - 1);
@@ -229,7 +230,8 @@ export default function LoteFechamentoPage() {
                         descontos: 0,
                         ajustesDetalhes: [],
                         active: true,
-                        ciclo: client.ciclos_faturamento?.nome || "-"
+                        ciclo: client.ciclos_faturamento?.nome || "-",
+                        porcentagemNF: client.produtos_faturamento?.porcentagem_nf ?? 11.5
                     });
                 }
                 const store = consolidatedMap.get(a.loja_id)!;
@@ -283,12 +285,17 @@ export default function LoteFechamentoPage() {
     }, [lojas, searchTerm]);
 
     const totals = useMemo(() => {
-        const boleto = lojas.reduce((acc, curr) => acc + (curr.valorBase + curr.acrescimos) - curr.descontos, 0);
-        return {
-            boleto,
-            nf: boleto * 0.115,
-            nc: boleto * 0.885
-        };
+        let totalBoleto = 0;
+        let totalNF = 0;
+        let totalNC = 0;
+        for (const loja of lojas) {
+            const boleto = (loja.valorBase + loja.acrescimos) - loja.descontos;
+            const fatorNF = loja.porcentagemNF / 100;
+            totalBoleto += boleto;
+            totalNF += boleto * fatorNF;
+            totalNC += boleto * (1 - fatorNF);
+        }
+        return { boleto: totalBoleto, nf: totalNF, nc: totalNC };
     }, [lojas]);
 
     // Actions
@@ -509,8 +516,8 @@ export default function LoteFechamentoPage() {
                                     <th className="p-4 text-right">Acréscimos</th>
                                     <th className="p-4 text-right">Descontos</th>
                                     <th className="p-4 text-right text-white">Boleto Final</th>
-                                    <th className="p-4 text-right text-[var(--primary)]">NF (11,5%)</th>
-                                    <th className="p-4 text-right text-emerald-500">NC (88,5%)</th>
+                                    <th className="p-4 text-right text-[var(--primary)]">NF</th>
+                                    <th className="p-4 text-right text-emerald-500">NC</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -587,8 +594,8 @@ export default function LoteFechamentoPage() {
                                             </td>
 
                                             <td className="p-4 text-right text-lg font-black text-white">{fmtCurrency(boletoLoja)}</td>
-                                            <td className="p-4 text-right text-sm font-bold text-[var(--primary)]">{fmtCurrency(boletoLoja * 0.115)}</td>
-                                            <td className="p-4 text-right text-sm font-bold text-emerald-500">{fmtCurrency(boletoLoja * 0.885)}</td>
+                                            <td className="p-4 text-right text-sm font-bold text-[var(--primary)]">{fmtCurrency(boletoLoja * (loja.porcentagemNF / 100))}</td>
+                                            <td className="p-4 text-right text-sm font-bold text-emerald-500">{fmtCurrency(boletoLoja * (1 - loja.porcentagemNF / 100))}</td>
                                         </tr>
                                     );
                                 })}
@@ -620,13 +627,13 @@ export default function LoteFechamentoPage() {
                         </div>
                         <div className="flex flex-col">
                             <span className="text-[10px] uppercase font-black text-[var(--fg-dim)] tracking-widest flex items-center gap-2">
-                                <FileText size={12} className="text-[var(--primary)]" /> Total NF (11,5%)
+                                <FileText size={12} className="text-[var(--primary)]" /> Total NF
                             </span>
                             <span className="text-2xl font-black text-[var(--primary)]">{fmtCurrency(totals.nf)}</span>
                         </div>
                         <div className="flex flex-col">
                             <span className="text-[10px] uppercase font-black text-[var(--fg-dim)] tracking-widest flex items-center gap-2">
-                                <FileText size={12} className="text-emerald-500" /> Total NC (88,5%)
+                                <FileText size={12} className="text-emerald-500" /> Total NC
                             </span>
                             <span className="text-2xl font-black text-emerald-500">{fmtCurrency(totals.nc)}</span>
                         </div>

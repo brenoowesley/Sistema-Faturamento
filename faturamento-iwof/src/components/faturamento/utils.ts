@@ -100,17 +100,21 @@ export function calcularTotaisFaturamento(
     descontos: number,
     irrf: number,
     isNFEmitida: boolean,
-    boletoUnificado: boolean = true
+    boletoUnificado: boolean = true,
+    porcentagemNF: number = 11.5
 ): TotaisFaturamento {
     // A base faturável (que gera a NF e NC) DEVE ter o desconto aplicado para o financeiro bater
     const valorBaseFaturavel = valorBruto + acrescimos - descontos;
     
+    const fatorNF = porcentagemNF / 100;
+    const fatorNC = 1 - fatorNF;
+
     let valorNF = 0;
     let valorNC = 0;
 
     if (!boletoUnificado) {
-        valorNF = valorBaseFaturavel * 0.115;
-        valorNC = valorBaseFaturavel * 0.885;
+        valorNF = valorBaseFaturavel * fatorNF;
+        valorNC = valorBaseFaturavel * fatorNC;
     } else {
         valorNF = isNFEmitida ? valorBaseFaturavel : 0;
         valorNC = !isNFEmitida ? valorBaseFaturavel : 0;

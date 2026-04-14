@@ -23,7 +23,8 @@ export async function POST(req: NextRequest) {
                 id, razao_social, nome_fantasia, cnpj, email_principal, emails_faturamento, nome_conta_azul,
                 endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge,
                 loja_mae_id, boleto_unificado, tempo_pagamento_dias,
-                ciclos_faturamento(id, nome)
+                ciclos_faturamento(id, nome),
+                produtos_faturamento(porcentagem_nf)
             `)
             .in("id", validStoreIds);
 
@@ -46,7 +47,8 @@ export async function POST(req: NextRequest) {
                     id, razao_social, nome_fantasia, cnpj, email_principal, emails_faturamento, nome_conta_azul,
                     endereco, numero, complemento, bairro, cidade, estado, cep, codigo_ibge,
                     loja_mae_id, boleto_unificado, tempo_pagamento_dias,
-                    ciclos_faturamento(id, nome)
+                    ciclos_faturamento(id, nome),
+                    produtos_faturamento(porcentagem_nf)
                 `)
                 .in("id", Array.from(motherIdsToFetch));
 
@@ -141,10 +143,11 @@ export async function POST(req: NextRequest) {
                 ? (r.valor_bruto + r.acrescimos) 
                 : (r.valor_bruto + r.acrescimos) - r.descontos;
             const isSemNF = semNFSet.has(r.cliente_id) || semNFSet.has(r.clientes?.loja_mae_id);
+            const porcentagemNF = r.clientes?.produtos_faturamento?.porcentagem_nf ?? 11.5;
             return {
                 ...r,
                 valor_base_calculo: baseResumo,
-                valor_nf_emitida: isSemNF ? 0 : Math.max(0, baseResumo * 0.115)
+                valor_nf_emitida: isSemNF ? 0 : Math.max(0, baseResumo * (porcentagemNF / 100))
             };
         });
 

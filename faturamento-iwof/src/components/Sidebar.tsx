@@ -23,6 +23,8 @@ import {
     BookOpen,
     PlusCircle,
     MessageSquare,
+    Settings,
+    Package,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
@@ -44,6 +46,9 @@ const navItems = [
 
     // Grupo: Cadastros
     { label: "Clientes",              href: "/clientes",               icon: Briefcase,       roles: ["ADMIN", "APROVADOR", "USER"] },
+
+    // Grupo: Configurações do Sistema
+    { label: "Produtos Faturamento",  href: "/configuracoes/produtos",  icon: Package,         roles: ["ADMIN"] },
 
     // Grupo: Configurações e Ajuda
     { label: "Ajustes",               href: "/ajustes",                icon: SlidersHorizontal, roles: ["ADMIN", "APROVADOR", "USER"] },

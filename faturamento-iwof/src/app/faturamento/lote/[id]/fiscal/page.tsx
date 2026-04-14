@@ -62,6 +62,7 @@ interface LojaConsolidada {
     loja_mae_id?: string | null;
     loja_id_real: string;
     ciclo: string;
+    porcentagemNF: number;
     active?: boolean;
     children?: any[];
     // Drive Observability
@@ -351,7 +352,7 @@ export default function FiscalProcessingPage() {
                                 drive_id_hc,
                                 error_drive_nf,
                                 error_drive_hc,
-                                clientes(razao_social, nome_fantasia, nome_conta_azul, cnpj, loja_mae_id, ciclos_faturamento(nome))
+                                clientes(razao_social, nome_fantasia, nome_conta_azul, cnpj, loja_mae_id, ciclos_faturamento(nome), produtos_faturamento(porcentagem_nf))
                             `)
                         .eq("lote_id", loteId)
                         .range(from, from + step - 1);
@@ -379,7 +380,7 @@ export default function FiscalProcessingPage() {
                 while (hasMore) {
                     const { data: chunk, error: chunkErr } = await supabase
                         .from("agendamentos_brutos")
-                        .select("loja_id, cnpj_loja, valor_iwof, status_validacao, clientes(razao_social, nome_fantasia, nome_conta_azul, cnpj, loja_mae_id, ciclos_faturamento(nome))")
+                        .select("loja_id, cnpj_loja, valor_iwof, status_validacao, clientes(razao_social, nome_fantasia, nome_conta_azul, cnpj, loja_mae_id, ciclos_faturamento(nome), produtos_faturamento(porcentagem_nf))")
                         .eq("lote_id", loteId)
                         .eq("status_validacao", "VALIDADO")
                         .range(from, from + step - 1);
@@ -506,6 +507,7 @@ export default function FiscalProcessingPage() {
                         ajustesDetalhes: [],
                         active: true,
                         ciclo: client?.ciclos_faturamento?.nome || "-",
+                        porcentagemNF: client?.produtos_faturamento?.porcentagem_nf ?? 11.5,
                         loja_mae_id: client?.loja_mae_id || null,
                         loja_id_real: uniqueKey,
                         drive_id_nf: a.drive_id_nf,
@@ -741,14 +743,16 @@ export default function FiscalProcessingPage() {
                 const isNordestao = (loja as any).ciclo === "NORDESTÃO";
 
                 if (isNordestao && irrf === 0) {
-                    irrf = Number(((calcBase * 0.115) * 0.015).toFixed(2));
+                    const fatorNF = (loja as any).porcentagemNF ? (loja as any).porcentagemNF / 100 : 0.115;
+                    irrf = Number(((calcBase * fatorNF) * 0.015).toFixed(2));
                 }
 
                 // Regra de cálculo:
                 // - calcBase (bruto + acréscimos - descontos) define NF e NC
                 // - IRRF só afeta o boleto (valor líquido a receber)
+                const fatorNC = 1 - ((loja as any).porcentagemNF ? (loja as any).porcentagemNF / 100 : 0.115);
                 const boleto = calcBase - irrf;
-                const nc = calcBase * 0.885;
+                const nc = calcBase * fatorNC;
 
                 return {
                     loja,
@@ -823,7 +827,8 @@ export default function FiscalProcessingPage() {
                     item.loja.descontos,
                     item.irrfCalculado,
                     Boolean(item.xml),
-                    (item.loja as any).boleto_unificado ?? true
+                    (item.loja as any).boleto_unificado ?? true,
+                    item.loja.porcentagemNF ?? 11.5
                 );
 
                 // 1. Salvar ou Atualizar registro da Mãe (ou Loja Avulsa)

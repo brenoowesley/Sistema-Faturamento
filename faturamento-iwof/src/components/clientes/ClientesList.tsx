@@ -13,6 +13,12 @@ interface Ciclo {
     nome: string;
 }
 
+interface ProdutoFaturamento {
+    id: string;
+    nome: string;
+    porcentagem_nf: number;
+}
+
 interface Cliente {
     id: string;
     razao_social: string;
@@ -33,6 +39,7 @@ interface Cliente {
     bairro: string | null;
     complemento: string | null;
     ciclo_faturamento_id: string | null;
+    produto_id: string | null;
     tempo_pagamento_dias: number;
     nome_conta_azul: string | null;
     boleto_unificado: boolean;
@@ -40,6 +47,7 @@ interface Cliente {
     status: boolean;
     loja_mae_id: string | null;
     ciclos_faturamento?: { nome: string } | null;
+    produtos_faturamento?: { nome: string; porcentagem_nf: number } | null;
 }
 
 /* Render semicolon-separated emails as badge chips */
@@ -79,6 +87,7 @@ interface ClienteForm {
     email_contato: string;
     nome_conta_azul: string;
     ciclo_faturamento_id: string;
+    produto_id: string;
     tempo_pagamento_dias: number;
     boleto_unificado: boolean;
     emails_faturamento: string;
@@ -107,6 +116,7 @@ const EMPTY_FORM: ClienteForm = {
     email_contato: "",
     nome_conta_azul: "",
     ciclo_faturamento_id: "",
+    produto_id: "",
     tempo_pagamento_dias: 30,
     boleto_unificado: true,
     emails_faturamento: "",
@@ -133,6 +143,7 @@ function ClientesListContent() {
 
     const [clientes, setClientes] = useState<Cliente[]>([]);
     const [ciclos, setCiclos] = useState<Ciclo[]>([]);
+    const [produtos, setProdutos] = useState<ProdutoFaturamento[]>([]);
     const [ufs, setUfs] = useState<string[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState(initialSearch);
@@ -172,7 +183,7 @@ function ClientesListContent() {
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("todos");
     const [counts, setCounts] = useState({ todos: 0, ativos: 0, inativos: 0, pendentes: 0 });
 
-    /* fetch ciclos + distinct UFs */
+    /* fetch ciclos + produtos + distinct UFs */
     useEffect(() => {
         supabase
             .from("ciclos_faturamento")
@@ -180,6 +191,13 @@ function ClientesListContent() {
             .order("nome")
             .then(({ data }) => {
                 if (data) setCiclos(data);
+            });
+        supabase
+            .from("produtos_faturamento")
+            .select("id, nome, porcentagem_nf")
+            .order("nome")
+            .then(({ data }) => {
+                if (data) setProdutos(data);
             });
         supabase
             .from("clientes")
@@ -225,7 +243,7 @@ function ClientesListContent() {
         setLoading(true);
         let query = supabase
             .from("clientes")
-            .select("*, ciclos_faturamento(nome)", { count: "exact" })
+            .select("*, ciclos_faturamento(nome), produtos_faturamento(nome, porcentagem_nf)", { count: "exact" })
             .order("razao_social")
             .range(page * pageSize, (page + 1) * pageSize - 1);
 
@@ -304,6 +322,7 @@ function ClientesListContent() {
             email_contato: c.email_contato ?? "",
             nome_conta_azul: c.nome_conta_azul ?? "",
             ciclo_faturamento_id: c.ciclo_faturamento_id ?? "",
+            produto_id: c.produto_id ?? "",
             tempo_pagamento_dias: c.tempo_pagamento_dias ?? 30,
             boleto_unificado: c.boleto_unificado ?? false,
             emails_faturamento: c.emails_faturamento ?? "",
@@ -352,6 +371,7 @@ function ClientesListContent() {
         const payload = {
             ...form,
             ciclo_faturamento_id: form.ciclo_faturamento_id || null,
+            produto_id: form.produto_id || null,
             nome_fantasia: form.nome_fantasia || null,
             nome: form.nome || null,
             cpf: form.cpf || null,
@@ -427,7 +447,7 @@ function ClientesListContent() {
         // Fetch ALL matching clients (no pagination)
         let query = supabase
             .from("clientes")
-            .select("*, ciclos_faturamento(nome)")
+            .select("*, ciclos_faturamento(nome), produtos_faturamento(nome, porcentagem_nf)")
             .order("razao_social");
 
         if (search.trim()) {
@@ -615,7 +635,7 @@ function ClientesListContent() {
                             <th>Cidade / UF</th>
                             <th>Conta Azul</th>
                             <th>Ciclo</th>
-                            <th>Tempo Pgto</th>
+                            <th>Produto</th>
                             <th>Status</th>
                             <th style={{ width: 80 }}>Ações</th>
                         </tr>
@@ -623,13 +643,13 @@ function ClientesListContent() {
                     <tbody>
                         {loading ? (
                             <tr>
-                                <td colSpan={9} className="table-empty">
+                                <td colSpan={10} className="table-empty">
                                     Carregando...
                                 </td>
                             </tr>
                         ) : clientes.length === 0 ? (
                             <tr>
-                                <td colSpan={9} className="table-empty">
+                                <td colSpan={10} className="table-empty">
                                     Nenhum cliente encontrado
                                 </td>
                             </tr>
@@ -701,7 +721,23 @@ function ClientesListContent() {
                                             )}
                                         </div>
                                     </td>
-                                    <td>{c.tempo_pagamento_dias} dias</td>
+                                    <td>
+                                        {c.produtos_faturamento ? (
+                                            <span style={{
+                                                background: 'rgba(139,92,246,0.12)',
+                                                color: '#8b5cf6',
+                                                border: '1px solid rgba(139,92,246,0.25)',
+                                                borderRadius: 20,
+                                                padding: '2px 10px',
+                                                fontSize: 11,
+                                                fontWeight: 700,
+                                            }}>
+                                                {c.produtos_faturamento.nome} ({c.produtos_faturamento.porcentagem_nf}%)
+                                            </span>
+                                        ) : (
+                                            <span className="text-[var(--fg-dim)]" style={{ fontSize: 11 }}>Padrão (11,5%)</span>
+                                        )}
+                                    </td>
                                     <td>
                                         {(() => {
                                             const pending = isPendente(c);
@@ -964,6 +1000,18 @@ function ClientesListContent() {
                                 <option value="">Selecione...</option>
                                 {ciclos.map((c) => (
                                     <option key={c.id} value={c.id}>{c.nome}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="input-group">
+                            <label className="input-label">Produto de Faturamento</label>
+                            <select className="input" style={{ paddingLeft: 14 }}
+                                value={form.produto_id}
+                                onChange={(e) => setForm({ ...form, produto_id: e.target.value })}
+                            >
+                                <option value="">Padrão (11,5%)</option>
+                                {produtos.map((p) => (
+                                    <option key={p.id} value={p.id}>{p.nome} — NF {p.porcentagem_nf}% / NC {(100 - p.porcentagem_nf).toFixed(1)}%</option>
                                 ))}
                             </select>
                         </div>

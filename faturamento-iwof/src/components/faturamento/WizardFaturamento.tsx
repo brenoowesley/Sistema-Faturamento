@@ -122,7 +122,7 @@ function WizardContent() {
                 while (hasMore) {
                     const { data: chunk, error: agdsError } = await supabase
                         .from("agendamentos_brutos")
-                        .select("*, clientes(*, ciclos_faturamento(nome))")
+                        .select("*, clientes(*, ciclos_faturamento(nome), produtos_faturamento(porcentagem_nf))")
                         .eq("lote_id", loteIdParam)
                         .range(from, from + stepAmount - 1);
 
@@ -146,7 +146,7 @@ function WizardContent() {
                 // Buscar clientes ativos no banco para suportar Dropdowns / Vinculação manual na Stage 2
                 const { data: dbClientesRes } = await supabase
                     .from("clientes")
-                    .select("id, razao_social, nome_fantasia, nome_conta_azul, cnpj, ciclo_faturamento_id, boleto_unificado")
+                    .select("id, razao_social, nome_fantasia, nome_conta_azul, cnpj, ciclo_faturamento_id, boleto_unificado, produto_id, produtos_faturamento(porcentagem_nf)")
                     .eq("status", true);
 
                 if (dbClientesRes) {
@@ -195,6 +195,7 @@ function WizardContent() {
                         nome_conta_azul: cliente.nome_conta_azul || null,
                         ciclo: cliente.ciclos_faturamento?.nome || null,
                         boleto_unificado: cliente.boleto_unificado || false,
+                        porcentagemNF: cliente.produtos_faturamento?.porcentagem_nf ?? 11.5,
                         rawRow: { data_competencia: a.data_competencia },
                         data_competencia: a.data_competencia,
                         dataCompetencia: a.data_competencia
@@ -353,7 +354,7 @@ function WizardContent() {
         while (hasMore) {
             const { data: chunk, error } = await supabase
                 .from("clientes")
-                .select("id, razao_social, nome_fantasia, nome, nome_conta_azul, cnpj, cep, endereco, numero, bairro, cidade, estado, ciclo_faturamento_id, ciclos_faturamento(nome), status, boleto_unificado")
+                .select("id, razao_social, nome_fantasia, nome, nome_conta_azul, cnpj, cep, endereco, numero, bairro, cidade, estado, ciclo_faturamento_id, ciclos_faturamento(nome), status, boleto_unificado, produto_id, produtos_faturamento(porcentagem_nf)")
                 .eq("status", true)
                 .range(from, from + stepAmount - 1);
 
@@ -556,6 +557,7 @@ function WizardContent() {
                 ciclo: matched?.ciclos_faturamento?.nome ?? null,
                 numero_nf: (row as any).numero_nf || (row as any).numeroNF, // Preserva numero_nf se vier de faturamento_consolidados
                 boleto_unificado: matched?.boleto_unificado ?? false,
+                porcentagemNF: (matched as any)?.produtos_faturamento?.porcentagem_nf ?? 11.5,
                 rawRow: row,
                 suggestedFracaoHora,
                 suggestedValorIwof,

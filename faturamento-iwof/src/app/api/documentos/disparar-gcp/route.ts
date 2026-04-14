@@ -88,7 +88,8 @@ export async function POST(req: NextRequest) {
                 clientes (
                     id, nome_fantasia, razao_social, cnpj, endereco, bairro, cidade, estado, cep,
                     codigo_ibge, email_principal, emails_faturamento, nome_conta_azul, loja_mae_id,
-                    ciclos_faturamento(nome)
+                    ciclos_faturamento(nome),
+                    produtos_faturamento(porcentagem_nf)
                 )
             `)
             .eq("lote_id", loteId);
@@ -229,8 +230,12 @@ export async function POST(req: NextRequest) {
             const valorBaseNormal = numBruto + numAcrescimos - numDescontos;
             const valorBaseFatura = isNordestao ? (numBruto + numAcrescimos) : valorBaseNormal;
 
-            const valorNC = valorBaseFatura * 0.885;
-            const valorNF = valorBaseFatura * 0.115;
+            const porcentagemNF = cliente.produtos_faturamento?.porcentagem_nf ?? 11.5;
+            const fatorNF = porcentagemNF / 100;
+            const fatorNC = 1 - fatorNF;
+
+            const valorNC = valorBaseFatura * fatorNC;
+            const valorNF = valorBaseFatura * fatorNF;
             const valorIRRF = Number(cons.valor_ir_xml || 0);
             const valorLiquido = valorBaseNormal - valorIRRF;
 
@@ -440,8 +445,8 @@ export async function POST(req: NextRequest) {
                                     "DESCONTO": formatarParaGCP(filialTotalDesconto),
                                     "IRRF": formatarParaGCP(0),
                                     "VALOR_LIQUIDO": formatarParaGCP(baseFilialVirtual),
-                                    "NF": formatarParaGCP(baseFilialVirtual * 0.115),
-                                    "NC": formatarParaGCP(baseFilialVirtual * 0.885),
+                                    "NF": formatarParaGCP(baseFilialVirtual * fatorNF),
+                                    "NC": formatarParaGCP(baseFilialVirtual * fatorNC),
                                     "PERIODO": `${formatDataSegura(lote.data_inicio_ciclo)} à ${formatDataSegura(lote.data_fim_ciclo)}`,
                                     "boleto_unificado": financeiroPayload.boleto_unificado
                                 },

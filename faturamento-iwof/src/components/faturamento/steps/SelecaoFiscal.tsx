@@ -35,6 +35,7 @@ export default function SelecaoFiscal({
             cnpj: string;
             numAgendamentos: number;
             valorSugerido: number;
+            porcentagemNF: number;
         }>();
 
         for (const a of validados) {
@@ -48,7 +49,8 @@ export default function SelecaoFiscal({
                     razaoSocial: a.razaoSocial || a.loja,
                     cnpj: a.cnpj || "Sem CNPJ",
                     numAgendamentos: 0,
-                    valorSugerido: 0
+                    valorSugerido: 0,
+                    porcentagemNF: (a as any).porcentagemNF ?? 11.5
                 });
             }
 
@@ -119,10 +121,12 @@ export default function SelecaoFiscal({
 
         for (const loja of lojasData) {
             baseTotal += loja.valorSugerido;
+            const fatorNF = loja.porcentagemNF / 100;
+            const fatorNC = 1 - fatorNF;
             if (!lojasSemNf.has(loja.id)) {
-                // Emits NF: 11.5% NF and 88.5% NC
-                nfeTotal += loja.valorSugerido * 0.115;
-                ncTotal += loja.valorSugerido * 0.885;
+                // Emits NF: dynamic split based on product percentage
+                nfeTotal += loja.valorSugerido * fatorNF;
+                ncTotal += loja.valorSugerido * fatorNC;
             } else {
                 // Does NOT emit NF: 100% NC
                 ncTotal += loja.valorSugerido;

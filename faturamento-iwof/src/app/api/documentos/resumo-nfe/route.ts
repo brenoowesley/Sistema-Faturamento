@@ -21,7 +21,8 @@ export async function POST(req: NextRequest) {
             .select(`
                 id, razao_social, nome_fantasia, cnpj, nome_conta_azul,
                 loja_mae_id,
-                ciclos_faturamento(id, nome)
+                ciclos_faturamento(id, nome),
+                produtos_faturamento(porcentagem_nf)
             `)
             .in("id", validStoreIds);
 
@@ -43,7 +44,8 @@ export async function POST(req: NextRequest) {
                 .select(`
                     id, razao_social, nome_fantasia, cnpj, nome_conta_azul,
                     loja_mae_id,
-                    ciclos_faturamento(id, nome)
+                    ciclos_faturamento(id, nome),
+                    produtos_faturamento(porcentagem_nf)
                 `)
                 .in("id", Array.from(motherIdsToFetch));
 
@@ -139,8 +141,12 @@ export async function POST(req: NextRequest) {
             let isSemNF = semNFSet.has(c.id);
             // We can also fallback to the original payload's id match but since we swapped the client object to mother's, the mother id check applies natively.
 
-            const nf = isSemNF ? 0 : Math.max(0, baseResumo * 0.115);
-            const nc = isSemNF ? baseResumo : Math.max(0, baseResumo * 0.885);
+            const porcentagemNF = c.produtos_faturamento?.porcentagem_nf ?? 11.5;
+            const fatorNF = porcentagemNF / 100;
+            const fatorNC = 1 - fatorNF;
+
+            const nf = isSemNF ? 0 : Math.max(0, baseResumo * fatorNF);
+            const nc = isSemNF ? baseResumo : Math.max(0, baseResumo * fatorNC);
 
             return {
                 id: c.id || r.cliente_id,
