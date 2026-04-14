@@ -335,6 +335,13 @@ function WizardContent() {
         const colCnpjLoja = findCol(headers, "cnpj", "cnpj loja", "cnpj_loja", "cnpj empresa", "cnpj_empresa");
         const colEmailIniciador = findCol(headers, "email do iniciador", "email_iniciador", "email iniciador");
 
+        // 🔍 DEBUG: Verificar headers da planilha e mapeamento do email
+        console.log("[DEBUG HEADERS] Todas as colunas da planilha:", headers);
+        console.log("[DEBUG EMAIL] colEmailIniciador mapeado para:", colEmailIniciador);
+        if (!colEmailIniciador) {
+            console.warn("[DEBUG EMAIL] ⚠️ Coluna de email do iniciador NÃO encontrada! Headers disponíveis:", headers.map(h => `"${h}"`).join(", "));
+        }
+
         const pStart = periodoInicio ? new Date(periodoInicio + "T00:00:00") : null;
         const pEnd = periodoFim ? new Date(periodoFim + "T23:59:59") : null;
 
