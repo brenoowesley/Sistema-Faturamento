@@ -20,13 +20,35 @@ export async function POST(request: Request) {
         const { loteId, assunto, continuar } = await request.json();
         if (!loteId) throw new Error("ID do Lote não fornecido.");
 
-        // Se "Continuar Envio": limpar logs de Erro da última tentativa para re-processá-los
+        // ═══ LOCK OTIMISTA (CAS): Impedir disparos simultâneos ═══
+        // Só permite disparar se o lote NÃO está em ENVIANDO nem CANCELADO.
+        // Se "continuar", permite re-disparar a partir de ENVIANDO.
+        const allowedStatuses = continuar
+            ? ['ENVIANDO', 'PENDENTE', 'AGUARDANDO_XML', 'EM_ESPERA']
+            : ['PENDENTE', 'AGUARDANDO_XML', 'EM_ESPERA', 'RASCUNHO'];
+
+        const { data: lockData, error: lockErr } = await supabaseAdmin
+            .from('faturamentos_lote')
+            .update({ status: 'ENVIANDO' })
+            .eq('id', loteId)
+            .in('status', allowedStatuses)
+            .select('id')
+            .single();
+
+        if (lockErr || !lockData) {
+            return NextResponse.json({
+                success: false,
+                error: 'Este lote já está em processo de envio ou foi cancelado. Aguarde a conclusão.'
+            }, { status: 409 });
+        }
+
+        // Se "Continuar Envio": limpar logs de Erro e Processando da última tentativa
         if (continuar) {
             await supabaseAdmin
                 .from('logs_envio_email')
                 .delete()
                 .eq('lote_id', loteId)
-                .eq('status', 'Erro');
+                .in('status', ['Erro', 'Processando']);
         }
 
         // 1. Buscar o lote (para nome_pasta e data_competencia)
@@ -136,13 +158,9 @@ export async function POST(request: Request) {
         }
 
         // 5. Disparo simultâneo para o Pub/Sub
+        // O status já foi marcado como ENVIANDO pelo CAS lock acima.
         if (publishPromises.length > 0) {
             await Promise.all(publishPromises);
-
-            await supabaseAdmin
-                .from('faturamentos_lote')
-                .update({ status: 'ENVIANDO' })
-                .eq('id', loteId);
         }
 
         return NextResponse.json({

@@ -78,6 +78,7 @@ export default function FechamentoLote({
 
     const boletosInputRef = useRef<HTMLInputElement>(null);
     const nfsInputRef = useRef<HTMLInputElement>(null);
+    const isDispatchingRef = useRef(false);
     const [manualMappings, setManualMappings] = useState<Record<string, { consolidadoId: string; type: 'nfse' | 'boleto' }>>({});
     const [parsedDocumentData, setParsedDocumentData] = useState<Record<string, { cnpj: string; irrf: number; numero_nf_real: string; valorServicos: number; name: string }>>({});
     const [pendingAdjustments, setPendingAdjustments] = useState<any[]>([]);
@@ -995,6 +996,10 @@ export default function FechamentoLote({
     };
 
     const handleDispararEmails = async () => {
+        // Guard síncrono: bloqueia antes do React re-render (anti double-click)
+        if (isDispatchingRef.current) return;
+        isDispatchingRef.current = true;
+
         // Verifica se faltam passos básicos e pede confirmação
         const faltamBoletos = !actionState.boletosSuccess;
         const faltamNfs = !actionState.nfsSuccess;
@@ -1005,7 +1010,10 @@ export default function FechamentoLote({
             if (faltamBoletos) itensFaltantes.push("Boletos (Passo 5)");
             
             const confirmMsg = `Atenção: Você ainda não organizou os seguintes itens: ${itensFaltantes.join(' e ')}. \n\nOs e-mails serão enviados sem esses documentos anexados. Deseja enviar assim mesmo?`;
-            if (!window.confirm(confirmMsg)) return;
+            if (!window.confirm(confirmMsg)) {
+                isDispatchingRef.current = false;
+                return;
+            }
         }
 
         setLoadingMap(p => ({ ...p, "emailsSuccess": true }));
@@ -1034,6 +1042,7 @@ export default function FechamentoLote({
         } finally {
             setLoadingMap(p => ({ ...p, "emailsSuccess": false }));
             setActiveModal(null);
+            isDispatchingRef.current = false;
         }
     };
 
