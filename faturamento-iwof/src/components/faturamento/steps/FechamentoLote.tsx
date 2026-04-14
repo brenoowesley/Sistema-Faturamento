@@ -572,7 +572,8 @@ export default function FechamentoLote({
                     valor_iwof: finalVal,
                     fracao_hora: a.status === "CORREÇÃO" ? (a.suggestedFracaoHora ?? a.fracaoHora) : a.fracaoHora,
                     status_validacao: "VALIDADO",
-                    data_competencia: a.data_competencia || a.dataCompetencia || null
+                    data_competencia: a.data_competencia || a.dataCompetencia || null,
+                    email_iniciador: a.emailIniciador || null
                 };
             });
 
