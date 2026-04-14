@@ -76,6 +76,7 @@ interface Agendamento {
     dataCancelamento: Date | null;
     motivoCancelamento: string;
     responsavelCancelamento: string;
+    emailIniciador?: string;
 
     // Processed fields
     status: ValidationStatus;

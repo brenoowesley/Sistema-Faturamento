@@ -333,6 +333,7 @@ function WizardContent() {
         const colMotivo = findCol(headers, "motivo");
         const colRespCanc = findCol(headers, "responsável pelo cancelamento", "responsavel_cancelamento");
         const colCnpjLoja = findCol(headers, "cnpj", "cnpj loja", "cnpj_loja", "cnpj empresa", "cnpj_empresa");
+        const colEmailIniciador = findCol(headers, "email do iniciador", "email_iniciador", "email iniciador");
 
         const pStart = periodoInicio ? new Date(periodoInicio + "T00:00:00") : null;
         const pEnd = periodoFim ? new Date(periodoFim + "T23:59:59") : null;
@@ -397,6 +398,7 @@ function WizardContent() {
             const motivoCancelamento = colMotivo ? String(row[colMotivo] ?? "").trim() : "";
             const responsavelCancelamento = colRespCanc ? String(row[colRespCanc] ?? "").trim() : "";
             const cnpjDaPlanilha = colCnpjLoja ? normalizeCnpj(String(row[colCnpjLoja] ?? "").trim()) : "";
+            const emailIniciador = colEmailIniciador ? String(row[colEmailIniciador] ?? "").trim() : "";
 
             if (!loja) continue;
 
@@ -536,6 +538,7 @@ function WizardContent() {
                 dataCancelamento,
                 motivoCancelamento,
                 responsavelCancelamento,
+                emailIniciador,
                 status,
                 status_match,
                 clienteId: matched?.id ?? null,
@@ -765,7 +768,8 @@ function WizardContent() {
                     valor_iwof: finalVal,
                     fracao_hora: a.status === "CORREÇÃO" ? (a.suggestedFracaoHora ?? a.fracaoHora) : a.fracaoHora,
                     data_competencia: dataComp,
-                    status_validacao: "VALIDADO"
+                    status_validacao: "VALIDADO",
+                    email_iniciador: a.emailIniciador || null
                 };
             });
 

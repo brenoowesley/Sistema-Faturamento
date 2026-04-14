@@ -165,7 +165,8 @@ export async function POST(req: NextRequest) {
                 profissional: ag.nome_profissional,
                 vaga: ag.vaga || null,
                 cnpj_execucao: ag.cnpj_loja || (ag.clientes as any)?.cnpj,
-                razao_social_execucao: (ag.clientes as any)?.razao_social
+                razao_social_execucao: (ag.clientes as any)?.razao_social,
+                email_iniciador: ag.email_iniciador || ""
             });
         });
 
@@ -196,7 +197,8 @@ export async function POST(req: NextRequest) {
                     formatDateStr(ag.inicio),
                     formatDateStr(ag.termino),
                     `R$ ${formatarParaGCP(ag.valor)}`,
-                    formatarParaGCP(ag.fracao_hora)
+                    formatarParaGCP(ag.fracao_hora),
+                    ag.email_iniciador || "-"
                 ]);
         };
 
@@ -392,7 +394,7 @@ export async function POST(req: NextRequest) {
                             lista_acrescimos: lista_acrescimos,
                             lista_descontos: lista_descontos,
                             ajustes_manuais: ajustes_manuais,
-                            faturamento_headers: ["Nome", "Vaga", "Início", "Término", "Valor IWOF", "Fração de hora computada"],
+                            faturamento_headers: ["Nome", "Vaga", "Início", "Término", "Valor IWOF", "Fração de hora computada", "Iniciado por"],
                             itens_faturados_rows: buildMatriz(agsDaLoja)
                         });
                     }
@@ -446,7 +448,7 @@ export async function POST(req: NextRequest) {
                                 lista_acrescimos: filialListaAcrescimos,
                                 lista_descontos: filialListaDescontos,
                                 ajustes_manuais: filialAjustesManuais,
-                                faturamento_headers: ["Nome", "Vaga", "Início", "Término", "Valor IWOF", "Fração de hora computada"],
+                                faturamento_headers: ["Nome", "Vaga", "Início", "Término", "Valor IWOF", "Fração de hora computada", "Iniciado por"],
                                 itens_faturados_rows: buildMatriz(agsFilial)
                             });
                         }
@@ -476,7 +478,7 @@ export async function POST(req: NextRequest) {
                         lista_acrescimos: lista_acrescimos,
                         lista_descontos: lista_descontos,
                         ajustes_manuais: ajustes_manuais,
-                        faturamento_headers: ["Nome", "Vaga", "Início", "Término", "Valor IWOF", "Fração de hora computada"],
+                        faturamento_headers: ["Nome", "Vaga", "Início", "Término", "Valor IWOF", "Fração de hora computada", "Iniciado por"],
                         itens_faturados_rows: buildMatriz(agsDaLoja)
                     });
                 }
