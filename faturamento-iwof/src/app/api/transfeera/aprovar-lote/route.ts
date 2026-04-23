@@ -112,6 +112,9 @@ export async function POST(req: NextRequest) {
             destination_bank_account: {
                 pix_key_type: normalizePixKeyType(item.tipo_pix),
                 pix_key: formatarChavePix(item.tipo_pix, item.chave_pix),
+            },
+            pix_key_validation: {
+                cpf_cnpj: item.cpf_favorecido ? item.cpf_favorecido.replace(/\D/g, "") : ""
             }
         }));
 
