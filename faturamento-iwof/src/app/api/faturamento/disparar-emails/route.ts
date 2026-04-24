@@ -109,6 +109,10 @@ export async function POST(request: Request) {
                 continue;
             }
 
+            // Registrar em memória que este cliente já foi processado nesta execução
+            // Isso evita disparos duplos caso o banco de dados retorne múltiplas linhas para o mesmo cliente
+            clientesJaProcessados.add(item.cliente_id);
+
             // Sem e-mail configurado → registrar como falha imediatamente (não vai pro Pub/Sub)
             if (!cliente || !cliente.emails_faturamento || cliente.emails_faturamento.trim() === '') {
                 await supabaseAdmin.from('logs_envio_email').insert({

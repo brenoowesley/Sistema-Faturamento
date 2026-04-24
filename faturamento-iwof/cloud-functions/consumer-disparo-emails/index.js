@@ -236,6 +236,20 @@ app.post('/', async (req, res) => {
             return res.status(204).send();
         }
 
+        // ⚠️ INSERE "PROCESSANDO" PARA BLOQUEAR RACE CONDITIONS (Disparos múltiplos)
+        // Se duas requisições entrarem ao mesmo tempo, a primeira cria isso e a segunda vai cair na checagem acima 
+        // ou falhar na restrição do banco. De qualquer forma, garante que o worker assumiu o envio.
+        const { data: processandoLog } = await supabaseAdmin.from('logs_envio_email').insert({
+            lote_id: loteId,
+            cliente_id: clienteId,
+            cliente_nome: razaoSocial || clienteNome,
+            destinatarios,
+            assunto: assunto || `Faturamento Mensal - ${razaoSocial}`,
+            status: 'Processando',
+        }).select('id').single();
+
+        const logId = processandoLog?.id;
+
         // ═══════════════════════════════════════
         // 3. Localizar pasta no Drive e baixar PDFs
         // ═══════════════════════════════════════
@@ -300,14 +314,21 @@ app.post('/', async (req, res) => {
         // ═══════════════════════════════════════
         // 5. Registrar SUCESSO no Supabase
         // ═══════════════════════════════════════
-        await supabaseAdmin.from('logs_envio_email').insert({
-            lote_id: loteId,
-            cliente_id: clienteId,
-            cliente_nome: razaoSocial || clienteNome,
-            destinatarios,
-            assunto: mailOptions.subject,
-            status: 'Sucesso',
-        });
+        if (logId) {
+            await supabaseAdmin.from('logs_envio_email').update({
+                status: 'Sucesso',
+                assunto: mailOptions.subject
+            }).eq('id', logId);
+        } else {
+            await supabaseAdmin.from('logs_envio_email').insert({
+                lote_id: loteId,
+                cliente_id: clienteId,
+                cliente_nome: razaoSocial || clienteNome,
+                destinatarios,
+                assunto: mailOptions.subject,
+                status: 'Sucesso',
+            });
+        }
 
         return res.status(204).send();
 
@@ -320,6 +341,13 @@ app.post('/', async (req, res) => {
 
         try {
             if (payload?.loteId) {
+                // Remove o log temporário de "Processando" para substituí-lo pelo erro final
+                await supabaseAdmin.from('logs_envio_email')
+                    .delete()
+                    .eq('lote_id', payload.loteId)
+                    .eq('cliente_id', payload.clienteId)
+                    .eq('status', 'Processando');
+
                 await supabaseAdmin.from('logs_envio_email').insert({
                     lote_id: payload.loteId,
                     cliente_id: payload.clienteId || null,
