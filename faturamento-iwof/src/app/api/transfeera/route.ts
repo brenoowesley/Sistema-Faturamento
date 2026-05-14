@@ -202,78 +202,37 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ error: "batchId é obrigatório" }, { status: 400 });
             }
 
-            console.log(`[Transfeera] ▶ Buscando lote ${batchId} com paginação completa e sincronizando via Backend...`);
+            console.log(`[Transfeera] ▶ Buscando lote ${batchId} e sincronizando via Backend...`);
 
-            // ─── Paginação completa: busca TODAS as páginas da Transfeera ──────────
-            // per_page=500 reduz drasticamente o número de round-trips (1920 itens → ~4 chamadas).
-            // A paginação é guiada pelos metadados da resposta (last_page/total_pages) quando
-            // disponíveis, com fallback pela comparação do tamanho da página retornada.
-            // Safety-guard de 50 páginas evita loops infinitos em caso de bug de API.
-            const TRANSFEERA_PAGE_SIZE = 500;
-            const MAX_PAGES = 50;
-            const list: any[] = [];
-            let currentPage = 1;
-            let lastPage: number | null = null;
-            let fetchError: { payload: any; status: number } | null = null;
+            // A API GET /batch/{id}/transfer não aceita query params de paginação —
+            // ela retorna TODOS os itens do lote em uma única resposta.
+            const tRes = await fetch(`${baseUrl}/batch/${batchId}/transfer`, {
+                method: "GET",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "User-Agent": UA_HEADER,
+                    Accept: "application/json",
+                },
+            });
 
-            while (currentPage <= MAX_PAGES) {
-                const pagedUrl = `${baseUrl}/batch/${batchId}/transfer?page=${currentPage}&per_page=${TRANSFEERA_PAGE_SIZE}`;
-                console.log(`[Transfeera] Buscando página ${currentPage}${lastPage ? `/${lastPage}` : ""}: ${pagedUrl}`);
-
-                const tRes = await fetch(pagedUrl, {
-                    method: "GET",
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                        "User-Agent": UA_HEADER,
-                        Accept: "application/json",
-                    },
-                });
-
-                const tPayload = await tRes.json();
-
-                if (!tRes.ok) {
-                    console.error(`[Transfeera] ❌ Erro na página ${currentPage}:`, tPayload);
-                    fetchError = { payload: tPayload, status: tRes.status };
-                    break;
-                }
-
-                // Extrai os itens e os metadados de paginação da resposta
-                const isArray = Array.isArray(tPayload);
-                const pageItems: any[] = isArray ? tPayload : (tPayload.data || []);
-                
-                // Captura last_page/total_pages dos metadados da resposta (se existirem)
-                if (!isArray && lastPage === null) {
-                    const meta = tPayload.meta || tPayload;
-                    lastPage = meta.last_page ?? meta.total_pages ?? null;
-                    if (lastPage) console.log(`[Transfeera] Metadados: last_page=${lastPage}, total=${meta.total ?? "?"}`);
-                }
-
-                list.push(...pageItems);
-                console.log(`[Transfeera] Página ${currentPage}: ${pageItems.length} item(s). Acumulado: ${list.length}`);
-
-                // Condição de parada: metadados indicam última página, ou página retornou menos que o máximo
-                if (lastPage !== null && currentPage >= lastPage) break;
-                if (pageItems.length < TRANSFEERA_PAGE_SIZE) break;
-                if (pageItems.length === 0) break;
-                currentPage++;
+            const tPayload = await tRes.json();
+            if (!tRes.ok) {
+                console.error(`[Transfeera] ❌ Erro na requisição:`, tPayload);
+                return NextResponse.json({ success: false, error: "Erro na Transfeera", details: tPayload }, { status: tRes.status });
             }
 
-            if (fetchError && list.length === 0) {
-                return NextResponse.json({ success: false, error: "Erro na Transfeera", details: fetchError.payload }, { status: fetchError.status });
-            }
-
-            console.log(`[Transfeera] ✅ Paginação concluída: ${list.length} item(s) em ${currentPage} página(s).`);
+            const list: any[] = Array.isArray(tPayload) ? tPayload : (tPayload.data || []);
+            console.log(`[Transfeera] ✅ ${list.length} item(s) recebidos da Transfeera.`);
 
             // ─── Atualiza o Supabase em chunks para evitar sobrecarga de conexões ──
-            // Executa updates em lotes de 100 em paralelo (em vez de 1920+ Promises simultâneas),
-            // evitando rate-limiting e timeouts em lotes grandes.
+            // Para lotes grandes (ex: 1920 itens), executar 1920 Promises simultâneas
+            // pode sobrecarregar a pool de conexões. Executamos em lotes de 100.
             if (list.length > 0) {
                 const supabaseAdmin = createAdminClient();
                 const DB_CHUNK_SIZE = 100;
                 let updatedCount = 0;
                 let errorCount = 0;
 
-                // Prepara os payloads de update para todos os itens identificáveis
                 const updateTasks = list
                     .map((t: any) => {
                         const remoteId = t.integration_id || t.id_integracao;
@@ -297,7 +256,6 @@ export async function POST(req: NextRequest) {
                     })
                     .filter(Boolean) as { remoteId: string; payload: any }[];
 
-                // Executa em chunks paralelos de DB_CHUNK_SIZE
                 for (let i = 0; i < updateTasks.length; i += DB_CHUNK_SIZE) {
                     const chunk = updateTasks.slice(i, i + DB_CHUNK_SIZE);
                     await Promise.all(
@@ -316,7 +274,7 @@ export async function POST(req: NextRequest) {
                                 })
                         )
                     );
-                    console.log(`[Transfeera] DB chunk ${Math.floor(i / DB_CHUNK_SIZE) + 1}: ${chunk.length} updates processados.`);
+                    console.log(`[Transfeera] DB chunk ${Math.floor(i / DB_CHUNK_SIZE) + 1}: ${chunk.length} updates.`);
                 }
 
                 console.log(`[Transfeera] ✅ Sync completo: ${updatedCount} atualizados, ${errorCount} erros.`);
