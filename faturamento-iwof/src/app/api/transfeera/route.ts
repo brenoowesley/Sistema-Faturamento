@@ -205,16 +205,20 @@ export async function POST(req: NextRequest) {
             console.log(`[Transfeera] ▶ Buscando lote ${batchId} com paginação completa e sincronizando via Backend...`);
 
             // ─── Paginação completa: busca TODAS as páginas da Transfeera ──────────
-            // A API Transfeera pagina resultados (padrão: 100/página).
-            // Sem paginação, lotes com >100 itens teriam apenas a primeira página sincronizada.
-            const TRANSFEERA_PAGE_SIZE = 100;
+            // per_page=500 reduz drasticamente o número de round-trips (1920 itens → ~4 chamadas).
+            // A paginação é guiada pelos metadados da resposta (last_page/total_pages) quando
+            // disponíveis, com fallback pela comparação do tamanho da página retornada.
+            // Safety-guard de 50 páginas evita loops infinitos em caso de bug de API.
+            const TRANSFEERA_PAGE_SIZE = 500;
+            const MAX_PAGES = 50;
             const list: any[] = [];
             let currentPage = 1;
+            let lastPage: number | null = null;
             let fetchError: { payload: any; status: number } | null = null;
 
-            while (true) {
+            while (currentPage <= MAX_PAGES) {
                 const pagedUrl = `${baseUrl}/batch/${batchId}/transfer?page=${currentPage}&per_page=${TRANSFEERA_PAGE_SIZE}`;
-                console.log(`[Transfeera] Buscando página ${currentPage}: ${pagedUrl}`);
+                console.log(`[Transfeera] Buscando página ${currentPage}${lastPage ? `/${lastPage}` : ""}: ${pagedUrl}`);
 
                 const tRes = await fetch(pagedUrl, {
                     method: "GET",
@@ -233,13 +237,24 @@ export async function POST(req: NextRequest) {
                     break;
                 }
 
-                const pageItems: any[] = Array.isArray(tPayload) ? tPayload : (tPayload.data || []);
+                // Extrai os itens e os metadados de paginação da resposta
+                const isArray = Array.isArray(tPayload);
+                const pageItems: any[] = isArray ? tPayload : (tPayload.data || []);
+                
+                // Captura last_page/total_pages dos metadados da resposta (se existirem)
+                if (!isArray && lastPage === null) {
+                    const meta = tPayload.meta || tPayload;
+                    lastPage = meta.last_page ?? meta.total_pages ?? null;
+                    if (lastPage) console.log(`[Transfeera] Metadados: last_page=${lastPage}, total=${meta.total ?? "?"}`);
+                }
+
                 list.push(...pageItems);
+                console.log(`[Transfeera] Página ${currentPage}: ${pageItems.length} item(s). Acumulado: ${list.length}`);
 
-                console.log(`[Transfeera] Página ${currentPage}: ${pageItems.length} item(s) recebidos. Total acumulado: ${list.length}`);
-
-                // Se a página retornou menos itens que o tamanho máximo, é a última página
+                // Condição de parada: metadados indicam última página, ou página retornou menos que o máximo
+                if (lastPage !== null && currentPage >= lastPage) break;
                 if (pageItems.length < TRANSFEERA_PAGE_SIZE) break;
+                if (pageItems.length === 0) break;
                 currentPage++;
             }
 
@@ -247,48 +262,67 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ success: false, error: "Erro na Transfeera", details: fetchError.payload }, { status: fetchError.status });
             }
 
-            console.log(`[Transfeera] ✅ Paginação concluída: ${list.length} item(s) no total (${currentPage} página(s) consultadas).`);
-            
-            // 💡 O PULO DO GATO: Atualiza o Supabase direto do Backend usando poder de Admin (ignora bloqueios do browser)
+            console.log(`[Transfeera] ✅ Paginação concluída: ${list.length} item(s) em ${currentPage} página(s).`);
+
+            // ─── Atualiza o Supabase em chunks para evitar sobrecarga de conexões ──
+            // Executa updates em lotes de 100 em paralelo (em vez de 1920+ Promises simultâneas),
+            // evitando rate-limiting e timeouts em lotes grandes.
             if (list.length > 0) {
                 const supabaseAdmin = createAdminClient();
-                const updatePromises = list.map(async (t: any) => {
-                    const remoteId = t.integration_id || t.id_integracao;
-                    
-                    // SEGURANÇA: Se não há integration_id, este item não pertence ao nosso sistema. Ignora.
-                    if (!remoteId) return null;
+                const DB_CHUNK_SIZE = 100;
+                let updatedCount = 0;
+                let errorCount = 0;
 
-                    const s = String(t.status || "").toUpperCase().trim();
-                    const payload: any = { 
-                        transfeera_transfer_id: String(t.id)
-                    };
+                // Prepara os payloads de update para todos os itens identificáveis
+                const updateTasks = list
+                    .map((t: any) => {
+                        const remoteId = t.integration_id || t.id_integracao;
+                        if (!remoteId) return null;
 
-                    // MAPEAMENTO ESTREITO: Só altera o status_item para itens identificados na API
-                    if (["FINALIZADA", "FINALIZADO", "PAGO", "CONCLUIDO", "CONCLUÍDO", "EFETIVADO"].includes(s)) {
-                        payload.status_item = "CONCLUIDO";
-                        payload.motivo_bloqueio = null; 
-                    } else if (["FALHA", "FAILED", "ERROR", "REJEITADA", "DEVOLVIDA", "DEVOLVIDO", "RETURNED"].includes(s)) {
-                        payload.status_item = "FALHA";
-                        // Preenche com o erro real da Transfeera
-                        payload.motivo_bloqueio = t.status_description || "Erro no processamento Transfeera";
-                    } else if (["CANCELADA", "CANCELADO"].includes(s)) {
-                        payload.status_item = "REMOVIDO";
-                        payload.motivo_bloqueio = "Cancelado na plataforma Transfeera";
-                    }
+                        const s = String(t.status || "").toUpperCase().trim();
+                        const payload: any = { transfeera_transfer_id: String(t.id) };
 
-                    // O 'eq("id", remoteId)' garante que APENAS o saque específico identificado pela Transfeera
-                    // seja alterado. Saques bloqueados anteriormente que não estão na lista da API permanecem intocados.
-                    const { error } = await supabaseAdmin.from("itens_saque").update(payload).eq("id", remoteId);
-                    
-                    if (error) console.error(`❌ [Supabase ERRO] Falha no saque ${remoteId}:`, error.message);
-                    return error;
-                });
+                        if (["FINALIZADA", "FINALIZADO", "PAGO", "CONCLUIDO", "CONCLUÍDO", "EFETIVADO"].includes(s)) {
+                            payload.status_item = "CONCLUIDO";
+                            payload.motivo_bloqueio = null;
+                        } else if (["FALHA", "FAILED", "ERROR", "REJEITADA", "DEVOLVIDA", "DEVOLVIDO", "RETURNED"].includes(s)) {
+                            payload.status_item = "FALHA";
+                            payload.motivo_bloqueio = t.status_description || "Erro no processamento Transfeera";
+                        } else if (["CANCELADA", "CANCELADO"].includes(s)) {
+                            payload.status_item = "REMOVIDO";
+                            payload.motivo_bloqueio = "Cancelado na plataforma Transfeera";
+                        }
 
-                await Promise.all(updatePromises);
-                console.log(`[Transfeera] ✅ ${list.length} itens sincronizados no Supabase pelo Backend!`);
+                        return { remoteId, payload };
+                    })
+                    .filter(Boolean) as { remoteId: string; payload: any }[];
+
+                // Executa em chunks paralelos de DB_CHUNK_SIZE
+                for (let i = 0; i < updateTasks.length; i += DB_CHUNK_SIZE) {
+                    const chunk = updateTasks.slice(i, i + DB_CHUNK_SIZE);
+                    await Promise.all(
+                        chunk.map(({ remoteId, payload }) =>
+                            supabaseAdmin
+                                .from("itens_saque")
+                                .update(payload)
+                                .eq("id", remoteId)
+                                .then(({ error }) => {
+                                    if (error) {
+                                        console.error(`❌ [Supabase ERRO] Falha no saque ${remoteId}:`, error.message);
+                                        errorCount++;
+                                    } else {
+                                        updatedCount++;
+                                    }
+                                })
+                        )
+                    );
+                    console.log(`[Transfeera] DB chunk ${Math.floor(i / DB_CHUNK_SIZE) + 1}: ${chunk.length} updates processados.`);
+                }
+
+                console.log(`[Transfeera] ✅ Sync completo: ${updatedCount} atualizados, ${errorCount} erros.`);
             }
 
-            return NextResponse.json({ success: true, transfers: list });
+            return NextResponse.json({ success: true, transfers: list, total: list.length });
         }
 
         return NextResponse.json({ error: "Invalid action" }, { status: 400 });

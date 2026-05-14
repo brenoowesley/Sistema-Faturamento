@@ -215,7 +215,12 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
                 </div>
                 <div className="ml-auto text-right">
                     <p className="text-xs font-semibold text-fg-dim uppercase tracking-wider mb-1">Total do Lote</p>
-                    <p className="text-2xl font-bold text-accent">R$ {lote.total_real?.toFixed(2)}</p>
+                    <p className="text-2xl font-bold text-accent">
+                        R$ {itens.length > 0
+                            ? itens.reduce((s, i) => s + (Number(i.valor) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })
+                            : lote.total_real?.toLocaleString("pt-BR", { minimumFractionDigits: 2 }) ?? "—"}
+                    </p>
+                    <p className="text-xs text-fg-dim mt-0.5">{itens.length} registros carregados</p>
                 </div>
             </div>
 
