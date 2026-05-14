@@ -202,25 +202,52 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ error: "batchId é obrigatório" }, { status: 400 });
             }
 
-            console.log(`[Transfeera] ▶ Buscando lote ${batchId} e sincronizando via Backend...`);
-            const url = `${baseUrl}/batch/${batchId}/transfer`;
-            
-            const tRes = await fetch(url, {
-                method: "GET",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "User-Agent": UA_HEADER,
-                    Accept: "application/json",
-                },
-            });
+            console.log(`[Transfeera] ▶ Buscando lote ${batchId} com paginação completa e sincronizando via Backend...`);
 
-            const tPayload = await tRes.json();
-            if (!tRes.ok) {
-                console.error(`[Transfeera] ❌ Erro na requisição:`, tPayload);
-                return NextResponse.json({ success: false, error: "Erro na Transfeera", details: tPayload }, { status: tRes.status });
+            // ─── Paginação completa: busca TODAS as páginas da Transfeera ──────────
+            // A API Transfeera pagina resultados (padrão: 100/página).
+            // Sem paginação, lotes com >100 itens teriam apenas a primeira página sincronizada.
+            const TRANSFEERA_PAGE_SIZE = 100;
+            const list: any[] = [];
+            let currentPage = 1;
+            let fetchError: { payload: any; status: number } | null = null;
+
+            while (true) {
+                const pagedUrl = `${baseUrl}/batch/${batchId}/transfer?page=${currentPage}&per_page=${TRANSFEERA_PAGE_SIZE}`;
+                console.log(`[Transfeera] Buscando página ${currentPage}: ${pagedUrl}`);
+
+                const tRes = await fetch(pagedUrl, {
+                    method: "GET",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        "User-Agent": UA_HEADER,
+                        Accept: "application/json",
+                    },
+                });
+
+                const tPayload = await tRes.json();
+
+                if (!tRes.ok) {
+                    console.error(`[Transfeera] ❌ Erro na página ${currentPage}:`, tPayload);
+                    fetchError = { payload: tPayload, status: tRes.status };
+                    break;
+                }
+
+                const pageItems: any[] = Array.isArray(tPayload) ? tPayload : (tPayload.data || []);
+                list.push(...pageItems);
+
+                console.log(`[Transfeera] Página ${currentPage}: ${pageItems.length} item(s) recebidos. Total acumulado: ${list.length}`);
+
+                // Se a página retornou menos itens que o tamanho máximo, é a última página
+                if (pageItems.length < TRANSFEERA_PAGE_SIZE) break;
+                currentPage++;
             }
 
-            const list = Array.isArray(tPayload) ? tPayload : (tPayload.data || []);
+            if (fetchError && list.length === 0) {
+                return NextResponse.json({ success: false, error: "Erro na Transfeera", details: fetchError.payload }, { status: fetchError.status });
+            }
+
+            console.log(`[Transfeera] ✅ Paginação concluída: ${list.length} item(s) no total (${currentPage} página(s) consultadas).`);
             
             // 💡 O PULO DO GATO: Atualiza o Supabase direto do Backend usando poder de Admin (ignora bloqueios do browser)
             if (list.length > 0) {

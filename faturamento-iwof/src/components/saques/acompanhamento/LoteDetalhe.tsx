@@ -32,6 +32,42 @@ interface LoteSaque {
     transfeera_batch_id?: string;
 }
 
+// ─── Helper: busca TODOS os itens de um lote com paginação ───────────────────
+// O Supabase tem limite padrão silencioso de 1.000 linhas por query.
+// Lotes com >1000 itens seriam truncados sem aviso. Este helper usa .range()
+// iterativamente até esgotar todos os registros do lote.
+async function fetchAllItensDoLote(
+    supabase: ReturnType<typeof createClient>,
+    loteId: string
+): Promise<SaqueItem[]> {
+    const PAGE_SIZE = 1000;
+    const allItems: SaqueItem[] = [];
+    let from = 0;
+
+    while (true) {
+        const { data, error } = await supabase
+            .from("itens_saque")
+            .select("*")
+            .eq("lote_id", loteId)
+            .order("nome_usuario", { ascending: true })
+            .range(from, from + PAGE_SIZE - 1);
+
+        if (error) {
+            console.error(`[LoteDetalhe] Erro ao buscar itens (range ${from}-${from + PAGE_SIZE - 1}):`, error.message);
+            break;
+        }
+        if (!data || data.length === 0) break;
+
+        allItems.push(...(data as SaqueItem[]));
+        console.log(`[LoteDetalhe] Carregados ${allItems.length} itens até agora (página a partir de ${from}).`);
+
+        if (data.length < PAGE_SIZE) break; // última página
+        from += PAGE_SIZE;
+    }
+
+    return allItems;
+}
+
 export default function LoteDetalhe({ loteId }: { loteId: string }) {
     const supabase = createClient();
     const searchParams = useSearchParams();
@@ -55,12 +91,13 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
             const { data: lData } = await supabase.from("lotes_saques").select("*").eq("id", loteId).single();
             if (lData) setLote(lData);
 
-            const { data: iData } = await supabase.from("itens_saque").select("*").eq("lote_id", loteId).order("nome_usuario", { ascending: true });
-            if (iData) setItens(iData);
+            // Paginação: busca TODOS os itens (Supabase limita a 1000/query por padrão)
+            const iData = await fetchAllItensDoLote(supabase, loteId);
+            setItens(iData);
             setLoading(false); // Libera a tela para o utilizador ver
 
             // 2. Faz o Auto-Sync na Transfeera de forma invisível (apenas na 1ª vez)
-            if (!hasAutoSynced.current && lData?.transfeera_batch_id && iData && iData.length > 0) {
+            if (!hasAutoSynced.current && lData?.transfeera_batch_id && iData.length > 0) {
                 hasAutoSynced.current = true;
                 
                 const syncItems = iData.map(item => ({
@@ -71,8 +108,8 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
                 const success = await syncBatch(lData.transfeera_batch_id, syncItems);
                 if (success) {
                     // 3. Atualiza os dados da tabela silenciosamente (sem loading)
-                    const { data: updatedItens } = await supabase.from("itens_saque").select("*").eq("lote_id", loteId).order("nome_usuario", { ascending: true });
-                    if (updatedItens) setItens(updatedItens);
+                    const updatedItens = await fetchAllItensDoLote(supabase, loteId);
+                    setItens(updatedItens);
                 }
             }
         };
@@ -85,8 +122,8 @@ export default function LoteDetalhe({ loteId }: { loteId: string }) {
         if (!itens || !lote?.transfeera_batch_id) return;
         const success = await syncBatch(lote.transfeera_batch_id, itens);
         if (success) {
-            const { data } = await supabase.from("itens_saque").select("*").eq("lote_id", loteId).order("nome_usuario", { ascending: true });
-            if (data) setItens(data);
+            const updatedItens = await fetchAllItensDoLote(supabase, loteId);
+            setItens(updatedItens);
         }
     };
 
