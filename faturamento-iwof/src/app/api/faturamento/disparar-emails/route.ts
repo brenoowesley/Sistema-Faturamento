@@ -24,8 +24,8 @@ export async function POST(request: Request) {
         // Só permite disparar se o lote NÃO está em ENVIANDO nem CANCELADO.
         // Se "continuar", permite re-disparar a partir de ENVIANDO.
         const allowedStatuses = continuar
-            ? ['ENVIANDO', 'PENDENTE', 'AGUARDANDO_XML', 'EM_ESPERA']
-            : ['PENDENTE', 'AGUARDANDO_XML', 'EM_ESPERA', 'RASCUNHO'];
+            ? ['ENVIANDO', 'PENDENTE', 'AGUARDANDO_XML', 'EM_ESPERA', 'FECHADO']
+            : ['PENDENTE', 'AGUARDANDO_XML', 'EM_ESPERA', 'RASCUNHO', 'FECHADO'];
 
         const { data: lockData, error: lockErr } = await supabaseAdmin
             .from('faturamentos_lote')
