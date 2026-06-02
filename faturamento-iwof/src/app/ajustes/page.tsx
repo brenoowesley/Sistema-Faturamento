@@ -15,6 +15,7 @@ import {
     CheckCircle2,
     Search,
     ChevronDown,
+    ChevronRight,
     X,
     Eye,
     Pencil,
@@ -22,7 +23,16 @@ import {
     AlertTriangle,
     FileText,
     FileArchive,
-    Filter
+    Filter,
+    ShieldCheck,
+    XCircle,
+    Link2,
+    ExternalLink,
+    Download,
+    BarChart3,
+    TrendingUp,
+    TrendingDown,
+    Store
 } from "lucide-react";
 import { useDropzone } from "react-dropzone";
 import * as XLSX from "xlsx";
@@ -69,6 +79,37 @@ interface ClienteDB {
     nome_fantasia: string | null;
     nome_conta_azul: string | null;
     cnpj: string;
+}
+
+interface OnusSolicitacao {
+    id: string;
+    cnpj_loja: string;
+    nome_loja: string;
+    nome_usuario: string;
+    data_agendamento: string;
+    descricao: string;
+    valor: number;
+    anexo_url: string | null;
+    canal_recebimento: string;
+    canal_link: string | null;
+    email_solicitante: string | null;
+    cliente_id: string | null;
+    loja_identificada: boolean;
+    status: 'pendente' | 'aprovado' | 'recusado';
+    tipo_ajuste: 'ACRESCIMO' | 'DESCONTO' | null;
+    ajuste_gerado_id: string | null;
+    aprovado_por: string | null;
+    aprovado_em: string | null;
+    motivo_recusa: string | null;
+    observacao_admin: string | null;
+    created_at: string;
+    updated_at: string | null;
+    clientes?: {
+        nome_fantasia: string;
+        razao_social: string;
+        nome_conta_azul: string | null;
+        cnpj: string;
+    };
 }
 
 /* ================================================================
@@ -254,7 +295,7 @@ export default function AjustesPage() {
     const supabase = createClient();
 
     // State
-    const [activeMainTab, setActiveMainTab] = useState<"gestao" | "relatorios">("gestao");
+    const [activeMainTab, setActiveMainTab] = useState<"gestao" | "aprovacoes" | "relatorios">("gestao");
     const [activeTab, setActiveTab] = useState<"descontos" | "acrescimos" | "historico">("descontos");
     const [ajustes, setAjustes] = useState<Ajuste[]>([]);
     const [clientes, setClientes] = useState<ClienteDB[]>([]);
@@ -304,6 +345,28 @@ export default function AjustesPage() {
     const [filterClienteId, setFilterClienteId] = useState("");
     const [filterSearchText, setFilterSearchText] = useState("");
     const [filterDateType, setFilterDateType] = useState<"ocorrencia" | "aplicacao">("aplicacao");
+
+    // Aprovações State
+    const [solicitacoes, setSolicitacoes] = useState<OnusSolicitacao[]>([]);
+    const [loadingSolicitacoes, setLoadingSolicitacoes] = useState(false);
+    const [filtroStatusOnus, setFiltroStatusOnus] = useState<"" | "pendente" | "aprovado" | "recusado">("");
+    const [showModalAprovacao, setShowModalAprovacao] = useState(false);
+    const [selectedSolicitacao, setSelectedSolicitacao] = useState<OnusSolicitacao | null>(null);
+    const [aprovacaoData, setAprovacaoData] = useState({
+        tipo_ajuste: "DESCONTO" as "ACRESCIMO" | "DESCONTO",
+        cliente_id: "",
+        nome_loja: "",
+        valor: "",
+        descricao: "",
+        observacao_admin: "",
+        motivo_recusa: "",
+    });
+
+    // Dashboard State
+    const [dashboardTab, setDashboardTab] = useState<"dashboard" | "pdf">("dashboard");
+    const [dashDataInicio, setDashDataInicio] = useState("");
+    const [dashDataFim, setDashDataFim] = useState("");
+    const [expandedLojas, setExpandedLojas] = useState<Set<string>>(new Set());
 
     const applyFilters = useCallback((lista: Ajuste[]) => {
         return lista.filter(item => {
@@ -406,6 +469,7 @@ export default function AjustesPage() {
         fetchAjustes();
         fetchClientes();
         fetchCiclos();
+        fetchSolicitacoes();
         const fetchRole = async () => {
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
@@ -415,6 +479,183 @@ export default function AjustesPage() {
         };
         fetchRole();
     }, [fetchAjustes, fetchClientes, supabase]);
+
+    // ─── APROVAÇÕES: Fetch & Handlers ──────────────────────────────────────────
+    const fetchSolicitacoes = useCallback(async () => {
+        setLoadingSolicitacoes(true);
+        try {
+            let query = supabase
+                .from("onus_solicitacoes")
+                .select("*, clientes(nome_fantasia, razao_social, nome_conta_azul, cnpj)")
+                .order("created_at", { ascending: false });
+
+            if (filtroStatusOnus) query = query.eq("status", filtroStatusOnus);
+
+            const { data, error } = await query;
+            if (error) console.error("Error fetching solicitacoes:", error);
+            else setSolicitacoes(data || []);
+        } catch (err) {
+            console.error("Error:", err);
+        } finally {
+            setLoadingSolicitacoes(false);
+        }
+    }, [supabase, filtroStatusOnus]);
+
+    useEffect(() => {
+        if (activeMainTab === "aprovacoes") fetchSolicitacoes();
+    }, [activeMainTab, filtroStatusOnus]);
+
+    const openAprovacaoModal = (sol: OnusSolicitacao) => {
+        setSelectedSolicitacao(sol);
+        setAprovacaoData({
+            tipo_ajuste: sol.tipo_ajuste || "DESCONTO",
+            cliente_id: sol.cliente_id || "",
+            nome_loja: sol.nome_loja,
+            valor: formatBRL(sol.valor),
+            descricao: sol.descricao,
+            observacao_admin: sol.observacao_admin || "",
+            motivo_recusa: "",
+        });
+        setShowModalAprovacao(true);
+    };
+
+    const handleAprovarSolicitacao = async () => {
+        if (!selectedSolicitacao) return;
+        setIsSaving(true);
+        try {
+            const res = await fetch("/api/onus/solicitacoes", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    id: selectedSolicitacao.id,
+                    acao: "aprovar",
+                    tipo_ajuste: aprovacaoData.tipo_ajuste,
+                    cliente_id: aprovacaoData.cliente_id || selectedSolicitacao.cliente_id,
+                    nome_loja: aprovacaoData.nome_loja,
+                    valor: parseBRL(aprovacaoData.valor),
+                    descricao: aprovacaoData.descricao,
+                    observacao_admin: aprovacaoData.observacao_admin,
+                }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            setShowModalAprovacao(false);
+            fetchSolicitacoes();
+        } catch (err: any) {
+            alert("Erro ao aprovar: " + err.message);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleRecusarSolicitacao = async () => {
+        if (!selectedSolicitacao || !aprovacaoData.motivo_recusa.trim()) {
+            alert("Informe o motivo da recusa.");
+            return;
+        }
+        setIsSaving(true);
+        try {
+            const res = await fetch("/api/onus/solicitacoes", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    id: selectedSolicitacao.id,
+                    acao: "recusar",
+                    motivo_recusa: aprovacaoData.motivo_recusa,
+                }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            setShowModalAprovacao(false);
+            fetchSolicitacoes();
+        } catch (err: any) {
+            alert("Erro ao recusar: " + err.message);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    // ─── DASHBOARD: Computação de dados ────────────────────────────────────────
+    const dashboardAjustes = (() => {
+        let filtered = ajustes;
+        if (dashDataInicio || dashDataFim) {
+            filtered = ajustes.filter(a => {
+                const d = (a.data_aplicacao || a.data_ocorrencia || "").split("T")[0];
+                if (dashDataInicio && d < dashDataInicio) return false;
+                if (dashDataFim && d > dashDataFim) return false;
+                return true;
+            });
+        }
+        return filtered;
+    })();
+
+    const dashboardByLoja = (() => {
+        const map = new Map<string, { loja: string, cnpj: string, clienteId: string, acrescimos: Ajuste[], descontos: Ajuste[], totalAcrescimo: number, totalDesconto: number, usuarios: Set<string> }>();
+        for (const a of dashboardAjustes) {
+            const key = a.cliente_id;
+            if (!map.has(key)) {
+                map.set(key, {
+                    loja: a.clientes?.nome_conta_azul || a.clientes?.nome_fantasia || a.clientes?.razao_social || "Desconhecida",
+                    cnpj: a.clientes?.cnpj || "-",
+                    clienteId: key,
+                    acrescimos: [],
+                    descontos: [],
+                    totalAcrescimo: 0,
+                    totalDesconto: 0,
+                    usuarios: new Set(),
+                });
+            }
+            const entry = map.get(key)!;
+            if (a.tipo === "ACRESCIMO") {
+                entry.acrescimos.push(a);
+                entry.totalAcrescimo += a.valor;
+            } else {
+                entry.descontos.push(a);
+                entry.totalDesconto += a.valor;
+            }
+            if (a.nome_profissional) entry.usuarios.add(a.nome_profissional);
+        }
+        return Array.from(map.values()).sort((a, b) => (b.totalAcrescimo + b.totalDesconto) - (a.totalAcrescimo + a.totalDesconto));
+    })();
+
+    const dashTotalAcrescimos = dashboardByLoja.reduce((s, l) => s + l.totalAcrescimo, 0);
+    const dashTotalDescontos = dashboardByLoja.reduce((s, l) => s + l.totalDesconto, 0);
+    const dashNumLojas = dashboardByLoja.length;
+
+    const toggleExpandLoja = (id: string) => {
+        const next = new Set(expandedLojas);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        setExpandedLojas(next);
+    };
+
+    const handleExportDashboardXLSX = () => {
+        const exportData = dashboardAjustes.map(item => ({
+            "Empresa (Conta Azul)": item.clientes?.nome_conta_azul || "-",
+            "Razão Social": item.clientes?.razao_social || "-",
+            "Nome Fantasia": item.clientes?.nome_fantasia || "-",
+            "CNPJ": item.clientes?.cnpj || "-",
+            "Tipo": item.tipo,
+            "Valor": item.valor,
+            "Profissional": item.nome_profissional || "-",
+            "Data Ocorrência": fmtDate(item.data_ocorrencia),
+            "Data Aplicação": item.data_aplicacao ? fmtDate(item.data_aplicacao) : "-",
+            "Status": item.status_aplicacao ? "Aplicado" : "Pendente",
+            "Motivo": item.motivo || "-",
+            "Obs Interna": item.observacao_interna || "-",
+            "Repasse Profissional": item.repasse_profissional ? "Sim" : "Não",
+            "Início": item.inicio ? fmtDateTime(item.inicio) : "-",
+            "Término": item.termino ? fmtDateTime(item.termino) : "-",
+            "Fração Hora": item.fracao_hora || "-",
+            "Lote Aplicado": item.lote_aplicado_id || "-",
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Dashboard Ajustes");
+        const today = new Date().toISOString().split("T")[0];
+        XLSX.writeFile(wb, `Dashboard_Ajustes_Completo_${today}.xlsx`);
+    };
+
+    const pendentesCount = solicitacoes.filter(s => s.status === "pendente").length;
 
     const handleSaveDesconto = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -848,7 +1089,7 @@ export default function AjustesPage() {
             <div className="max-w-7xl mx-auto space-y-8 relative">
 
                 {/* GLOBAL TABS VIEW */}
-                <div className="flex gap-4 mb-4 border-b border-[var(--border)] pb-4">
+                <div className="flex gap-4 mb-4 border-b border-[var(--border)] pb-4 flex-wrap">
                     <button
                         onClick={() => setActiveMainTab("gestao")}
                         className={`text-lg font-bold uppercase tracking-wider px-6 py-3 rounded-lg transition-all flex items-center gap-2 ${activeMainTab === 'gestao' ? 'bg-[var(--primary)] text-white shadow-[0_0_15px_var(--primary)]' : 'text-[var(--fg-dim)] hover:bg-[var(--bg-card)] hover:text-white'}`}
@@ -856,10 +1097,21 @@ export default function AjustesPage() {
                         <History size={20} /> Gestão de Ajustes
                     </button>
                     <button
+                        onClick={() => setActiveMainTab("aprovacoes")}
+                        className={`text-lg font-bold uppercase tracking-wider px-6 py-3 rounded-lg transition-all flex items-center gap-2 relative ${activeMainTab === 'aprovacoes' ? 'bg-amber-600 text-white shadow-[0_0_15px_rgba(217,119,6,0.5)]' : 'text-[var(--fg-dim)] hover:bg-[var(--bg-card)] hover:text-white'}`}
+                    >
+                        <ShieldCheck size={20} /> Aprovações
+                        {pendentesCount > 0 && (
+                            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center animate-pulse">
+                                {pendentesCount}
+                            </span>
+                        )}
+                    </button>
+                    <button
                         onClick={() => setActiveMainTab("relatorios")}
                         className={`text-lg font-bold uppercase tracking-wider px-6 py-3 rounded-lg transition-all flex items-center gap-2 ${activeMainTab === 'relatorios' ? 'bg-indigo-600 text-white shadow-[0_0_15px_rgba(79,70,229,0.5)]' : 'text-[var(--fg-dim)] hover:bg-[var(--bg-card)] hover:text-white'}`}
                     >
-                        <FileText size={20} /> Central de Relatórios
+                        <BarChart3 size={20} /> Central de Relatórios
                     </button>
                 </div>
 
@@ -1303,8 +1555,298 @@ export default function AjustesPage() {
                 </div>
                 )}
 
+                {/* ════════════════════════════════════════════════════════════
+                   ABA: APROVAÇÕES DE ÔNUS
+                   ════════════════════════════════════════════════════════════ */}
+                {activeMainTab === "aprovacoes" && (
+                    <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
+                        {/* Header */}
+                        <div className="flex justify-between items-center bg-[var(--bg-card)] p-6 rounded-2xl border border-[var(--border)] shadow-xl">
+                            <div>
+                                <h1 className="text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-3">
+                                    <ShieldCheck className="text-amber-500" size={28} />
+                                    Aprovações de Ônus
+                                </h1>
+                                <p className="text-[var(--fg-dim)] text-sm mt-1">
+                                    Gerencie solicitações de ônus a usuário recebidas via formulário externo.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Summary Cards */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="bg-amber-950/20 p-5 rounded-xl border border-amber-900/30 flex items-center gap-4">
+                                <div className="p-3 bg-amber-500/10 rounded-xl"><Clock className="text-amber-500" size={24} /></div>
+                                <div>
+                                    <p className="text-[10px] uppercase font-bold text-amber-500 tracking-widest">Pendentes</p>
+                                    <p className="text-2xl font-black text-amber-500">{solicitacoes.filter(s => s.status === 'pendente').length}</p>
+                                </div>
+                            </div>
+                            <div className="bg-emerald-950/20 p-5 rounded-xl border border-emerald-900/30 flex items-center gap-4">
+                                <div className="p-3 bg-emerald-500/10 rounded-xl"><CheckCircle2 className="text-emerald-500" size={24} /></div>
+                                <div>
+                                    <p className="text-[10px] uppercase font-bold text-emerald-500 tracking-widest">Aprovados</p>
+                                    <p className="text-2xl font-black text-emerald-500">{solicitacoes.filter(s => s.status === 'aprovado').length}</p>
+                                </div>
+                            </div>
+                            <div className="bg-red-950/20 p-5 rounded-xl border border-red-900/30 flex items-center gap-4">
+                                <div className="p-3 bg-red-500/10 rounded-xl"><XCircle className="text-red-500" size={24} /></div>
+                                <div>
+                                    <p className="text-[10px] uppercase font-bold text-red-500 tracking-widest">Recusados</p>
+                                    <p className="text-2xl font-black text-red-500">{solicitacoes.filter(s => s.status === 'recusado').length}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Filtro Status */}
+                        <div className="bg-[var(--bg-card)] p-4 rounded-xl border border-[var(--border)] flex items-center gap-4 flex-wrap">
+                            <span className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Filtrar:</span>
+                            {([["", "Todos"], ["pendente", "Pendentes"], ["aprovado", "Aprovados"], ["recusado", "Recusados"]] as const).map(([val, label]) => (
+                                <button
+                                    key={val}
+                                    onClick={() => setFiltroStatusOnus(val)}
+                                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${filtroStatusOnus === val ? 'bg-amber-600 text-white' : 'bg-[var(--bg-main)] text-[var(--fg-dim)] hover:text-white border border-[var(--border)]'}`}
+                                >
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Tabela de Solicitações */}
+                        <div className="bg-[var(--bg-card)] rounded-2xl border border-[var(--border)] overflow-hidden shadow-lg">
+                            {loadingSolicitacoes ? (
+                                <div className="flex justify-center py-20">
+                                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-500"></div>
+                                </div>
+                            ) : (
+                                <div className="overflow-x-auto">
+                                    <table className="w-full">
+                                        <thead className="bg-[var(--bg-card-hover)]">
+                                            <tr>
+                                                <th className="py-3 px-4 text-left text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Status</th>
+                                                <th className="py-3 px-4 text-left text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Loja</th>
+                                                <th className="py-3 px-4 text-left text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Usuário</th>
+                                                <th className="py-3 px-4 text-left text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Data</th>
+                                                <th className="py-3 px-4 text-right text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Valor</th>
+                                                <th className="py-3 px-4 text-center text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Canal</th>
+                                                <th className="py-3 px-4 text-center text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Anexo</th>
+                                                <th className="py-3 px-4 text-right text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Ações</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {solicitacoes.map(sol => (
+                                                <tr key={sol.id} className="border-t border-[var(--border)]/30 hover:bg-white/[0.02] transition-colors cursor-pointer group" onClick={() => openAprovacaoModal(sol)}>
+                                                    <td className="py-3 px-4">
+                                                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-black tracking-wider uppercase ${sol.status === 'pendente' ? 'bg-amber-500/15 text-amber-500' : sol.status === 'aprovado' ? 'bg-emerald-500/15 text-emerald-500' : 'bg-red-500/15 text-red-500'}`}>
+                                                            {sol.status}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-3 px-4">
+                                                        <div className="flex flex-col">
+                                                            <span className="text-sm font-bold text-white flex items-center gap-1.5">
+                                                                {sol.nome_loja}
+                                                                {sol.loja_identificada && <CheckCircle2 size={12} className="text-emerald-500" />}
+                                                            </span>
+                                                            <span className="text-[10px] text-[var(--fg-dim)] font-mono">{sol.cnpj_loja}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="py-3 px-4 text-sm text-white">{sol.nome_usuario}</td>
+                                                    <td className="py-3 px-4 text-sm text-[var(--fg-dim)] font-mono">{fmtDate(sol.data_agendamento)}</td>
+                                                    <td className="py-3 px-4 text-sm text-right font-mono font-bold text-amber-500">{fmtCurrency(sol.valor)}</td>
+                                                    <td className="py-3 px-4 text-center">
+                                                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[var(--bg-main)] text-[var(--fg-dim)] border border-[var(--border)]">
+                                                            {sol.canal_recebimento === 'tasky' ? '🔗 Tasky' : sol.canal_recebimento === 'email' ? '📧 E-mail' : sol.canal_recebimento === 'formulario' ? '📋 Formulário' : '📎 Outros'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-3 px-4 text-center">
+                                                        {sol.anexo_url ? (
+                                                            <a href={sol.anexo_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="text-[var(--primary)] hover:underline text-xs flex items-center justify-center gap-1">
+                                                                <Download size={12} /> Ver
+                                                            </a>
+                                                        ) : (
+                                                            <span className="text-[10px] text-[var(--fg-dim)]">—</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="py-3 px-4 text-right">
+                                                        {sol.status === 'pendente' && (
+                                                            <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                <button onClick={(e) => { e.stopPropagation(); openAprovacaoModal(sol); }} className="btn btn-ghost btn-xs text-amber-500" title="Revisar">
+                                                                    <Eye size={14} />
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                            {solicitacoes.length === 0 && (
+                                                <tr>
+                                                    <td colSpan={8} className="text-center py-16 text-[var(--fg-dim)]">
+                                                        <ShieldCheck size={40} className="mx-auto mb-3 opacity-20" />
+                                                        <p>Nenhuma solicitação encontrada.</p>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* ════════════════════════════════════════════════════════════
+                   ABA: CENTRAL DE RELATÓRIOS (Dashboard + PDF)
+                   ════════════════════════════════════════════════════════════ */}
                 {activeMainTab === "relatorios" && (
                     <div className="space-y-8 animate-in fade-in zoom-in-95 duration-200">
+                        {/* Sub-tabs: Dashboard vs PDF */}
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setDashboardTab("dashboard")}
+                                className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${dashboardTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'bg-[var(--bg-card)] text-[var(--fg-dim)] border border-[var(--border)] hover:text-white'}`}
+                            >
+                                <BarChart3 size={16} /> Dashboard de Ajustes
+                            </button>
+                            <button
+                                onClick={() => setDashboardTab("pdf")}
+                                className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${dashboardTab === 'pdf' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'bg-[var(--bg-card)] text-[var(--fg-dim)] border border-[var(--border)] hover:text-white'}`}
+                            >
+                                <FileText size={16} /> Relatórios PDF
+                            </button>
+                        </div>
+
+                        {dashboardTab === "dashboard" && (
+                            <div className="space-y-6">
+                                {/* Filtro de Período */}
+                                <div className="bg-[var(--bg-card)] p-5 rounded-2xl border border-[var(--border)] shadow-xl">
+                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                                        <div>
+                                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Data Início</label>
+                                            <input type="date" className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white p-2.5 rounded-xl text-sm focus:border-indigo-500 outline-none" value={dashDataInicio} onChange={e => setDashDataInicio(e.target.value)} />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Data Fim</label>
+                                            <input type="date" className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white p-2.5 rounded-xl text-sm focus:border-indigo-500 outline-none" value={dashDataFim} onChange={e => setDashDataFim(e.target.value)} />
+                                        </div>
+                                        <div>
+                                            <button onClick={() => { setDashDataInicio(""); setDashDataFim(""); }} className="px-4 py-2.5 text-sm font-bold text-[var(--fg-dim)] hover:text-white transition-colors flex items-center gap-2">
+                                                <X size={14} /> Limpar
+                                            </button>
+                                        </div>
+                                        <div>
+                                            <button onClick={handleExportDashboardXLSX} className="btn bg-emerald-600 hover:bg-emerald-700 w-full rounded-xl border-none text-white font-bold h-[42px] flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-600/20">
+                                                <Upload size={16} className="rotate-180" /> Exportar XLSX Completo
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* KPI Cards */}
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    <div className="bg-[var(--bg-card)] p-5 rounded-xl border border-[var(--border)] flex items-center gap-4">
+                                        <div className="p-3 bg-emerald-500/10 rounded-xl"><TrendingUp className="text-emerald-500" size={24} /></div>
+                                        <div>
+                                            <p className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Total Acréscimos</p>
+                                            <p className="text-xl font-black text-emerald-500">{fmtCurrency(dashTotalAcrescimos)}</p>
+                                        </div>
+                                    </div>
+                                    <div className="bg-[var(--bg-card)] p-5 rounded-xl border border-[var(--border)] flex items-center gap-4">
+                                        <div className="p-3 bg-red-500/10 rounded-xl"><TrendingDown className="text-red-500" size={24} /></div>
+                                        <div>
+                                            <p className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Total Descontos</p>
+                                            <p className="text-xl font-black text-red-500">{fmtCurrency(dashTotalDescontos)}</p>
+                                        </div>
+                                    </div>
+                                    <div className="bg-[var(--bg-card)] p-5 rounded-xl border border-[var(--border)] flex items-center gap-4">
+                                        <div className="p-3 bg-[var(--primary)]/10 rounded-xl"><DollarSign className="text-[var(--primary)]" size={24} /></div>
+                                        <div>
+                                            <p className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Saldo Líquido</p>
+                                            <p className={`text-xl font-black ${dashTotalAcrescimos - dashTotalDescontos >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{fmtCurrency(dashTotalAcrescimos - dashTotalDescontos)}</p>
+                                        </div>
+                                    </div>
+                                    <div className="bg-[var(--bg-card)] p-5 rounded-xl border border-[var(--border)] flex items-center gap-4">
+                                        <div className="p-3 bg-indigo-500/10 rounded-xl"><Store className="text-indigo-500" size={24} /></div>
+                                        <div>
+                                            <p className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Lojas Impactadas</p>
+                                            <p className="text-xl font-black text-indigo-500">{dashNumLojas}</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Tabela por Loja (Accordion) */}
+                                <div className="bg-[var(--bg-card)] rounded-2xl border border-[var(--border)] overflow-hidden shadow-lg">
+                                    <div className="p-4 border-b border-[var(--border)] bg-indigo-900/10">
+                                        <h3 className="text-white font-black text-lg flex items-center gap-2"><Store size={20} /> Breakdown por Loja</h3>
+                                        <p className="text-[var(--fg-dim)] text-sm">{dashNumLojas} lojas com ajustes no período • {dashboardAjustes.length} lançamentos</p>
+                                    </div>
+                                    <div className="divide-y divide-[var(--border)]/30">
+                                        {dashboardByLoja.map(loja => (
+                                            <div key={loja.clienteId}>
+                                                {/* Loja Header */}
+                                                <div className="flex items-center gap-4 p-4 hover:bg-white/[0.02] cursor-pointer transition-colors" onClick={() => toggleExpandLoja(loja.clienteId)}>
+                                                    <ChevronRight size={16} className={`text-[var(--fg-dim)] transition-transform ${expandedLojas.has(loja.clienteId) ? 'rotate-90' : ''}`} />
+                                                    <div className="flex-1 min-w-0">
+                                                        <span className="text-sm font-bold text-white">{loja.loja}</span>
+                                                        <span className="text-[10px] text-[var(--fg-dim)] ml-2 font-mono">{loja.cnpj}</span>
+                                                    </div>
+                                                    <div className="flex gap-6 text-sm font-mono">
+                                                        <span className="text-emerald-500 font-bold">+{fmtCurrency(loja.totalAcrescimo)}</span>
+                                                        <span className="text-red-500 font-bold">-{fmtCurrency(loja.totalDesconto)}</span>
+                                                        <span className="text-[var(--fg-dim)] text-xs">{loja.usuarios.size} usu.</span>
+                                                    </div>
+                                                </div>
+                                                {/* Expanded Content */}
+                                                {expandedLojas.has(loja.clienteId) && (
+                                                    <div className="bg-[var(--bg-main)]/50 px-6 pb-4 space-y-3 animate-in slide-in-from-top-2">
+                                                        {loja.acrescimos.length > 0 && (
+                                                            <div>
+                                                                <p className="text-[10px] uppercase font-black text-emerald-500 tracking-widest mb-2 flex items-center gap-1"><TrendingUp size={10} /> Acréscimos ({loja.acrescimos.length})</p>
+                                                                <div className="space-y-1">
+                                                                    {loja.acrescimos.map(a => (
+                                                                        <div key={a.id} className="flex items-center gap-3 text-xs bg-emerald-900/10 px-3 py-2 rounded-lg border border-emerald-900/20">
+                                                                            <span className="text-white font-bold min-w-[120px]">{a.nome_profissional || '-'}</span>
+                                                                            <span className="text-emerald-500 font-mono font-bold">{fmtCurrency(a.valor)}</span>
+                                                                            <span className="text-[var(--fg-dim)]">{fmtDate(a.data_ocorrencia)}</span>
+                                                                            <span className="text-[var(--fg-dim)] truncate flex-1">{a.motivo || '-'}</span>
+                                                                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${a.status_aplicacao ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>{a.status_aplicacao ? 'Aplicado' : 'Pendente'}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {loja.descontos.length > 0 && (
+                                                            <div>
+                                                                <p className="text-[10px] uppercase font-black text-red-500 tracking-widest mb-2 flex items-center gap-1"><TrendingDown size={10} /> Descontos ({loja.descontos.length})</p>
+                                                                <div className="space-y-1">
+                                                                    {loja.descontos.map(a => (
+                                                                        <div key={a.id} className="flex items-center gap-3 text-xs bg-red-900/10 px-3 py-2 rounded-lg border border-red-900/20">
+                                                                            <span className="text-white font-bold min-w-[120px]">{a.nome_profissional || '-'}</span>
+                                                                            <span className="text-red-500 font-mono font-bold">{fmtCurrency(a.valor)}</span>
+                                                                            <span className="text-[var(--fg-dim)]">{fmtDate(a.data_ocorrencia)}</span>
+                                                                            <span className="text-[var(--fg-dim)] truncate flex-1">{a.motivo || '-'}</span>
+                                                                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${a.status_aplicacao ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>{a.status_aplicacao ? 'Aplicado' : 'Pendente'}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                        {dashboardByLoja.length === 0 && (
+                                            <div className="text-center py-16 text-[var(--fg-dim)]">
+                                                <BarChart3 size={40} className="mx-auto mb-3 opacity-20" />
+                                                <p>Nenhum ajuste encontrado no período selecionado.</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {dashboardTab === "pdf" && (
+                        <div className="space-y-6">
                         <div className="flex justify-between items-center bg-[var(--bg-card)] p-6 rounded-2xl border border-[var(--border)] shadow-xl">
                             <div>
                                 <h1 className="text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-3">
@@ -1415,7 +1957,7 @@ export default function AjustesPage() {
                                             ))}
                                         </tbody>
                                     </table>
-                                </div>
+                        </div>
                             </div>
                         )}
 
@@ -1438,9 +1980,145 @@ export default function AjustesPage() {
                                 />
                             ))}
                         </div>
+                        </div>)}
                     </div>
                 )}
             </div>
+
+            {/* MODAL APROVAÇÃO DE ÔNUS */}
+            <Modal isOpen={showModalAprovacao} onClose={() => setShowModalAprovacao(false)} title="Revisão de Solicitação de Ônus" width="900px">
+                {selectedSolicitacao && (
+                    <div className="space-y-6">
+                        {/* Status Badge */}
+                        <div className="flex items-center gap-3">
+                            <span className={`px-3 py-1.5 rounded-full text-xs font-black tracking-wider uppercase ${selectedSolicitacao.status === 'pendente' ? 'bg-amber-500/15 text-amber-500' : selectedSolicitacao.status === 'aprovado' ? 'bg-emerald-500/15 text-emerald-500' : 'bg-red-500/15 text-red-500'}`}>
+                                {selectedSolicitacao.status}
+                            </span>
+                            <span className="text-[var(--fg-dim)] text-xs">Enviado em {fmtDate(selectedSolicitacao.created_at)}</span>
+                            {selectedSolicitacao.loja_identificada && (
+                                <span className="flex items-center gap-1 text-emerald-500 text-xs"><CheckCircle2 size={12} /> Loja identificada</span>
+                            )}
+                        </div>
+
+                        {/* Dados do Formulário (read-only info) */}
+                        <div className="bg-[var(--bg-main)] p-4 rounded-xl border border-[var(--border)] space-y-3">
+                            <p className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-3">Dados Enviados</p>
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                                <div><span className="text-[var(--fg-dim)]">CNPJ:</span> <span className="text-white font-mono">{selectedSolicitacao.cnpj_loja}</span></div>
+                                <div><span className="text-[var(--fg-dim)]">Usuário:</span> <span className="text-white">{selectedSolicitacao.nome_usuario}</span></div>
+                                <div><span className="text-[var(--fg-dim)]">Agendamento:</span> <span className="text-white font-mono">{fmtDate(selectedSolicitacao.data_agendamento)}</span></div>
+                                <div><span className="text-[var(--fg-dim)]">Canal:</span> <span className="text-white">{selectedSolicitacao.canal_recebimento === 'tasky' ? '🔗 Tasky' : selectedSolicitacao.canal_recebimento === 'email' ? '📧 E-mail' : selectedSolicitacao.canal_recebimento === 'formulario' ? '📋 Formulário' : '📎 Outros'}</span></div>
+                            </div>
+                            {selectedSolicitacao.canal_link && (
+                                <div className="text-sm"><span className="text-[var(--fg-dim)]">Link:</span> <a href={selectedSolicitacao.canal_link} target="_blank" rel="noopener noreferrer" className="text-[var(--primary)] hover:underline flex items-center gap-1 inline-flex"><ExternalLink size={12} />{selectedSolicitacao.canal_link}</a></div>
+                            )}
+                            <div className="text-sm"><span className="text-[var(--fg-dim)]">Descrição:</span> <span className="text-white">{selectedSolicitacao.descricao}</span></div>
+                            {selectedSolicitacao.anexo_url && (
+                                <div><a href={selectedSolicitacao.anexo_url} target="_blank" rel="noopener noreferrer" className="text-[var(--primary)] hover:underline text-sm flex items-center gap-1"><Download size={14} /> Ver Anexo</a></div>
+                            )}
+                        </div>
+
+                        {/* Campos editáveis (admin) */}
+                        {selectedSolicitacao.status === 'pendente' && (
+                            <div className="space-y-4">
+                                <p className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Editar para Aprovação</p>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Tipo de Ajuste</label>
+                                        <select
+                                            className="w-full bg-[var(--bg-card)] border border-[var(--border)] text-white p-2.5 rounded-lg text-sm focus:border-amber-500 outline-none"
+                                            value={aprovacaoData.tipo_ajuste}
+                                            onChange={e => setAprovacaoData({ ...aprovacaoData, tipo_ajuste: e.target.value as any })}
+                                        >
+                                            <option value="DESCONTO">DESCONTO</option>
+                                            <option value="ACRESCIMO">ACRÉSCIMO</option>
+                                        </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Valor (R$)</label>
+                                        <input
+                                            type="text"
+                                            className="w-full bg-[var(--bg-card)] border border-[var(--border)] text-white p-2.5 rounded-lg text-sm focus:border-amber-500 outline-none text-right font-mono"
+                                            value={aprovacaoData.valor}
+                                            onChange={e => setAprovacaoData({ ...aprovacaoData, valor: formatBRL(parseBRL(e.target.value)) })}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Loja / Empresa</label>
+                                    <SearchableSelect
+                                        options={clientes}
+                                        value={aprovacaoData.cliente_id}
+                                        placeholder="Corrigir empresa..."
+                                        onChange={(client) => setAprovacaoData({ ...aprovacaoData, cliente_id: client?.id || "", nome_loja: client?.nome_fantasia || client?.razao_social || aprovacaoData.nome_loja })}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Descrição</label>
+                                    <textarea
+                                        className="w-full bg-[var(--bg-card)] border border-[var(--border)] text-white p-2.5 rounded-lg text-sm focus:border-amber-500 outline-none resize-none"
+                                        rows={3}
+                                        value={aprovacaoData.descricao}
+                                        onChange={e => setAprovacaoData({ ...aprovacaoData, descricao: e.target.value })}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest">Observação do Admin</label>
+                                    <textarea
+                                        className="w-full bg-[var(--bg-card)] border border-[var(--border)] text-white p-2.5 rounded-lg text-sm focus:border-amber-500 outline-none resize-none"
+                                        rows={2}
+                                        placeholder="Observação interna..."
+                                        value={aprovacaoData.observacao_admin}
+                                        onChange={e => setAprovacaoData({ ...aprovacaoData, observacao_admin: e.target.value })}
+                                    />
+                                </div>
+
+                                {/* Seção de Recusa */}
+                                <div className="border-t border-[var(--border)] pt-4 space-y-2">
+                                    <label className="text-[10px] uppercase font-bold text-red-500 tracking-widest">Motivo da Recusa (apenas se recusar)</label>
+                                    <textarea
+                                        className="w-full bg-red-950/20 border border-red-900/30 text-white p-2.5 rounded-lg text-sm focus:border-red-500 outline-none resize-none"
+                                        rows={2}
+                                        placeholder="Informe o motivo da recusa..."
+                                        value={aprovacaoData.motivo_recusa}
+                                        onChange={e => setAprovacaoData({ ...aprovacaoData, motivo_recusa: e.target.value })}
+                                    />
+                                </div>
+
+                                {/* Botões de Ação */}
+                                <div className="flex justify-end gap-3 pt-2">
+                                    <button
+                                        onClick={handleRecusarSolicitacao}
+                                        disabled={isSaving}
+                                        className="px-6 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm flex items-center gap-2 transition-all shadow-lg shadow-red-600/20 disabled:opacity-50"
+                                    >
+                                        <XCircle size={16} /> Recusar
+                                    </button>
+                                    <button
+                                        onClick={handleAprovarSolicitacao}
+                                        disabled={isSaving}
+                                        className="px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm flex items-center gap-2 transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50"
+                                    >
+                                        {isSaving ? <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin" /> : <CheckCircle2 size={16} />}
+                                        Aprovar e Gerar Ajuste
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Info se já processado */}
+                        {selectedSolicitacao.status !== 'pendente' && (
+                            <div className={`p-4 rounded-xl border ${selectedSolicitacao.status === 'aprovado' ? 'bg-emerald-950/20 border-emerald-900/30' : 'bg-red-950/20 border-red-900/30'}`}>
+                                <p className="text-sm text-white font-bold mb-1">{selectedSolicitacao.status === 'aprovado' ? '✅ Aprovado' : '❌ Recusado'}</p>
+                                {selectedSolicitacao.aprovado_em && <p className="text-xs text-[var(--fg-dim)]">Em {fmtDate(selectedSolicitacao.aprovado_em)}</p>}
+                                {selectedSolicitacao.tipo_ajuste && <p className="text-xs text-[var(--fg-dim)]">Tipo: {selectedSolicitacao.tipo_ajuste}</p>}
+                                {selectedSolicitacao.motivo_recusa && <p className="text-xs text-red-400 mt-1">Motivo: {selectedSolicitacao.motivo_recusa}</p>}
+                                {selectedSolicitacao.observacao_admin && <p className="text-xs text-[var(--fg-dim)] mt-1">Obs: {selectedSolicitacao.observacao_admin}</p>}
+                            </div>
+                        )}
+                    </div>
+                )}
+            </Modal>
 
             {/* MODAL NOVO DESCONTO */}
             <Modal isOpen={showModalDesconto} onClose={() => { setShowModalDesconto(false); resetForm(); }} title={editingId ? "Editar Desconto" : "Lançar Novo Desconto"} width="800px">

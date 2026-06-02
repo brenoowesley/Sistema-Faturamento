@@ -141,6 +141,38 @@ CREATE TABLE IF NOT EXISTS faturamento_consolidados (
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- --------------------------------------------------------
+-- 7. Tabela de Solicitações de Ônus (Formulário Externo)
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS onus_solicitacoes (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  cnpj_loja         VARCHAR(18) NOT NULL,
+  nome_loja         VARCHAR(255) NOT NULL,
+  nome_usuario      VARCHAR(255) NOT NULL,
+  data_agendamento  DATE NOT NULL,
+  descricao         TEXT NOT NULL,
+  valor             NUMERIC(12,2) NOT NULL,
+  anexo_url         TEXT,
+  canal_recebimento VARCHAR(50) NOT NULL CHECK (
+    canal_recebimento IN ('tasky', 'email', 'formulario', 'outros')
+  ),
+  canal_link        TEXT,
+  email_solicitante VARCHAR(255),
+  cliente_id        UUID REFERENCES clientes(id) ON DELETE SET NULL,
+  loja_identificada BOOLEAN DEFAULT false,
+  status            VARCHAR(30) NOT NULL DEFAULT 'pendente' CHECK (
+    status IN ('pendente', 'aprovado', 'recusado')
+  ),
+  tipo_ajuste       VARCHAR(30) CHECK (tipo_ajuste IN ('ACRESCIMO', 'DESCONTO')),
+  ajuste_gerado_id  UUID REFERENCES ajustes_faturamento(id) ON DELETE SET NULL,
+  aprovado_por      UUID,
+  aprovado_em       TIMESTAMPTZ,
+  motivo_recusa     TEXT,
+  observacao_admin  TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at        TIMESTAMPTZ DEFAULT now()
+);
+
 -- ============================================================
 -- ROW LEVEL SECURITY (RLS)
 -- ============================================================

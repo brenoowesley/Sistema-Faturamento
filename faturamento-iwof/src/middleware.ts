@@ -7,12 +7,13 @@ const CX_ALLOWED_PREFIX = "/saques/acompanhamento";
 export async function middleware(request: NextRequest) {
     const { pathname } = request.nextUrl;
 
-    // Ignorar rotas estáticas, API e auth
+    // Ignorar rotas estáticas, API, auth e formulário público
     if (
         pathname.startsWith("/_next") ||
         pathname.startsWith("/api") ||
         pathname.startsWith("/login") ||
-        pathname.startsWith("/auth")
+        pathname.startsWith("/auth") ||
+        pathname.startsWith("/formulario-onus")
     ) {
         return NextResponse.next();
     }

@@ -30,10 +30,12 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
   const [isVerifyingRoute, setIsVerifyingRoute] = useState(true);
   const isLoginPage = pathname === "/login";
+  const isFormularioOnus = pathname.startsWith("/formulario-onus");
+  const isPublicPage = isLoginPage || isFormularioOnus;
 
   useEffect(() => {
     async function verifyRoute() {
-      if (isLoginPage) {
+      if (isPublicPage) {
         setIsVerifyingRoute(false);
         return;
       }
@@ -62,9 +64,9 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
       setIsVerifyingRoute(false);
     }
     verifyRoute();
-  }, [pathname, supabase, isLoginPage, router]);
+  }, [pathname, supabase, isPublicPage, router]);
 
-  if (isVerifyingRoute && !isLoginPage) {
+  if (isVerifyingRoute && !isPublicPage) {
     return (
       <main className="main-content flex items-center justify-center min-h-screen">
          <div className="text-[var(--fg-dim)] text-sm animate-pulse">Consultando permissões...</div>
@@ -72,10 +74,19 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
     )
   }
 
+  // Páginas públicas: sem sidebar
+  if (isPublicPage) {
+    return (
+      <main className={`${isLoginPage ? "main-content no-sidebar" : ""}`}>
+        {children}
+      </main>
+    );
+  }
+
   return (
     <>
       <Sidebar />
-      <main className={`main-content ${isLoginPage ? "no-sidebar" : ""}`}>
+      <main className="main-content">
         {children}
       </main>
     </>
