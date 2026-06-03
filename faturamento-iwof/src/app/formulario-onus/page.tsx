@@ -10,7 +10,6 @@ import {
   FileText,
   Upload,
   Mail,
-  Link2,
   CheckCircle2,
   AlertTriangle,
   Send,
@@ -18,8 +17,6 @@ import {
   Sun,
   Moon,
   X,
-  ChevronDown,
-  Sparkles,
   ArrowLeft,
 } from "lucide-react";
 
@@ -62,7 +59,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ACCEPTED_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/jpg"];
 const ACCEPTED_EXTENSIONS = ".pdf,.png,.jpg,.jpeg";
 
-type CanalRecebimento = "formulario" | "tasky" | "email" | "outros";
+
 
 interface FormData {
   cnpj: string;
@@ -71,8 +68,6 @@ interface FormData {
   data_agendamento: string;
   descricao: string;
   valor: string;
-  canal_recebimento: CanalRecebimento;
-  link_tasky: string;
   email_retorno: string;
 }
 
@@ -83,8 +78,6 @@ interface FormErrors {
   data_agendamento?: string;
   descricao?: string;
   valor?: string;
-  canal_recebimento?: string;
-  link_tasky?: string;
   anexo?: string;
   email_retorno?: string;
 }
@@ -106,8 +99,6 @@ export default function FormularioOnusPage() {
     data_agendamento: "",
     descricao: "",
     valor: "",
-    canal_recebimento: "formulario",
-    link_tasky: "",
     email_retorno: "",
   });
 
@@ -212,10 +203,6 @@ export default function FormularioOnusPage() {
     if (!formData.data_agendamento) errors.data_agendamento = "Data é obrigatória.";
     if (!formData.descricao.trim()) errors.descricao = "Descrição é obrigatória.";
     if (!formData.valor || parseBRL(formData.valor) <= 0) errors.valor = "Valor deve ser maior que zero.";
-    if (formData.canal_recebimento === "tasky" && !formData.link_tasky.trim())
-      errors.link_tasky = "Link do Tasky é obrigatório.";
-    if (formData.canal_recebimento === "outros" && !anexo)
-      errors.anexo = "Anexo é obrigatório para o canal 'Outros'.";
     if (formData.email_retorno && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email_retorno))
       errors.email_retorno = "E-mail inválido.";
 
@@ -240,8 +227,7 @@ export default function FormularioOnusPage() {
       fd.append("data_agendamento", formData.data_agendamento);
       fd.append("descricao", formData.descricao);
       fd.append("valor", parseBRL(formData.valor).toFixed(2));
-      fd.append("canal_recebimento", formData.canal_recebimento);
-      if (formData.link_tasky) fd.append("link_tasky", formData.link_tasky);
+      fd.append("canal_recebimento", "formulario");
       if (formData.email_retorno) fd.append("email_retorno", formData.email_retorno);
       if (anexo) fd.append("anexo", anexo);
 
@@ -260,13 +246,7 @@ export default function FormularioOnusPage() {
     }
   };
 
-  /* ---- Canal labels ---- */
-  const canalLabels: Record<CanalRecebimento, string> = {
-    formulario: "Formulário de cadastro de ônus (auto-preenchido)",
-    tasky: "Tasky",
-    email: "E-mail",
-    outros: "Outros",
-  };
+
 
   /* ---- Section animation class ---- */
   const sectionClass = (index: number) =>
@@ -318,7 +298,6 @@ export default function FormularioOnusPage() {
               <SummaryRow label="Usuário" value={formData.nome_usuario} />
               <SummaryRow label="Data" value={formData.data_agendamento.split("-").reverse().join("/")} />
               <SummaryRow label="Valor" value={`R$ ${formData.valor}`} />
-              <SummaryRow label="Canal" value={canalLabels[formData.canal_recebimento]} />
               {anexo && <SummaryRow label="Anexo" value={anexo.name} />}
             </div>
 
@@ -327,8 +306,7 @@ export default function FormularioOnusPage() {
                 setSubmitSuccess(false);
                 setFormData({
                   cnpj: "", nome_loja: "", nome_usuario: "", data_agendamento: "",
-                  descricao: "", valor: "", canal_recebimento: "formulario",
-                  link_tasky: "", email_retorno: "",
+                  descricao: "", valor: "", email_retorno: "",
                 });
                 setAnexo(null);
                 setCnpjStatus("idle");
@@ -505,63 +483,7 @@ export default function FormularioOnusPage() {
             </div>
           </div>
 
-          {/* ── Section 3: Canal ── */}
-          <div className={sectionClass(2)}>
-            <SectionTitle icon={<Sparkles size={18} />} title="Canal de Recebimento" />
-            <div className="rounded-xl p-5 md:p-6 mb-6 space-y-5"
-              style={{ background: "var(--bg-card)", border: "1px solid var(--border)", boxShadow: "0 4px 24px rgba(0,0,0,0.06)" }}>
 
-              <FieldGroup label="Canal de Recebimento" required error={formErrors.canal_recebimento}>
-                <div className="input-wrapper">
-                  <ChevronDown size={18} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "var(--fg-dim)" }} />
-                  <select
-                    className="input appearance-none cursor-pointer !pl-3.5"
-                    value={formData.canal_recebimento}
-                    onChange={(e) => updateField("canal_recebimento", e.target.value as CanalRecebimento)}
-                  >
-                    <option value="formulario">Formulário de cadastro de ônus (auto-preenchido)</option>
-                    <option value="tasky">Tasky</option>
-                    <option value="email">E-mail</option>
-                    <option value="outros">Outros</option>
-                  </select>
-                </div>
-              </FieldGroup>
-
-              {/* Conditional hints / fields */}
-              <div className="overflow-hidden transition-all duration-300">
-                {formData.canal_recebimento === "formulario" && (
-                  <HintBadge color="accent" icon={<CheckCircle2 size={14} />}
-                    text="Enviado via formulário externo — preenchimento automático." />
-                )}
-
-                {formData.canal_recebimento === "tasky" && (
-                  <div className="animate-[slideUp_0.25s_ease]">
-                    <FieldGroup label="Link do Tasky" required error={formErrors.link_tasky}>
-                      <div className="input-wrapper">
-                        <Link2 size={18} className="input-icon" />
-                        <input
-                          className="input"
-                          placeholder="https://tasky.example.com/..."
-                          value={formData.link_tasky}
-                          onChange={(e) => updateField("link_tasky", e.target.value)}
-                        />
-                      </div>
-                    </FieldGroup>
-                  </div>
-                )}
-
-                {formData.canal_recebimento === "email" && (
-                  <HintBadge color="accent" icon={<Mail size={14} />}
-                    text="Anexe o formulário preenchido abaixo." />
-                )}
-
-                {formData.canal_recebimento === "outros" && (
-                  <HintBadge color="warning" icon={<AlertTriangle size={14} />}
-                    text="Necessário anexar evidência no campo abaixo." />
-                )}
-              </div>
-            </div>
-          </div>
 
           {/* ── Section 4: File upload ── */}
           <div className={sectionClass(3)}>
@@ -570,7 +492,7 @@ export default function FormularioOnusPage() {
               style={{ background: "var(--bg-card)", border: "1px solid var(--border)", boxShadow: "0 4px 24px rgba(0,0,0,0.06)" }}>
 
               <FieldGroup
-                label={`Anexo (Termo Assinado)${formData.canal_recebimento === "outros" ? " *" : ""}`}
+                label="Anexo (Termo Assinado)"
                 error={formErrors.anexo}
               >
                 {/* Drop zone */}
@@ -739,19 +661,6 @@ function FieldGroup({
   );
 }
 
-function HintBadge({ color, icon, text }: { color: "accent" | "warning"; icon: React.ReactNode; text: string }) {
-  const bgMap = { accent: "var(--info-glow)", warning: "var(--warning-glow)" };
-  const fgMap = { accent: "var(--accent)", warning: "var(--warning)" };
-  return (
-    <div
-      className="flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-medium animate-[slideUp_0.25s_ease]"
-      style={{ background: bgMap[color], color: fgMap[color] }}
-    >
-      {icon}
-      {text}
-    </div>
-  );
-}
 
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
