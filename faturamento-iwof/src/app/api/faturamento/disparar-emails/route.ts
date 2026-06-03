@@ -20,6 +20,15 @@ export async function POST(request: Request) {
         const { loteId, assunto, continuar } = await request.json();
         if (!loteId) throw new Error("ID do Lote não fornecido.");
 
+        // ═══ F-08: Capturar status atual ANTES do lock para uso no rollback ═══
+        const { data: lotePreLock } = await supabaseAdmin
+            .from('faturamentos_lote')
+            .select('status')
+            .eq('id', loteId)
+            .single();
+
+        const statusAnterior = lotePreLock?.status ?? 'FECHADO';
+
         // ═══ LOCK OTIMISTA (CAS): Impedir disparos simultâneos ═══
         // Só permite disparar se o lote NÃO está em ENVIANDO nem CANCELADO.
         // Se "continuar", permite re-disparar a partir de ENVIANDO.
@@ -51,7 +60,7 @@ export async function POST(request: Request) {
                 .in('status', ['Erro', 'Processando']);
         }
 
-        // 1. Buscar o lote (para nome_pasta e data_competencia)
+        // 1. Buscar o lote (nome_pasta e data_competencia)
         const { data: lote, error: loteErr } = await supabaseAdmin
             .from('faturamentos_lote')
             .select('nome_pasta, data_competencia')
@@ -162,9 +171,22 @@ export async function POST(request: Request) {
         }
 
         // 5. Disparo simultâneo para o Pub/Sub
-        // O status já foi marcado como ENVIANDO pelo CAS lock acima.
-        if (publishPromises.length > 0) {
-            await Promise.all(publishPromises);
+        // F-08: flag de controle para o rollback no finally
+        let publicacaoOk = false;
+        try {
+            if (publishPromises.length > 0) {
+                await Promise.all(publishPromises);
+            }
+            publicacaoOk = true;
+        } finally {
+            // F-08: se a publicação falhou, reverter status para o valor anterior ao lock
+            if (!publicacaoOk) {
+                console.error(`[Disparo] ⚠️ Falha na publicação Pub/Sub. Revertendo lote ${loteId} para status '${statusAnterior}'.`);
+                await supabaseAdmin
+                    .from('faturamentos_lote')
+                    .update({ status: statusAnterior })
+                    .eq('id', loteId);
+            }
         }
 
         return NextResponse.json({

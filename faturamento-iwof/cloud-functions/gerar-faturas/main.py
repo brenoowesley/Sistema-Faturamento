@@ -88,8 +88,11 @@ def get_image_as_base64(filepath):
 #         },
 #         ...
 #     ],
-#     "driveFolderId": "folder-id"
+#     "driveFolderId": "folder-id-raiz"  ← ID da pasta ROOT (não do ciclo)
 # }
+#
+# Estrutura de pastas criada no Drive:
+#   ROOT / Ano / Mês / Empresa / nome_pasta_ciclo / PDF
 # ==============================================================================
 
 def gerar_faturas_mestre(request):
@@ -101,36 +104,72 @@ def gerar_faturas_mestre(request):
             print("❌ Payload inválido ou campo 'lojas' ausente.")
             return ("Payload inválido: campo 'lojas' é obrigatório.", 400)
 
-        lojas = payload['lojas']
+        lojas            = payload['lojas']
         nome_pasta_ciclo = payload.get('nome_pasta_ciclo', 'Ciclo_Geral')
-        ciclo_mensal = payload.get('ciclo_mensal', 'Período não definido')
-        lote_id = payload.get('lote_id', '')
+        ciclo_mensal     = payload.get('ciclo_mensal', 'Período não definido')
+        lote_id          = payload.get('lote_id', '')
         data_faturamento = payload.get('data_faturamento', datetime.now().strftime('%d/%m/%Y'))
-        drive_folder_id = payload.get('driveFolderId', DRIVE_FOLDER_ID)
+        drive_folder_id  = payload.get('driveFolderId', DRIVE_FOLDER_ID)
 
         print(f"📊 Payload recebido: {len(lojas)} lojas | Ciclo: {nome_pasta_ciclo} | Lote: {lote_id[:8] if lote_id else 'N/A'}")
 
-        publisher = pubsub_v1.PublisherClient()
-        topic_path = publisher.topic_path(PROJECT_ID, PUB_SUB_TOPIC)
+        # ══════════════════════════════════════════════════════════════
+        # Garantir estrutura Root → Ano → Mês no Drive ANTES de
+        # distribuir sub-tarefas. Assim os workers recebem mes_folder_id
+        # pronto e não criam essa hierarquia de forma paralela/redundante.
+        # ══════════════════════════════════════════════════════════════
+        hoje   = datetime.now()
+        ano_str = str(hoje.year)
+        mes_str = hoje.strftime('%m')
+        mes_folder_id = None
+
+        try:
+            creds_drive = Credentials.from_service_account_file(
+                SERVICE_ACCOUNT_FILE,
+                scopes=['https://www.googleapis.com/auth/drive']
+            )
+            drive_service_mestre = build('drive', 'v3', credentials=creds_drive)
+
+            root_folder = drive_folder_id or DRIVE_FOLDER_ID
+            print(f"📂 Garantindo estrutura: Root({root_folder}) → {ano_str} → {mes_str}")
+
+            ano_folder_id = get_or_create_folder_id(drive_service_mestre, root_folder, ano_str)
+            mes_folder_id = get_or_create_folder_id(drive_service_mestre, ano_folder_id, mes_str)
+
+            print(f"✅ Estrutura Root/Ano/Mês pronta. mes_folder_id={mes_folder_id}")
+
+        except Exception as drive_err:
+            # Não aborta o fluxo: workers farão o fallback individualmente
+            print(f"⚠️ Mestre não conseguiu pré-criar Root/Ano/Mês: {drive_err}. Workers usarão fallback.")
+
+        # ──────────────────────────────────────────────────────────────
+        # Publicar uma tarefa por loja no Pub/Sub
+        # ──────────────────────────────────────────────────────────────
+        publisher   = pubsub_v1.PublisherClient()
+        topic_path  = publisher.topic_path(PROJECT_ID, PUB_SUB_TOPIC)
         tarefas_publicadas = 0
 
         for loja_data in lojas:
             info_loja = loja_data.get("info_loja", {})
             nome_loja = info_loja.get("LOJA", "Desconhecida")
-            itens = loja_data.get("itens_faturados_rows", [])
+            itens     = loja_data.get("itens_faturados_rows", [])
 
             dados_tarefa = {
-                "info_loja": info_loja,
+                "info_loja":            info_loja,
                 "itens_faturados_rows": itens,
-                "faturamento_headers": loja_data.get("faturamento_headers", []),
-                "lista_acrescimos": loja_data.get("lista_acrescimos", []),
-                "lista_descontos": loja_data.get("lista_descontos", []),
-                "ajustes_manuais": loja_data.get("ajustes_manuais", []),
-                "ciclo_mensal": ciclo_mensal,
-                "nome_pasta_ciclo": nome_pasta_ciclo,
-                "lote_id": lote_id,
-                "data_faturamento": data_faturamento,
-                "driveFolderId": drive_folder_id
+                "faturamento_headers":  loja_data.get("faturamento_headers", []),
+                "lista_acrescimos":     loja_data.get("lista_acrescimos", []),
+                "lista_descontos":      loja_data.get("lista_descontos", []),
+                "ajustes_manuais":      loja_data.get("ajustes_manuais", []),
+                "ciclo_mensal":         ciclo_mensal,
+                "nome_pasta_ciclo":     nome_pasta_ciclo,
+                "lote_id":              lote_id,
+                "data_faturamento":     data_faturamento,
+                "driveFolderId":        drive_folder_id,
+                # Estrutura já garantida pelo mestre (None = worker faz fallback):
+                "mes_folder_id":        mes_folder_id,
+                "ano_str":              ano_str,
+                "mes_str":              mes_str,
             }
 
             mensagem_bytes = json.dumps(dados_tarefa).encode('utf-8')
@@ -155,20 +194,25 @@ def gerar_faturas_mestre(request):
 # Recebe a mensagem publicada pela Mestre, gera o PDF via template
 # Jinja2/WeasyPrint e faz upload para o Google Drive.
 #
-# Estrutura de pastas no Drive (compatível com consumer-disparo-emails):
-#   DRIVE_ROOT / ano / mês / empresa / ciclo / PDF
+# Caminho final no Drive:
+#   ROOT / Ano / Mês / Empresa / nome_pasta_ciclo / PDF
+#
+# O mes_folder_id (ROOT/Ano/Mês) é recebido do mestre.
+# O worker cria apenas as pastas Empresa e nome_pasta_ciclo.
+# Se mes_folder_id vier ausente (falha no mestre), o worker reconstrói
+# o caminho completo como fallback seguro.
 # ==============================================================================
 
 def processar_fatura_individual(event, context):
     dados_tarefa_json = base64.b64decode(event['data']).decode('utf-8')
     dados_tarefa = json.loads(dados_tarefa_json)
 
-    info_loja = dados_tarefa["info_loja"]
-    itens_faturados_rows = dados_tarefa["itens_faturados_rows"]
-    faturamento_headers = dados_tarefa.get("faturamento_headers", [])
-    ciclo_mensal = dados_tarefa.get("ciclo_mensal", "Período não definido")
-    nome_pasta_ciclo = dados_tarefa.get("nome_pasta_ciclo", "Ciclo_Geral")
-    drive_folder_id = dados_tarefa.get("driveFolderId", DRIVE_FOLDER_ID)
+    info_loja             = dados_tarefa["info_loja"]
+    itens_faturados_rows  = dados_tarefa["itens_faturados_rows"]
+    faturamento_headers   = dados_tarefa.get("faturamento_headers", [])
+    ciclo_mensal          = dados_tarefa.get("ciclo_mensal", "Período não definido")
+    nome_pasta_ciclo      = dados_tarefa.get("nome_pasta_ciclo", "Ciclo_Geral")
+    drive_folder_id       = dados_tarefa.get("driveFolderId", DRIVE_FOLDER_ID)
 
     nome_empresa_original = info_loja.get("LOJA", "Desconhecida")
     print(f"👷 Trabalhadora recebeu: {nome_empresa_original} ({len(itens_faturados_rows)} itens)")
@@ -186,24 +230,24 @@ def processar_fatura_individual(event, context):
         # Exemplo de headers: ["Nome", "Vaga", "Início", "Término",
         #                       "Valor IWOF", "Fração de hora computada",
         #                       "Iniciado por"]
-        col_map = {header: i for i, header in enumerate(faturamento_headers)}
-        nome_idx = col_map.get('Nome', 0)
-        vaga_idx = col_map.get('Vaga', 1)
-        inicio_idx = col_map.get('Início', 2)
-        termino_idx = col_map.get('Término', 3)
-        valor_iwof_idx = col_map.get('Valor IWOF', 4)
+        col_map         = {header: i for i, header in enumerate(faturamento_headers)}
+        nome_idx        = col_map.get('Nome', 0)
+        vaga_idx        = col_map.get('Vaga', 1)
+        inicio_idx      = col_map.get('Início', 2)
+        termino_idx     = col_map.get('Término', 3)
+        valor_iwof_idx  = col_map.get('Valor IWOF', 4)
         fracao_hora_idx = col_map.get('Fração de hora computada', 5)
-        iniciador_idx = col_map.get('Iniciado por', 6)
+        iniciador_idx   = col_map.get('Iniciado por', 6)
 
         # ─── Valores financeiros do info_loja ────────────────────────
         # Chaves novas enviadas pelo Next.js (disparar-gcp/route.ts)
         # com fallback para chaves legadas da planilha.
-        valor_bruto = parse_brazilian_float(info_loja.get('VALOR_BRUTO'))
-        acrescimo = parse_brazilian_float(info_loja.get('ACRESCIMO'))
-        desconto = parse_brazilian_float(info_loja.get('DESCONTO'))
-        irrf = parse_brazilian_float(info_loja.get('IRRF'))
-        valor_nf = parse_brazilian_float(info_loja.get('NF'))
-        valor_nc = parse_brazilian_float(info_loja.get('NC'))
+        valor_bruto  = parse_brazilian_float(info_loja.get('VALOR_BRUTO'))
+        acrescimo    = parse_brazilian_float(info_loja.get('ACRESCIMO'))
+        desconto     = parse_brazilian_float(info_loja.get('DESCONTO'))
+        irrf         = parse_brazilian_float(info_loja.get('IRRF'))
+        valor_nf     = parse_brazilian_float(info_loja.get('NF'))
+        valor_nc     = parse_brazilian_float(info_loja.get('NC'))
         valor_liquido = parse_brazilian_float(
             info_loja.get('VALOR_LIQUIDO') or info_loja.get('BOLETO')
         )
@@ -226,70 +270,81 @@ def processar_fatura_individual(event, context):
 
         template_context = {
             # Cabeçalho
-            "logo_src": logo_base64_src,
-            "nome_cliente": nome_empresa_original,
-            "cnpj_cliente": info_loja.get('CNPJ', 'N/A'),
+            "logo_src":      logo_base64_src,
+            "nome_cliente":  nome_empresa_original,
+            "cnpj_cliente":  info_loja.get('CNPJ', 'N/A'),
             "numero_fatura": info_loja.get('Nº NF', 'N/A'),
-            "ciclo_mensal": periodo,
+            "ciclo_mensal":  periodo,
 
             # Tabela de itens — cada agendamento individual vira uma linha
             "itens_faturados": [
                 {
                     "profissional": safe_col(item, nome_idx, "N/A"),
-                    "funcao": safe_col(item, vaga_idx),
-                    "inicio": safe_col(item, inicio_idx),
-                    "termino": safe_col(item, termino_idx),
-                    "valor": fmt(parse_brazilian_float(safe_col(item, valor_iwof_idx, "0"))),
-                    "fracao_hora": safe_col(item, fracao_hora_idx),
-                    "iniciador": safe_col(item, iniciador_idx),
+                    "funcao":       safe_col(item, vaga_idx),
+                    "inicio":       safe_col(item, inicio_idx),
+                    "termino":      safe_col(item, termino_idx),
+                    "valor":        fmt(parse_brazilian_float(safe_col(item, valor_iwof_idx, "0"))),
+                    "fracao_hora":  safe_col(item, fracao_hora_idx),
+                    "iniciador":    safe_col(item, iniciador_idx),
                 }
                 for item in itens_faturados_rows
             ],
 
             # Resumo financeiro (chaves antigas para compatibilidade com template)
-            "subtotal": fmt(subtotal_val),
-            "descontos": fmt(desconto),
-            "NF": fmt(valor_nf),
-            "NC": fmt(valor_nc),
+            "subtotal":    fmt(subtotal_val),
+            "descontos":   fmt(desconto),
+            "NF":          fmt(valor_nf),
+            "NC":          fmt(valor_nc),
             "total_geral": fmt(valor_total_pdf),
 
             # Chaves novas (para templates atualizados)
-            "valor_bruto": fmt(valor_bruto),
-            "acrescimos": fmt(acrescimo),
-            "irrf": fmt(irrf),
+            "valor_bruto":  fmt(valor_bruto),
+            "acrescimos":   fmt(acrescimo),
+            "irrf":         fmt(irrf),
             "valor_liquido": fmt(valor_liquido),
-            "periodo": periodo,
+            "periodo":      periodo,
 
             # Listas detalhadas de ajustes
             "lista_acrescimos": dados_tarefa.get("lista_acrescimos", []),
-            "lista_descontos": dados_tarefa.get("lista_descontos", []),
-            "ajustes_manuais": dados_tarefa.get("ajustes_manuais", []),
+            "lista_descontos":  dados_tarefa.get("lista_descontos", []),
+            "ajustes_manuais":  dados_tarefa.get("ajustes_manuais", []),
 
             # Flags
             "exibir_aviso_desconto": info_loja.get("exibir_aviso_desconto_informativo", False),
-            "boleto_unificado": info_loja.get("boleto_unificado", True),
+            "boleto_unificado":      info_loja.get("boleto_unificado", True),
         }
 
         # ─── Renderização do PDF ─────────────────────────────────────
-        env = Environment(loader=FileSystemLoader('.'))
-        template = env.get_template('template.html')
+        env       = Environment(loader=FileSystemLoader('.'))
+        template  = env.get_template('template.html')
         stylesheet = CSS('style.css')
 
         html_final = template.render(template_context)
-        pdf_bytes = HTML(string=html_final).write_pdf(stylesheets=[stylesheet])
+        pdf_bytes  = HTML(string=html_final).write_pdf(stylesheets=[stylesheet])
 
         # ─── Upload para o Google Drive ──────────────────────────────
-        # Estrutura: DRIVE_ROOT / ano / mês / empresa / ciclo / PDF
-        # (compatível com consumer-disparo-emails que busca PDFs nesta hierarquia)
-        hoje = datetime.now()
-        ano_str = str(hoje.year)
-        mes_str = hoje.strftime('%m')
+        # Caminho: ROOT / Ano / Mês / Empresa / nome_pasta_ciclo / PDF
+        #
+        # O mestre já criou ROOT/Ano/Mês e envia mes_folder_id no payload.
+        # O worker só precisa criar Empresa e nome_pasta_ciclo.
+        # Fallback seguro: se mes_folder_id não vier, worker reconstrói tudo.
+        mes_folder_id_recebido = dados_tarefa.get("mes_folder_id")
+        ano_str = dados_tarefa.get("ano_str") or str(datetime.now().year)
+        mes_str = dados_tarefa.get("mes_str") or datetime.now().strftime('%m')
 
-        root_folder = drive_folder_id or DRIVE_FOLDER_ID
-        ano_folder_id = get_or_create_folder_id(drive_service, root_folder, ano_str)
-        mes_folder_id = get_or_create_folder_id(drive_service, ano_folder_id, mes_str)
+        if mes_folder_id_recebido:
+            # Caminho rápido: usa o mes_folder_id pré-criado pelo mestre
+            mes_folder_id = mes_folder_id_recebido
+            print(f"  📂 Usando mes_folder_id do mestre: {mes_folder_id}")
+        else:
+            # Fallback: worker reconstrói ROOT → Ano → Mês individualmente
+            print(f"  ⚠️ mes_folder_id ausente. Recriando fallback ROOT→{ano_str}→{mes_str}...")
+            root_folder   = drive_folder_id or DRIVE_FOLDER_ID
+            ano_folder_id = get_or_create_folder_id(drive_service, root_folder, ano_str)
+            mes_folder_id = get_or_create_folder_id(drive_service, ano_folder_id, mes_str)
+
         empresa_folder_id = get_or_create_folder_id(drive_service, mes_folder_id, nome_empresa_original)
-        ciclo_folder_id = get_or_create_folder_id(drive_service, empresa_folder_id, nome_pasta_ciclo)
+        ciclo_folder_id   = get_or_create_folder_id(drive_service, empresa_folder_id, nome_pasta_ciclo)
 
         nome_arquivo_pdf = f"Fatura_{nome_empresa_original}_{ano_str}-{mes_str}.pdf"
         media = MediaInMemoryUpload(pdf_bytes, mimetype='application/pdf', resumable=True)
@@ -299,6 +354,7 @@ def processar_fatura_individual(event, context):
         ).execute()
 
         print(f"✅ Concluído: {nome_empresa_original} — {len(itens_faturados_rows)} itens no PDF ✔")
+        print(f"   📁 Salvo em: ROOT/{ano_str}/{mes_str}/{nome_empresa_original}/{nome_pasta_ciclo}/")
 
     except Exception as e:
         import traceback

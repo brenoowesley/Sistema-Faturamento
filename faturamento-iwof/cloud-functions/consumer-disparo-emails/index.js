@@ -143,6 +143,30 @@ async function downloadFile(fileId) {
 }
 
 // ═══════════════════════════════════════
+// F-10: Fechamento automático do lote
+// Chamada após cada log final (Sucesso ou Erro).
+// A função SQL é atômica: só fecha o lote se TODOS
+// os consolidados já têm log final, evitando race
+// conditions entre múltiplos workers do Cloud Run.
+// ═══════════════════════════════════════
+async function verificarEConcluirLote(loteId) {
+    if (!loteId) return;
+    try {
+        const { error } = await supabaseAdmin.rpc('verificar_e_concluir_lote', {
+            p_lote_id: loteId
+        });
+        if (error) {
+            console.error(`[CONSUMER] ⚠️ Erro ao verificar conclusão do lote ${loteId.slice(0,8)}:`, error.message);
+        } else {
+            console.log(`[CONSUMER] 🔄 verificar_e_concluir_lote executado para lote ${loteId.slice(0,8)}`);
+        }
+    } catch (err) {
+        // Não propagar: falha nesta função auxiliar não deve quebrar o fluxo principal
+        console.error(`[CONSUMER] ⚠️ Exceção em verificarEConcluirLote:`, err.message);
+    }
+}
+
+// ═══════════════════════════════════════
 // TEMPLATE HTML (inline para independência)
 // ═══════════════════════════════════════
 
@@ -330,6 +354,9 @@ app.post('/', async (req, res) => {
             });
         }
 
+        // F-10: verificar se todos os clientes do lote foram processados e fechar o lote
+        await verificarEConcluirLote(loteId);
+
         return res.status(204).send();
 
     } catch (error) {
@@ -358,6 +385,9 @@ app.post('/', async (req, res) => {
                     mensagem_erro: (error.message || 'Erro desconhecido').substring(0, 500),
                 });
                 console.log(`[CONSUMER] Log de erro gravado no Supabase.`);
+
+                // F-10: mesmo em caso de erro, verificar se o lote pode ser fechado
+                await verificarEConcluirLote(payload.loteId);
             }
         } catch (logError) {
             // Se nem o log conseguir gravar, apenas loga no console

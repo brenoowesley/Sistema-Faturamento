@@ -504,19 +504,17 @@ export async function POST(req: NextRequest) {
         const cycleNameStr = lote.nome_pasta ? lote.nome_pasta : (cicloLote?.nome || `Lote_${lote.id.substring(0, 8)}`);
         const cyclePeriodStr = `${dInicio} à ${dFim}`;
 
-        let rootFolderId = lote.drive_folder_id;
-        const rootConfigId = getRootFolderId();
-
-        if (!rootFolderId && rootConfigId) {
-            rootFolderId = await getOrCreateFolder(cycleNameStr, rootConfigId);
-            // Salva o ID no Supabase para as próximas requisições
-            await supabase.from('faturamentos_lote').update({ drive_folder_id: rootFolderId }).eq('id', loteId);
-            console.log(`[DRIVE CACHE] Pasta Mestre '${cycleNameStr}' criada e travada com ID: ${rootFolderId}`);
-        } else if (!rootFolderId && !rootConfigId) {
-            console.warn("⚠️ Variáveis de ambiente do Google Drive não configuradas. Usando ID dummy ou falhando se necessário.");
-        } else if (rootFolderId) {
-            console.log(`[DRIVE CACHE] Usando Pasta Mestre Existente '${cycleNameStr}': ${rootFolderId}`);
+        // ─── Pasta raiz do Drive ──────────────────────────────────
+        // Passamos apenas o Root ID para o GCP. A função master Python
+        // cria a estrutura Root/Ano/Mês antes de distribuir os workers.
+        // Não criamos mais a pasta "Ciclo" aqui dentro da raiz.
+        const rootFolderId = getRootFolderId();
+        if (!rootFolderId) {
+            console.warn("⚠️ GOOGLE_DRIVE_ROOT_FOLDER_ID não configurado. PDFs podem não ser salvos.");
+        } else {
+            console.log(`[DRIVE] Pasta raiz: ${rootFolderId}`);
         }
+
 
         const pubNCUrl = process.env.GCP_PUB_NC_URL;
         const pubHCUrl = process.env.GCP_PUB_HC_URL;
