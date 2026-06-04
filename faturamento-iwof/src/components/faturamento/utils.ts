@@ -101,11 +101,14 @@ export function calcularTotaisFaturamento(
     irrf: number,
     isNFEmitida: boolean,
     boletoUnificado: boolean = true,
-    porcentagemNF: number = 11.5
+    porcentagemNF: number = 11.5,
+    isNordestao: boolean = false
 ): TotaisFaturamento {
-    // A base faturável (que gera a NF e NC) DEVE ter o desconto aplicado para o financeiro bater
-    const valorBaseFaturavel = valorBruto + acrescimos - descontos;
-    
+    // Nordestão: descontos são demonstrativos na fatura — NF/NC usam bruto + acréscimos.
+    // Boleto sempre considera os descontos (valor efetivamente cobrado).
+    const baseParaBoleto  = valorBruto + acrescimos - descontos;
+    const baseParaFatura  = isNordestao ? (valorBruto + acrescimos) : baseParaBoleto;
+
     const fatorNF = porcentagemNF / 100;
     const fatorNC = 1 - fatorNF;
 
@@ -113,13 +116,16 @@ export function calcularTotaisFaturamento(
     let valorNC = 0;
 
     if (!boletoUnificado) {
-        valorNF = valorBaseFaturavel * fatorNF;
-        valorNC = valorBaseFaturavel * fatorNC;
+        valorNF = baseParaFatura * fatorNF;
+        valorNC = baseParaFatura * fatorNC;
     } else {
-        valorNF = isNFEmitida ? valorBaseFaturavel : 0;
-        valorNC = !isNFEmitida ? valorBaseFaturavel : 0;
+        valorNF = isNFEmitida ? baseParaFatura : 0;
+        valorNC = !isNFEmitida ? baseParaFatura : 0;
     }
 
-    const valorLiquido = valorBaseFaturavel - irrf;
-    return { valorBruto, valorBaseFaturavel, valorNF, valorNC, irrf, valorLiquido };
+    // valorLiquido = boleto: sempre usa a base com descontos
+    const valorLiquido = baseParaBoleto - irrf;
+
+    // valorBaseFaturavel exposto = base do boleto (compatibilidade com displays existentes)
+    return { valorBruto, valorBaseFaturavel: baseParaBoleto, valorNF, valorNC, irrf, valorLiquido };
 }

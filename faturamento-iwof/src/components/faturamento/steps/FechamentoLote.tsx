@@ -626,7 +626,8 @@ export default function FechamentoLote({
 
                 const isNordestao = String(r.ciclo || "").toUpperCase().includes('NORDESTÃO');
 
-                // Passamos o finalDescontos REAL para que o totais.valorLiquido (Boleto) seja abatido
+                // Passamos isNordestao para que a função separe a base da fatura (sem desconto)
+                // da base do boleto (com desconto) internamente.
                 const totais = calcularTotaisFaturamento(
                     r.valorBruto,
                     finalAcrescimos,
@@ -634,7 +635,8 @@ export default function FechamentoLote({
                     r.descontoIR || 0,
                     r.statusNF === 'EMITIDA',
                     r.boletoUnificado ?? true,
-                    r.porcentagemNF ?? 11.5
+                    r.porcentagemNF ?? 11.5,
+                    isNordestao
                 );
 
 
@@ -1051,18 +1053,14 @@ export default function FechamentoLote({
     // Painel de cascata: agrega o pipeline matemático de todos os reports do lote
     const cascataTotais = matchFiles.reports.reduce(
         (acc, r) => {
-            const t = calcularTotaisFaturamento(
-                r.valorBruto, r.valorAcrescimos, r.valorDescontos, // Usa desconto real
-                r.descontoIR || 0, r.statusNF === 'EMITIDA',
-                r.boletoUnificado ?? true
-            );
-            
             const isNordestao = String(r.ciclo || "").toUpperCase().includes('NORDESTÃO');
-            if (isNordestao) {
-                const valorFaturaCheia = r.valorBruto + r.valorAcrescimos;
-                if (r.statusNF === 'EMITIDA') t.valorNF = valorFaturaCheia;
-                else t.valorNC = valorFaturaCheia;
-            }
+            const t = calcularTotaisFaturamento(
+                r.valorBruto, r.valorAcrescimos, r.valorDescontos,
+                r.descontoIR || 0, r.statusNF === 'EMITIDA',
+                r.boletoUnificado ?? true,
+                undefined, // porcentagemNF — usa default 11.5
+                isNordestao
+            );
 
             acc.bruto += t.valorBruto;
             acc.ajustes += (r.valorAcrescimos - r.valorDescontos);
@@ -1632,13 +1630,16 @@ export default function FechamentoLote({
                                         {/* Boleto Final = pós ajustes − IRRF */}
                                         <td className="py-3 px-3 text-right">
                                             {(() => {
+                                                const isNordestaoRow = String(r.ciclo || "").toUpperCase().includes('NORDESTÃO');
                                                 const totais = calcularTotaisFaturamento(
                                                     r.valorBruto,
                                                     r.valorAcrescimos,
                                                     r.valorDescontos, // Passa o desconto real para renderizar o boleto reduzido
                                                     r.descontoIR || 0,
                                                     r.statusNF === 'EMITIDA',
-                                                    r.boletoUnificado ?? true
+                                                    r.boletoUnificado ?? true,
+                                                    undefined,
+                                                    isNordestaoRow
                                                 );
                                                 if (!r.boletoUnificado && totais.valorNF > 0 && totais.valorNC > 0) {
                                                     return (

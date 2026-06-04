@@ -9,6 +9,21 @@ const supabase = createClient(
 );
 
 async function findCnpjDuplicates() {
+    // 1. Resolve o UUID real do ciclo Nordestão — não depende do nome do cliente
+    const { data: ciclo, error: cicloErr } = await supabase
+        .from("ciclos_faturamento")
+        .select("id, nome")
+        .eq("nome", "NORDESTÃO")
+        .single();
+
+    if (cicloErr || !ciclo) {
+        console.error("Ciclo NORDESTÃO não encontrado na tabela ciclos_faturamento.", cicloErr);
+        return;
+    }
+
+    console.log(`Ciclo encontrado: "${ciclo.nome}" (UUID: ${ciclo.id})\n`);
+
+    // 2. Filtra clientes pelo FK ciclo_faturamento_id — imutável e preciso
     const { data: clientes, error } = await supabase
         .from("clientes")
         .select(`
@@ -18,7 +33,7 @@ async function findCnpjDuplicates() {
             ciclo_faturamento_id,
             ciclos_faturamento (nome)
         `)
-        .ilike("razao_social", "%nordestão%");
+        .eq("ciclo_faturamento_id", ciclo.id);
 
     if (error) {
         console.error("Error fetching", error);

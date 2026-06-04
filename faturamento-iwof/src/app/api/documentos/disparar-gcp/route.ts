@@ -240,7 +240,17 @@ export async function POST(req: NextRequest) {
             const valorLiquido = valorBaseNormal - valorIRRF;
 
             const boletoUnificado = cliente.boleto_unificado ?? true;
-            const finalLiquidoBoletoGCP = boletoUnificado === false ? (valorNF - valorIRRF) : valorLiquido;
+
+            // Para boleto desmembrado (boletoUnificado=false): o valor do boleto da parcela NF
+            // usa a base COM desconto — mesmo que o documento fiscal (NF) seja emitido sem desconto.
+            // Para Nordestão: valorNF usa baseParaFatura (sem desconto), por isso recalculamos
+            // a parcela do boleto sobre valorBaseNormal (com desconto).
+            const valorNFParaBoleto = isNordestao
+                ? (valorBaseNormal * fatorNF)
+                : valorNF;
+            const finalLiquidoBoletoGCP = boletoUnificado === false
+                ? (valorNFParaBoleto - valorIRRF)
+                : valorLiquido;
 
             // ==========================================
             // CÁLCULO DE PERÍODO ESPECÍFICO (QUEIROZ SPLIT)

@@ -736,23 +736,28 @@ export default function FiscalProcessingPage() {
                 const cleanCNPJ = loja.cnpj.replace(/\D/g, "");
                 const matchedXML = parsedXMLs.find(x => x.cnpj === cleanCNPJ);
 
+                // Nordestão: descontos são demonstrativos na fatura.
+                // - baseParaFatura: bruto + acréscimos (sem descontos) → base da NF e NC
+                // - calcBase: bruto + acréscimos - descontos → base do boleto (cobrado com desconto)
                 const calcBase = (loja.valorBruto + loja.acrescimos) - loja.descontos;
-
-                // Cálculo Nordestão: (Boleto * 0.115) * 0.015
-                let irrf = matchedXML ? matchedXML.valorIR : 0;
                 const isNordestao = (loja as any).ciclo === "NORDESTÃO";
+                const baseParaFatura = isNordestao ? (loja.valorBruto + loja.acrescimos) : calcBase;
 
+                // IRRF: quando não há XML, calcula automaticamente para Nordestão.
+                // Base do IRRF = baseParaFatura (NF é emitida sobre o valor sem desconto).
+                // Regra RFB (Art. 67 Lei 9.430/1996): só retém se o valor calculado >= R$10.
+                let irrf = matchedXML ? matchedXML.valorIR : 0;
                 if (isNordestao && irrf === 0) {
                     const fatorNF = (loja as any).porcentagemNF ? (loja as any).porcentagemNF / 100 : 0.115;
-                    irrf = Number(((calcBase * fatorNF) * 0.015).toFixed(2));
+                    const irrfCalculado = Number(((baseParaFatura * fatorNF) * 0.015).toFixed(2));
+                    irrf = irrfCalculado >= 10 ? irrfCalculado : 0;
                 }
 
-                // Regra de cálculo:
-                // - calcBase (bruto + acréscimos - descontos) define NF e NC
-                // - IRRF só afeta o boleto (valor líquido a receber)
+                // Fatura (NC): usa baseParaFatura — descontos não reduzem o documento fiscal.
+                // Boleto: usa calcBase — descontos são efetivamente aplicados no valor a receber.
                 const fatorNC = 1 - ((loja as any).porcentagemNF ? (loja as any).porcentagemNF / 100 : 0.115);
                 const boleto = calcBase - irrf;
-                const nc = calcBase * fatorNC;
+                const nc = baseParaFatura * fatorNC;
 
                 return {
                     loja,

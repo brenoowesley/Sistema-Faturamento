@@ -301,8 +301,13 @@ export async function POST(req: Request) {
                 continue;
             }
 
-            // 4c. Monta o payload compatível com o endpoint de Vendas (/v1/sales)
-            const payload = {
+            // 4c. Resolve Centro de Custo → UUID (opcional, não bloqueia exportação)
+            const centroCustoUUID = item.centroCusto
+                ? await resolverCentroCustoPorNome(item.centroCusto, accessToken, centroCustoCache)
+                : null;
+
+            // 4d. Monta o payload compatível com o endpoint de Vendas (/v1/sales)
+            const payload: Record<string, unknown> = {
                 emission: new Date(item.dataCompetencia).toISOString(),
                 status: "COMMITTED",
                 customer_id: contatoUUID,
@@ -331,7 +336,9 @@ export async function POST(req: Request) {
                     ]
                 },
                 notes: item.observacoes || "Gerado via Integração iWof",
-                category_id: categoryId
+                category_id: categoryId,
+                // Centro de custo resolvido dinamicamente (opcional)
+                ...(centroCustoUUID ? { cost_center_id: centroCustoUUID } : {})
             };
 
             try {
