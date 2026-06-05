@@ -8,6 +8,7 @@ const supabaseAdmin = createClient(
 );
 
 const API_BASE = "https://api-v2.contaazul.com";
+const RECEIVABLE_ENDPOINT = `${API_BASE}/v1/financeiro/eventos-financeiros/contas-a-receber`;
 
 // ─── Motor de Renovação OAuth2 ──────────────────────────────────
 
@@ -255,8 +256,10 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "CONTA_AZUL_BANK_ACCOUNT_ID não está configurado." }, { status: 500 });
         }
 
-        // Conta de cobranças (para emissão de boleto via CNAB)
-        // Pode ser diferente da conta financeira — configure CA_BOLETO_BANK_ACCOUNT_ID separadamente se necessário
+        // Conta PJ de cobrança: usada como `conta_cobranca_id` na parcela
+        // para que o Conta Azul emita o boleto vinculado a esta conta bancária.
+        // Configure CA_BOLETO_BANK_ACCOUNT_ID na Vercel com o UUID da conta PJ.
+        // Fallback: usa a própria conta financeira principal.
         const boletoAccountId = process.env.CA_BOLETO_BANK_ACCOUNT_ID || bankAccountId;
 
         let successCount = 0;
@@ -267,8 +270,10 @@ export async function POST(req: Request) {
         const contatoCache = new Map<string, string | null>();
         const centroCustoCache = new Map<string, string | null>();
 
-        // 4. Integração Principal — API Pública de Vendas
-        // Endpoint oficial: POST /v1/sales (cria fatura + conta a receber associada)
+        // 4. Integração Principal — Contas a Receber
+        // Endpoint: POST /v1/financeiro/eventos-financeiros/contas-a-receber (API v2)
+        // Cria um lançamento financeiro direto no módulo de contas a receber,
+        // sem gerar NF ou venda — apenas o título financeiro com boleto bancário.
 
         for (const item of rows) {
             if (!item.valor || item.valor <= 0) {
@@ -280,10 +285,10 @@ export async function POST(req: Request) {
 
             if (!categoryId) {
                 errorCount++;
-                errors.push({ 
-                    id: item.id, 
-                    cliente: item.cliente, 
-                    erro: `Categoria Financeira para o ciclo (${item.categoria}) não configurada. Defina CA_CATEGORY_SEMANAL, CA_CATEGORY_QUINZENAL ou CA_CATEGORY_MENSAL no .env.` 
+                errors.push({
+                    id: item.id,
+                    cliente: item.cliente,
+                    erro: `Categoria Financeira para o ciclo (${item.categoria}) não configurada. Defina CA_CATEGORY_SEMANAL, CA_CATEGORY_QUINZENAL ou CA_CATEGORY_MENSAL no .env.`,
                 });
                 continue;
             }
@@ -293,10 +298,10 @@ export async function POST(req: Request) {
 
             if (!contatoUUID) {
                 errorCount++;
-                errors.push({ 
-                    id: item.id, 
-                    cliente: item.cliente, 
-                    erro: `Cliente não encontrado no Conta Azul pelo CNPJ: ${item.cnpj}. Cadastre o cliente primeiro.` 
+                errors.push({
+                    id: item.id,
+                    cliente: item.cliente,
+                    erro: `Cliente não encontrado no Conta Azul pelo CNPJ: ${item.cnpj}. Cadastre o cliente primeiro.`,
                 });
                 continue;
             }
@@ -306,70 +311,84 @@ export async function POST(req: Request) {
                 ? await resolverCentroCustoPorNome(item.centroCusto, accessToken, centroCustoCache)
                 : null;
 
-            // 4d. Monta o payload compatível com o endpoint de Vendas (/v1/sales)
+            // 4d. Monta payload para Contas a Receber (API v2)
+            // Schema: evento financeiro com parcela única e método BANKING_BILLET
+            const dataCompetencia = item.dataCompetencia
+                ? new Date(item.dataCompetencia).toISOString().split("T")[0]  // "YYYY-MM-DD"
+                : new Date().toISOString().split("T")[0];
+
+            const dataVencimento = item.dataVencimento
+                ? new Date(item.dataVencimento).toISOString().split("T")[0]
+                : dataCompetencia;
+
             const payload: Record<string, unknown> = {
-                emission: new Date(item.dataCompetencia).toISOString(),
-                status: "COMMITTED",
-                customer_id: contatoUUID,
-                services: [
+                // Identificação do devedor
+                pessoa_id: contatoUUID,
+
+                // Data de competência (emissão do lançamento)
+                data_competencia: dataCompetencia,
+
+                // Descrição do lançamento
+                descricao: item.descricao || `Faturamento Mensal - ${item.cliente}`,
+
+                // Categoria financeira (UUID)
+                categoria_id: categoryId,
+
+                // Conta bancária de recebimento (UUID)
+                conta_financeira_id: bankAccountId,
+
+                // Observações
+                observacao: item.observacoes || "Gerado via Integração iWof",
+
+                // Parcelas — lançamento único com boleto bancário
+                parcelas: [
                     {
-                        description: item.descricao || "Faturamento Mensal",
-                        quantity: 1,
-                        value: item.valor
-                    }
+                        valor: item.valor,
+                        data_vencimento: dataVencimento,
+                        // Método de pagamento: boleto bancário
+                        metodo_pagamento: "BANKING_BILLET",
+                        // Conta PJ de cobrança: permite ao Conta Azul emitir o boleto
+                        // no momento do lançamento (vinculado à conta bancária PJ)
+                        conta_cobranca_id: boletoAccountId,
+                    },
                 ],
-                discount: {
-                    measure_unit: "VALUE",
-                    rate: 0
-                },
-                payment: {
-                    type: "TIMES",
-                    method: "BANK_SLIP",
-                    financial_account_id: bankAccountId,
-                    installments: [
-                        {
-                            number: 1,
-                            value: item.valor,
-                            due_date: new Date(item.dataVencimento).toISOString(),
-                            status: "PENDING"
-                        }
-                    ]
-                },
-                notes: item.observacoes || "Gerado via Integração iWof",
-                category_id: categoryId,
-                // Centro de custo resolvido dinamicamente (opcional)
-                ...(centroCustoUUID ? { cost_center_id: centroCustoUUID } : {})
+
+                // Centro de custo (opcional)
+                ...(centroCustoUUID ? { centro_de_custo_id: centroCustoUUID } : {}),
             };
 
             try {
-                // ── Cria a venda (fatura + conta a receber) via API Pública ─────
-                const response = await fetch("https://api.contaazul.com/v1/sales", {
+                // ── Cria o lançamento de contas a receber via API v2 ────────────
+                const response = await fetch(RECEIVABLE_ENDPOINT, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
-                        "Authorization": `Bearer ${accessToken}`
+                        "Authorization": `Bearer ${accessToken}`,
                     },
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify(payload),
                 });
-                
+
                 if (!response.ok) {
                     const rawText = await response.text();
                     let errMsg = response.statusText;
                     try {
                         const errObj = JSON.parse(rawText);
-                        errMsg = typeof errObj.message === "string" 
-                            ? errObj.message 
-                            : JSON.stringify(errObj.message || errObj.errors || errObj);
-                    } catch { errMsg = rawText || response.statusText; }
+                        errMsg =
+                            typeof errObj.message === "string"
+                                ? errObj.message
+                                : JSON.stringify(errObj.message || errObj.errors || errObj);
+                    } catch {
+                        errMsg = rawText || response.statusText;
+                    }
                     console.error(`🚨 Conta Azul API Error [${response.status}] para ${item.cliente}:`, errMsg);
                     throw new Error(`Erro API (${response.status}): ${errMsg}`);
                 }
 
-                const saleResult = await response.json().catch(() => ({}));
-                console.log(`✅ Venda criada para ${item.cliente}: id=${saleResult.id}, status=${saleResult.status}`);
+                const result = await response.json().catch(() => ({}));
+                console.log(`✅ Contas a receber criado para ${item.cliente}: id=${result.id}`);
 
-                // Rate limit: pequeno delay entre chamadas
-                await new Promise(resolve => setTimeout(resolve, 300));
+                // Rate limit: 300ms de intervalo entre chamadas (limite: 600/min)
+                await new Promise((resolve) => setTimeout(resolve, 300));
 
                 successCount++;
             } catch (err: any) {
@@ -382,7 +401,7 @@ export async function POST(req: Request) {
             message: "Sincronização concluída",
             successCount,
             errorCount,
-            errors
+            errors,
         });
 
     } catch (error: any) {

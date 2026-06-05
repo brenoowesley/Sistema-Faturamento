@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, type FormEvent, type DragEvent } from "react";
+import {
+  useState,
+  useRef,
+  useCallback,
+  useEffect,
+  type FormEvent,
+  type DragEvent,
+} from "react";
 import { useTheme } from "next-themes";
 import {
   Building2,
@@ -18,6 +25,9 @@ import {
   Moon,
   X,
   ArrowLeft,
+  ArrowRight,
+  ChevronRight,
+  Paperclip,
 } from "lucide-react";
 
 /* ================================================================
@@ -55,11 +65,9 @@ function cnpjDigits(value: string): string {
   return value.replace(/\D/g, "");
 }
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const ACCEPTED_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/jpg"];
 const ACCEPTED_EXTENSIONS = ".pdf,.png,.jpg,.jpeg";
-
-
 
 interface FormData {
   cnpj: string;
@@ -84,6 +92,14 @@ interface FormErrors {
 
 type CnpjStatus = "idle" | "loading" | "found" | "not-found";
 
+// Mobile stepper steps
+const STEPS = [
+  { id: 0, label: "Loja", icon: Building2 },
+  { id: 1, label: "Ônus", icon: User },
+  { id: 2, label: "Anexo", icon: Paperclip },
+  { id: 3, label: "Contato", icon: Mail },
+];
+
 /* ================================================================
    COMPONENT
    ================================================================ */
@@ -91,6 +107,8 @@ type CnpjStatus = "idle" | "loading" | "found" | "not-found";
 export default function FormularioOnusPage() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileStep, setMobileStep] = useState(0);
 
   const [formData, setFormData] = useState<FormData>({
     cnpj: "",
@@ -109,40 +127,27 @@ export default function FormularioOnusPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [visibleSections, setVisibleSections] = useState<boolean[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setMounted(true);
-    // Stagger section animations
-    const timers: NodeJS.Timeout[] = [];
-    for (let i = 0; i < 6; i++) {
-      timers.push(setTimeout(() => {
-        setVisibleSections(prev => {
-          const next = [...prev];
-          next[i] = true;
-          return next;
-        });
-      }, 100 + i * 80));
-    }
-    return () => timers.forEach(clearTimeout);
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
   }, []);
 
-  /* ---- Field update ---- */
   const updateField = <K extends keyof FormData>(key: K, value: FormData[K]) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
-    // Clear error on change
-    if (formErrors[key]) {
+    if (formErrors[key as keyof FormErrors]) {
       setFormErrors((prev) => ({ ...prev, [key]: undefined }));
     }
   };
 
-  /* ---- CNPJ lookup ---- */
   const handleCnpjBlur = useCallback(async () => {
     const digits = cnpjDigits(formData.cnpj);
     if (digits.length < 14) return;
-
     setCnpjStatus("loading");
     try {
       const res = await fetch(`/api/onus/buscar-loja?cnpj=${digits}`);
@@ -160,10 +165,9 @@ export default function FormularioOnusPage() {
     } catch {
       setCnpjStatus("not-found");
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.cnpj]);
 
-  /* ---- File handling ---- */
   const handleFileSelect = (file: File | null) => {
     if (!file) return;
     if (!ACCEPTED_TYPES.includes(file.type)) {
@@ -178,14 +182,8 @@ export default function FormularioOnusPage() {
     setFormErrors((prev) => ({ ...prev, anexo: undefined }));
   };
 
-  const handleDragOver = (e: DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-  const handleDragLeave = (e: DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-  };
+  const handleDragOver = (e: DragEvent) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragLeave = (e: DragEvent) => { e.preventDefault(); setIsDragging(false); };
   const handleDrop = (e: DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
@@ -193,10 +191,28 @@ export default function FormularioOnusPage() {
     if (file) handleFileSelect(file);
   };
 
-  /* ---- Validation ---- */
-  const validateForm = (): boolean => {
+  const validateStep = (step: number): boolean => {
     const errors: FormErrors = {};
+    if (step === 0) {
+      if (cnpjDigits(formData.cnpj).length < 14) errors.cnpj = "CNPJ inválido (14 dígitos).";
+      if (!formData.nome_loja.trim()) errors.nome_loja = "Nome da loja é obrigatório.";
+    }
+    if (step === 1) {
+      if (!formData.nome_usuario.trim()) errors.nome_usuario = "Nome do usuário é obrigatório.";
+      if (!formData.data_agendamento) errors.data_agendamento = "Data é obrigatória.";
+      if (!formData.descricao.trim()) errors.descricao = "Descrição é obrigatória.";
+      if (!formData.valor || parseBRL(formData.valor) <= 0) errors.valor = "Valor deve ser maior que zero.";
+    }
+    if (step === 3) {
+      if (formData.email_retorno && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email_retorno))
+        errors.email_retorno = "E-mail inválido.";
+    }
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
 
+  const validateAll = (): boolean => {
+    const errors: FormErrors = {};
     if (cnpjDigits(formData.cnpj).length < 14) errors.cnpj = "CNPJ inválido (14 dígitos).";
     if (!formData.nome_loja.trim()) errors.nome_loja = "Nome da loja é obrigatório.";
     if (!formData.nome_usuario.trim()) errors.nome_usuario = "Nome do usuário é obrigatório.";
@@ -205,20 +221,21 @@ export default function FormularioOnusPage() {
     if (!formData.valor || parseBRL(formData.valor) <= 0) errors.valor = "Valor deve ser maior que zero.";
     if (formData.email_retorno && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email_retorno))
       errors.email_retorno = "E-mail inválido.";
-
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
 
-  /* ---- Submit ---- */
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  const handleMobileNext = () => {
+    if (!validateStep(mobileStep)) return;
+    setMobileStep((s) => Math.min(s + 1, STEPS.length - 1));
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleSubmit = async (e?: FormEvent) => {
+    e?.preventDefault();
     setSubmitError(null);
-
-    if (!validateForm()) return;
-
+    if (!validateAll()) return;
     setIsSubmitting(true);
-
     try {
       const fd = new window.FormData();
       fd.append("cnpj", cnpjDigits(formData.cnpj));
@@ -230,14 +247,11 @@ export default function FormularioOnusPage() {
       fd.append("canal_recebimento", "formulario");
       if (formData.email_retorno) fd.append("email_retorno", formData.email_retorno);
       if (anexo) fd.append("anexo", anexo);
-
       const res = await fetch("/api/onus/enviar", { method: "POST", body: fd });
-
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         throw new Error(data?.error || `Erro ${res.status}`);
       }
-
       setSubmitSuccess(true);
     } catch (err: any) {
       setSubmitError(err.message || "Erro ao enviar formulário. Tente novamente.");
@@ -246,53 +260,31 @@ export default function FormularioOnusPage() {
     }
   };
 
-
-
-  /* ---- Section animation class ---- */
-  const sectionClass = (index: number) =>
-    `transition-all duration-500 ease-out ${
-      visibleSections[index]
-        ? "opacity-100 translate-y-0"
-        : "opacity-0 translate-y-4"
-    }`;
+  const resetForm = () => {
+    setSubmitSuccess(false);
+    setFormData({ cnpj: "", nome_loja: "", nome_usuario: "", data_agendamento: "", descricao: "", valor: "", email_retorno: "" });
+    setAnexo(null);
+    setCnpjStatus("idle");
+    setMobileStep(0);
+    setFormErrors({});
+    setSubmitError(null);
+  };
 
   /* ================================================================
      SUCCESS SCREEN
      ================================================================ */
-
   if (submitSuccess) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden"
-        style={{ background: "var(--bg)" }}>
-        {/* Ambient glows */}
-        <div className="pointer-events-none absolute w-[500px] h-[500px] rounded-full top-[-100px] right-[-100px]"
-          style={{ background: "radial-gradient(circle, var(--accent-glow), transparent 70%)" }} />
-        <div className="pointer-events-none absolute w-[400px] h-[400px] rounded-full bottom-[-80px] left-[-80px]"
-          style={{ background: "radial-gradient(circle, rgba(16,185,129,0.15), transparent 70%)" }} />
-
-        <div className="relative z-10 w-full max-w-lg animate-[slideUp_0.5s_ease]">
-          <div className="rounded-2xl p-8 md:p-10 text-center"
-            style={{
-              background: "var(--bg-card)",
-              border: "1px solid var(--border)",
-              boxShadow: "0 25px 60px rgba(0,0,0,0.15)",
-            }}>
-            {/* Animated checkmark */}
-            <div className="mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center animate-[bounceIn_0.6s_ease]"
-              style={{ background: "var(--success-glow)" }}>
-              <CheckCircle2 size={40} style={{ color: "var(--success)" }} strokeWidth={2} />
+      <div style={styles.page}>
+        <div style={styles.successWrap}>
+          <div style={styles.successCard}>
+            <div style={styles.successIcon}>
+              <CheckCircle2 size={40} color="#10b981" strokeWidth={2} />
             </div>
+            <h2 style={styles.successTitle}>Formulário Enviado!</h2>
+            <p style={styles.successSub}>Seu registro de ônus foi recebido com sucesso.</p>
 
-            <h2 className="text-2xl font-bold mb-2" style={{ color: "var(--fg)" }}>
-              Formulário Enviado!
-            </h2>
-            <p className="text-sm mb-8" style={{ color: "var(--fg-dim)" }}>
-              Seu registro de ônus foi recebido com sucesso.
-            </p>
-
-            {/* Summary card */}
-            <div className="rounded-xl p-5 text-left mb-8 space-y-3"
-              style={{ background: "var(--bg)", border: "1px solid var(--border)" }}>
+            <div style={styles.summaryCard}>
               <SummaryRow label="CNPJ" value={formData.cnpj} />
               <SummaryRow label="Loja" value={formData.nome_loja} />
               <SummaryRow label="Usuário" value={formData.nome_usuario} />
@@ -301,318 +293,407 @@ export default function FormularioOnusPage() {
               {anexo && <SummaryRow label="Anexo" value={anexo.name} />}
             </div>
 
-            <button
-              onClick={() => {
-                setSubmitSuccess(false);
-                setFormData({
-                  cnpj: "", nome_loja: "", nome_usuario: "", data_agendamento: "",
-                  descricao: "", valor: "", email_retorno: "",
-                });
-                setAnexo(null);
-                setCnpjStatus("idle");
-              }}
-              className="btn btn-primary w-full py-3.5 text-[15px]"
-            >
+            <button onClick={resetForm} style={styles.btnPrimary}>
               <ArrowLeft size={18} />
               Enviar Novo Formulário
             </button>
           </div>
+          <p style={styles.footer}>Powered by IWOF • Sistema de Faturamento</p>
+        </div>
+        <GlobalStyles />
+      </div>
+    );
+  }
 
-          <p className="text-center text-xs mt-6" style={{ color: "var(--fg-dim)" }}>
-            Powered by IWOF • Sistema de Faturamento
-          </p>
+  /* ================================================================
+     HEADER (shared)
+     ================================================================ */
+  const header = (
+    <header style={styles.header}>
+      <div style={styles.headerLeft}>
+        {mounted && (
+          <img
+            src={theme === "dark" ? "https://i.imgur.com/ag93VEM.png" : "https://i.imgur.com/MKGrpJX.png"}
+            alt="IWOF"
+            style={{ height: 40, width: "auto" }}
+          />
+        )}
+        <div>
+          <h1 style={styles.headerTitle}>Formulário de Ônus a Usuário</h1>
+          <p style={styles.headerSub}>Registre um novo ônus de forma rápida e segura</p>
+        </div>
+      </div>
+      {mounted && (
+        <button
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          style={styles.themeBtn}
+          title="Alternar tema"
+        >
+          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+        </button>
+      )}
+    </header>
+  );
+
+  /* ================================================================
+     FIELD BLOCKS (reused in both desktop/mobile)
+     ================================================================ */
+
+  const fieldLoja = (
+    <>
+      <FieldGroup label="CNPJ da Loja" required error={formErrors.cnpj}>
+        <div style={styles.inputWrap}>
+          <Building2 size={18} style={styles.inputIcon} />
+          <input
+            style={styles.input}
+            placeholder="00.000.000/0000-00"
+            inputMode="numeric"
+            value={formData.cnpj}
+            onChange={(e) => updateField("cnpj", formatCNPJ(e.target.value))}
+            onBlur={handleCnpjBlur}
+          />
+          <span style={styles.inputRight}>
+            {cnpjStatus === "loading" && <Loader2 size={18} style={{ color: "var(--accent, #6366f1)", animation: "spin 1s linear infinite" }} />}
+            {cnpjStatus === "found" && <CheckCircle2 size={18} color="#10b981" />}
+            {cnpjStatus === "not-found" && <AlertTriangle size={18} color="#f59e0b" />}
+          </span>
+        </div>
+        {cnpjStatus === "not-found" && (
+          <p style={styles.warnText}><AlertTriangle size={12} /> Loja não encontrada. Preencha manualmente.</p>
+        )}
+      </FieldGroup>
+
+      <FieldGroup label="Nome da Loja" required error={formErrors.nome_loja}>
+        <div style={styles.inputWrap}>
+          <Building2 size={18} style={styles.inputIcon} />
+          <input
+            style={styles.input}
+            placeholder="Nome da loja"
+            value={formData.nome_loja}
+            onChange={(e) => updateField("nome_loja", e.target.value)}
+          />
+        </div>
+      </FieldGroup>
+    </>
+  );
+
+  const fieldOnus = (
+    <>
+      <FieldGroup label="Nome do Usuário" required error={formErrors.nome_usuario}>
+        <div style={styles.inputWrap}>
+          <User size={18} style={styles.inputIcon} />
+          <input
+            style={styles.input}
+            placeholder="Nome completo do usuário"
+            autoComplete="name"
+            value={formData.nome_usuario}
+            onChange={(e) => updateField("nome_usuario", e.target.value)}
+          />
+        </div>
+      </FieldGroup>
+
+      <FieldGroup label="Data do Agendamento" required error={formErrors.data_agendamento}>
+        <div style={styles.inputWrap}>
+          <Calendar size={18} style={styles.inputIcon} />
+          <input
+            type="date"
+            style={styles.input}
+            value={formData.data_agendamento}
+            onChange={(e) => updateField("data_agendamento", e.target.value)}
+          />
+        </div>
+      </FieldGroup>
+
+      <FieldGroup label="Descrição" required error={formErrors.descricao}>
+        <div style={{ position: "relative" }}>
+          <FileText size={18} style={{ ...styles.inputIcon, top: 14 }} />
+          <textarea
+            style={{ ...styles.input, minHeight: 110, paddingTop: 12, resize: "vertical" }}
+            placeholder="Descreva o motivo do ônus..."
+            value={formData.descricao}
+            onChange={(e) => updateField("descricao", e.target.value)}
+            rows={4}
+          />
+        </div>
+      </FieldGroup>
+
+      <FieldGroup label="Valor (R$)" required error={formErrors.valor}>
+        <div style={styles.inputWrap}>
+          <DollarSign size={18} style={styles.inputIcon} />
+          <input
+            style={{ ...styles.input, fontSize: 20, fontWeight: 700, letterSpacing: 1 }}
+            placeholder="0,00"
+            inputMode="numeric"
+            value={formData.valor}
+            onChange={(e) => updateField("valor", formatBRL(e.target.value))}
+          />
+        </div>
+      </FieldGroup>
+    </>
+  );
+
+  const fieldAnexo = (
+    <FieldGroup label="Anexo (Termo Assinado)" error={formErrors.anexo}>
+      <div
+        style={{
+          ...styles.dropzone,
+          borderColor: isDragging ? "var(--accent, #6366f1)" : formErrors.anexo ? "#ef4444" : "var(--border-light, #334155)",
+          background: isDragging ? "rgba(99,102,241,0.08)" : "var(--bg, #0f172a)",
+          transform: isDragging ? "scale(1.01)" : "scale(1)",
+        }}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          style={{ display: "none" }}
+          accept={ACCEPTED_EXTENSIONS}
+          onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
+        />
+        {anexo ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <FileText size={28} color="#10b981" />
+            <div style={{ flex: 1, textAlign: "left" }}>
+              <p style={{ fontSize: 14, fontWeight: 600, color: "var(--fg, #f1f5f9)", margin: 0 }}>{anexo.name}</p>
+              <p style={{ fontSize: 12, color: "var(--fg-dim, #64748b)", margin: 0 }}>{(anexo.size / 1024 / 1024).toFixed(2)} MB</p>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setAnexo(null); }}
+              style={styles.removeBtn}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        ) : (
+          <>
+            <div style={styles.uploadIconWrap}>
+              <Upload size={28} color="var(--fg-dim, #64748b)" />
+            </div>
+            <p style={styles.dropText}>
+              Arraste o arquivo ou{" "}
+              <span style={{ color: "var(--accent, #6366f1)", fontWeight: 600 }}>clique para selecionar</span>
+            </p>
+            <p style={styles.dropSub}>PDF, PNG ou JPG • Máximo 10MB</p>
+          </>
+        )}
+      </div>
+    </FieldGroup>
+  );
+
+  const fieldContato = (
+    <FieldGroup label="E-mail para retorno" error={formErrors.email_retorno}>
+      <div style={styles.inputWrap}>
+        <Mail size={18} style={styles.inputIcon} />
+        <input
+          type="email"
+          style={styles.input}
+          placeholder="Receba confirmação por e-mail (opcional)"
+          autoComplete="email"
+          inputMode="email"
+          value={formData.email_retorno}
+          onChange={(e) => updateField("email_retorno", e.target.value)}
+        />
+      </div>
+      <p style={styles.hintText}>Opcional — informe caso deseje receber uma confirmação.</p>
+    </FieldGroup>
+  );
+
+  /* ================================================================
+     ERROR BANNER
+     ================================================================ */
+  const errorBanner = submitError && (
+    <div style={styles.errorBanner}>
+      <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+      <span style={{ flex: 1 }}>{submitError}</span>
+      <button type="button" onClick={() => setSubmitError(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 4 }}>
+        <X size={14} />
+      </button>
+    </div>
+  );
+
+  /* ================================================================
+     DESKTOP LAYOUT
+     ================================================================ */
+  if (!isMobile) {
+    return (
+      <div style={styles.page}>
+        <GlobalStyles />
+        {header}
+
+        <div style={styles.desktopBody}>
+          <form onSubmit={handleSubmit} noValidate>
+            {/* Two-column grid */}
+            <div style={styles.desktopGrid}>
+              {/* Left column */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+                <SectionCard icon={<Building2 size={18} />} title="Identificação da Loja" accent="#6366f1">
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    {fieldLoja}
+                  </div>
+                </SectionCard>
+
+                <SectionCard icon={<Paperclip size={18} />} title="Anexo" accent="#8b5cf6">
+                  {fieldAnexo}
+                </SectionCard>
+              </div>
+
+              {/* Right column */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+                <SectionCard icon={<User size={18} />} title="Dados do Ônus" accent="#06b6d4">
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    {fieldOnus}
+                  </div>
+                </SectionCard>
+
+                <SectionCard icon={<Mail size={18} />} title="Contato" accent="#10b981">
+                  {fieldContato}
+                </SectionCard>
+              </div>
+            </div>
+
+            {/* Submit */}
+            <div style={{ marginTop: 32 }}>
+              {errorBanner}
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                style={{ ...styles.btnPrimary, marginTop: errorBanner ? 12 : 0, width: "100%", padding: "18px 32px", fontSize: 16 }}
+              >
+                {isSubmitting ? <Loader2 size={20} style={{ animation: "spin 1s linear infinite" }} /> : <><Send size={18} />Enviar Formulário</>}
+              </button>
+            </div>
+          </form>
+
+          <p style={styles.footer}>Powered by IWOF • Sistema de Faturamento</p>
         </div>
       </div>
     );
   }
 
   /* ================================================================
-     MAIN FORM
+     MOBILE LAYOUT — 4-step stepper
      ================================================================ */
+  const stepContent = [fieldLoja, fieldOnus, fieldAnexo, fieldContato];
+  const stepFields = [
+    { title: "Identificação da Loja", icon: Building2, accent: "#6366f1" },
+    { title: "Dados do Ônus", icon: User, accent: "#06b6d4" },
+    { title: "Anexo", icon: Paperclip, accent: "#8b5cf6" },
+    { title: "Contato", icon: Mail, accent: "#10b981" },
+  ];
+  const currentStep = stepFields[mobileStep];
+  const StepIcon = currentStep.icon;
+  const isLastStep = mobileStep === STEPS.length - 1;
 
   return (
-    <div className="min-h-screen relative overflow-hidden" style={{ background: "var(--bg)" }}>
-      {/* ── Background glows ── */}
-      <div className="pointer-events-none absolute w-[500px] h-[500px] rounded-full top-[-100px] right-[-100px]"
-        style={{ background: "radial-gradient(circle, var(--accent-glow), transparent 70%)" }} />
-      <div className="pointer-events-none absolute w-[400px] h-[400px] rounded-full bottom-[-80px] left-[-80px]"
-        style={{ background: "radial-gradient(circle, rgba(139,92,246,0.12), transparent 70%)" }} />
+    <div style={styles.page}>
+      <GlobalStyles />
+      {header}
 
-      {/* ── Header ── */}
-      <header className="relative z-10 py-6 px-4 md:px-8 flex items-center justify-between"
-        style={{ borderBottom: "1px solid var(--border)" }}>
-        <div className="flex items-center gap-4">
-          {mounted && (
-            <img
-              src={theme === "dark" ? "https://i.imgur.com/ag93VEM.png" : "https://i.imgur.com/MKGrpJX.png"}
-              alt="IWOF Logo"
-              className="h-10 md:h-12 w-auto"
-            />
-          )}
+      {/* Progress stepper */}
+      <div style={styles.stepperBar}>
+        {STEPS.map((step, idx) => {
+          const SIcon = step.icon;
+          const isDone = idx < mobileStep;
+          const isActive = idx === mobileStep;
+          return (
+            <div key={step.id} style={{ display: "flex", alignItems: "center", flex: 1 }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1 }}>
+                <div style={{
+                  ...styles.stepCircle,
+                  background: isDone ? "#10b981" : isActive ? "var(--accent, #6366f1)" : "var(--bg-card, #1e293b)",
+                  border: `2px solid ${isDone ? "#10b981" : isActive ? "var(--accent, #6366f1)" : "var(--border, #334155)"}`,
+                  transform: isActive ? "scale(1.15)" : "scale(1)",
+                  transition: "all 0.25s ease",
+                }}>
+                  {isDone ? <CheckCircle2 size={16} color="white" /> : <SIcon size={16} color={isActive ? "white" : "var(--fg-dim, #64748b)"} />}
+                </div>
+                <span style={{
+                  fontSize: 10,
+                  fontWeight: isActive ? 700 : 500,
+                  marginTop: 4,
+                  color: isActive ? "var(--accent, #6366f1)" : isDone ? "#10b981" : "var(--fg-dim, #64748b)",
+                  transition: "color 0.25s ease",
+                }}>
+                  {step.label}
+                </span>
+              </div>
+              {idx < STEPS.length - 1 && (
+                <div style={{
+                  height: 2,
+                  flex: 0.5,
+                  background: idx < mobileStep ? "#10b981" : "var(--border, #334155)",
+                  borderRadius: 2,
+                  marginBottom: 18,
+                  transition: "background 0.3s ease",
+                }} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Step content */}
+      <div style={styles.mobileBody}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+          <div style={{ ...styles.stepIconBig, background: `${currentStep.accent}22`, border: `1.5px solid ${currentStep.accent}55` }}>
+            <StepIcon size={22} color={currentStep.accent} />
+          </div>
           <div>
-            <h1 className="text-lg md:text-xl font-bold tracking-tight" style={{ color: "var(--fg)" }}>
-              Formulário de Ônus a Usuário
-            </h1>
-            <p className="text-xs md:text-sm" style={{ color: "var(--fg-dim)" }}>
-              Registre um novo ônus de forma rápida e segura
+            <p style={{ fontSize: 11, fontWeight: 700, color: "var(--fg-dim, #64748b)", textTransform: "uppercase", letterSpacing: "0.08em", margin: 0 }}>
+              Etapa {mobileStep + 1} de {STEPS.length}
             </p>
+            <h2 style={{ fontSize: 20, fontWeight: 800, color: "var(--fg, #f1f5f9)", margin: 0, letterSpacing: "-0.02em" }}>
+              {currentStep.title}
+            </h2>
           </div>
         </div>
 
-        {mounted && (
-          <button
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            className="p-2.5 rounded-xl transition-colors"
-            style={{ background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--fg-muted)" }}
-            title="Alternar tema"
-          >
-            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-        )}
-      </header>
+        <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 120 }}>
+          {stepContent[mobileStep]}
+        </div>
+      </div>
 
-      {/* ── Form body ── */}
-      <div className="relative z-10 max-w-2xl mx-auto px-4 md:px-6 py-8 md:py-12">
-        <form onSubmit={handleSubmit} noValidate>
-          {/* ── Section 1: Identification ── */}
-          <div className={sectionClass(0)}>
-            <SectionTitle icon={<Building2 size={18} />} title="Identificação da Loja" />
-            <div className="rounded-xl p-5 md:p-6 mb-6 space-y-5"
-              style={{ background: "var(--bg-card)", border: "1px solid var(--border)", boxShadow: "0 4px 24px rgba(0,0,0,0.06)" }}>
-
-              {/* CNPJ */}
-              <FieldGroup label="CNPJ da Loja" required error={formErrors.cnpj}>
-                <div className="input-wrapper">
-                  <Building2 size={18} className="input-icon" />
-                  <input
-                    className="input"
-                    placeholder="00.000.000/0000-00"
-                    value={formData.cnpj}
-                    onChange={(e) => updateField("cnpj", formatCNPJ(e.target.value))}
-                    onBlur={handleCnpjBlur}
-                  />
-                  {/* CNPJ status indicator */}
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2">
-                    {cnpjStatus === "loading" && <Loader2 size={18} className="animate-spin" style={{ color: "var(--accent)" }} />}
-                    {cnpjStatus === "found" && <CheckCircle2 size={18} style={{ color: "var(--success)" }} />}
-                    {cnpjStatus === "not-found" && <AlertTriangle size={18} style={{ color: "var(--warning)" }} />}
-                  </span>
-                </div>
-                {cnpjStatus === "not-found" && (
-                  <p className="text-xs mt-1 flex items-center gap-1" style={{ color: "var(--warning)" }}>
-                    <AlertTriangle size={12} /> Loja não encontrada. Preencha manualmente.
-                  </p>
-                )}
-              </FieldGroup>
-
-              {/* Nome da Loja */}
-              <FieldGroup label="Nome da Loja" required error={formErrors.nome_loja}>
-                <div className="input-wrapper">
-                  <Building2 size={18} className="input-icon" />
-                  <input
-                    className="input"
-                    placeholder="Nome da loja"
-                    value={formData.nome_loja}
-                    onChange={(e) => updateField("nome_loja", e.target.value)}
-                  />
-                </div>
-              </FieldGroup>
-            </div>
-          </div>
-
-          {/* ── Section 2: User / Date ── */}
-          <div className={sectionClass(1)}>
-            <SectionTitle icon={<User size={18} />} title="Dados do Ônus" />
-            <div className="rounded-xl p-5 md:p-6 mb-6 space-y-5"
-              style={{ background: "var(--bg-card)", border: "1px solid var(--border)", boxShadow: "0 4px 24px rgba(0,0,0,0.06)" }}>
-
-              {/* Nome do Usuário */}
-              <FieldGroup label="Nome do Usuário" required error={formErrors.nome_usuario}>
-                <div className="input-wrapper">
-                  <User size={18} className="input-icon" />
-                  <input
-                    className="input"
-                    placeholder="Nome completo do usuário"
-                    value={formData.nome_usuario}
-                    onChange={(e) => updateField("nome_usuario", e.target.value)}
-                  />
-                </div>
-              </FieldGroup>
-
-              {/* Data */}
-              <FieldGroup label="Data do Agendamento" required error={formErrors.data_agendamento}>
-                <div className="input-wrapper">
-                  <Calendar size={18} className="input-icon" />
-                  <input
-                    type="date"
-                    className="input"
-                    value={formData.data_agendamento}
-                    onChange={(e) => updateField("data_agendamento", e.target.value)}
-                  />
-                </div>
-              </FieldGroup>
-
-              {/* Descrição */}
-              <FieldGroup label="Descrição" required error={formErrors.descricao}>
-                <div className="relative">
-                  <FileText size={18} className="absolute left-3.5 top-3.5" style={{ color: "var(--fg-dim)" }} />
-                  <textarea
-                    className="input min-h-[110px] resize-y !pl-11 !pt-3"
-                    style={{ paddingLeft: "44px" }}
-                    placeholder="Descreva o motivo do ônus..."
-                    value={formData.descricao}
-                    onChange={(e) => updateField("descricao", e.target.value)}
-                    rows={4}
-                  />
-                </div>
-              </FieldGroup>
-
-              {/* Valor */}
-              <FieldGroup label="Valor (R$)" required error={formErrors.valor}>
-                <div className="input-wrapper">
-                  <DollarSign size={18} className="input-icon" />
-                  <input
-                    className="input"
-                    placeholder="0,00"
-                    inputMode="numeric"
-                    value={formData.valor}
-                    onChange={(e) => updateField("valor", formatBRL(e.target.value))}
-                  />
-                </div>
-              </FieldGroup>
-            </div>
-          </div>
-
-
-
-          {/* ── Section 4: File upload ── */}
-          <div className={sectionClass(3)}>
-            <SectionTitle icon={<Upload size={18} />} title="Anexo" />
-            <div className="rounded-xl p-5 md:p-6 mb-6"
-              style={{ background: "var(--bg-card)", border: "1px solid var(--border)", boxShadow: "0 4px 24px rgba(0,0,0,0.06)" }}>
-
-              <FieldGroup
-                label="Anexo (Termo Assinado)"
-                error={formErrors.anexo}
-              >
-                {/* Drop zone */}
-                <div
-                  className={`relative rounded-xl border-2 border-dashed transition-all duration-200 cursor-pointer p-6 md:p-8 text-center ${
-                    isDragging ? "scale-[1.01]" : ""
-                  }`}
-                  style={{
-                    borderColor: isDragging ? "var(--accent)" : formErrors.anexo ? "var(--danger)" : "var(--border-light)",
-                    background: isDragging ? "var(--accent-glow)" : "var(--bg)",
-                  }}
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    className="hidden"
-                    accept={ACCEPTED_EXTENSIONS}
-                    onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
-                  />
-
-                  {anexo ? (
-                    <div className="flex items-center justify-center gap-3">
-                      <FileText size={24} style={{ color: "var(--success)" }} />
-                      <div className="text-left">
-                        <p className="text-sm font-medium" style={{ color: "var(--fg)" }}>{anexo.name}</p>
-                        <p className="text-xs" style={{ color: "var(--fg-dim)" }}>
-                          {(anexo.size / 1024 / 1024).toFixed(2)} MB
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); setAnexo(null); }}
-                        className="p-1.5 rounded-lg transition-colors hover:bg-red-500/10"
-                        style={{ color: "var(--danger)" }}
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <Upload size={28} className="mx-auto mb-3" style={{ color: "var(--fg-dim)" }} />
-                      <p className="text-sm font-medium mb-1" style={{ color: "var(--fg-muted)" }}>
-                        Arraste o arquivo ou <span style={{ color: "var(--accent)" }}>clique para selecionar</span>
-                      </p>
-                      <p className="text-xs" style={{ color: "var(--fg-dim)" }}>
-                        PDF, PNG ou JPG • Máximo 10MB
-                      </p>
-                    </>
-                  )}
-                </div>
-              </FieldGroup>
-            </div>
-          </div>
-
-          {/* ── Section 5: Email ── */}
-          <div className={sectionClass(4)}>
-            <SectionTitle icon={<Mail size={18} />} title="Contato" />
-            <div className="rounded-xl p-5 md:p-6 mb-6"
-              style={{ background: "var(--bg-card)", border: "1px solid var(--border)", boxShadow: "0 4px 24px rgba(0,0,0,0.06)" }}>
-              <FieldGroup label="E-mail para retorno" error={formErrors.email_retorno}>
-                <div className="input-wrapper">
-                  <Mail size={18} className="input-icon" />
-                  <input
-                    type="email"
-                    className="input"
-                    placeholder="Receba confirmação por e-mail"
-                    value={formData.email_retorno}
-                    onChange={(e) => updateField("email_retorno", e.target.value)}
-                  />
-                </div>
-                <p className="text-xs mt-1.5" style={{ color: "var(--fg-dim)" }}>
-                  Opcional — informe caso deseje receber uma confirmação.
-                </p>
-              </FieldGroup>
-            </div>
-          </div>
-
-          {/* ── Submit ── */}
-          <div className={sectionClass(5)}>
-            {submitError && (
-              <div className="rounded-xl p-4 mb-5 flex items-center gap-3 text-sm animate-[slideUp_0.25s_ease]"
-                style={{
-                  background: "var(--danger-glow)",
-                  border: "1px solid var(--danger)",
-                  color: "var(--danger)",
-                }}>
-                <AlertTriangle size={18} className="flex-shrink-0" />
-                <span className="flex-1">{submitError}</span>
-                <button type="button" onClick={() => setSubmitError(null)}
-                  className="p-1 rounded hover:bg-red-500/20 transition-colors">
-                  <X size={14} />
-                </button>
-              </div>
-            )}
-
+      {/* Fixed bottom nav */}
+      <div style={styles.mobileBottomBar}>
+        {errorBanner}
+        <div style={{ display: "flex", gap: 12, marginTop: errorBanner ? 12 : 0 }}>
+          {mobileStep > 0 && (
             <button
-              type="submit"
-              disabled={isSubmitting}
-              className="btn btn-primary w-full py-4 text-[15px] font-semibold tracking-wide"
+              type="button"
+              onClick={() => { setMobileStep((s) => s - 1); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+              style={styles.btnSecondary}
             >
-              {isSubmitting ? (
-                <Loader2 size={20} className="animate-spin" />
-              ) : (
-                <>
-                  <Send size={18} />
-                  Enviar Formulário
-                </>
-              )}
+              <ArrowLeft size={18} />
+              Voltar
             </button>
-          </div>
-        </form>
-
-        {/* ── Footer ── */}
-        <p className="text-center text-xs mt-10 pb-6" style={{ color: "var(--fg-dim)" }}>
-          Powered by IWOF • Sistema de Faturamento
-        </p>
+          )}
+          {!isLastStep ? (
+            <button
+              type="button"
+              onClick={handleMobileNext}
+              style={{ ...styles.btnPrimary, flex: 1 }}
+            >
+              Próximo
+              <ArrowRight size={18} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => handleSubmit()}
+              disabled={isSubmitting}
+              style={{ ...styles.btnPrimary, flex: 1 }}
+            >
+              {isSubmitting
+                ? <Loader2 size={20} style={{ animation: "spin 1s linear infinite" }} />
+                : <><Send size={18} />Enviar Formulário</>
+              }
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -622,22 +703,42 @@ export default function FormularioOnusPage() {
    SUB-COMPONENTS
    ================================================================ */
 
-function SectionTitle({ icon, title }: { icon: React.ReactNode; title: string }) {
+function SectionCard({
+  icon, title, accent, children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  accent: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="flex items-center gap-2.5 mb-3 ml-1">
-      <span style={{ color: "var(--accent)" }}>{icon}</span>
-      <h2 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "var(--fg-muted)" }}>
-        {title}
-      </h2>
+    <div style={styles.sectionCard}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+        <div style={{
+          padding: 8,
+          borderRadius: 10,
+          background: `${accent}18`,
+          border: `1px solid ${accent}40`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: accent,
+        }}>
+          {icon}
+        </div>
+        <h2 style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--fg-muted, #94a3b8)", margin: 0 }}>
+          {title}
+        </h2>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {children}
+      </div>
     </div>
   );
 }
 
 function FieldGroup({
-  label,
-  required,
-  error,
-  children,
+  label, required, error, children,
 }: {
   label: string;
   required?: boolean;
@@ -645,14 +746,14 @@ function FieldGroup({
   children: React.ReactNode;
 }) {
   return (
-    <div className="input-group">
-      <label className="input-label">
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <label style={styles.label}>
         {label}
-        {required && <span className="ml-0.5" style={{ color: "var(--danger)" }}>*</span>}
+        {required && <span style={{ color: "#ef4444", marginLeft: 3 }}>*</span>}
       </label>
       {children}
       {error && (
-        <p className="text-xs flex items-center gap-1 mt-0.5 animate-[slideUp_0.2s_ease]" style={{ color: "var(--danger)" }}>
+        <p style={styles.errorText}>
           <AlertTriangle size={12} />
           {error}
         </p>
@@ -661,16 +762,281 @@ function FieldGroup({
   );
 }
 
-
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-start justify-between gap-4">
-      <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--fg-dim)" }}>
-        {label}
-      </span>
-      <span className="text-sm text-right font-medium" style={{ color: "var(--fg)" }}>
-        {value}
-      </span>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "8px 0", borderBottom: "1px solid var(--border, #334155)" }}>
+      <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--fg-dim, #64748b)" }}>{label}</span>
+      <span style={{ fontSize: 14, fontWeight: 600, textAlign: "right", color: "var(--fg, #f1f5f9)" }}>{value}</span>
     </div>
   );
 }
+
+/* ================================================================
+   GLOBAL STYLES
+   ================================================================ */
+function GlobalStyles() {
+  return (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+      * { box-sizing: border-box; font-family: 'Inter', system-ui, sans-serif; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    `}</style>
+  );
+}
+
+/* ================================================================
+   STYLE OBJECTS
+   ================================================================ */
+const styles: Record<string, React.CSSProperties> = {
+  page: {
+    minHeight: "100vh",
+    background: "var(--bg, #0f172a)",
+    fontFamily: "'Inter', system-ui, sans-serif",
+  },
+  header: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "16px 20px",
+    borderBottom: "1px solid var(--border, #1e293b)",
+    background: "var(--bg, #0f172a)",
+    position: "sticky" as const,
+    top: 0,
+    zIndex: 50,
+    backdropFilter: "blur(12px)",
+  },
+  headerLeft: { display: "flex", alignItems: "center", gap: 12 },
+  headerTitle: { fontSize: 17, fontWeight: 800, color: "var(--fg, #f1f5f9)", margin: 0, letterSpacing: "-0.02em" },
+  headerSub: { fontSize: 12, color: "var(--fg-dim, #64748b)", margin: 0, marginTop: 2 },
+  themeBtn: {
+    padding: "8px 10px",
+    borderRadius: 12,
+    border: "1px solid var(--border, #334155)",
+    background: "var(--bg-card, #1e293b)",
+    color: "var(--fg-dim, #64748b)",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+  },
+
+  // Desktop
+  desktopBody: { maxWidth: 1100, margin: "0 auto", padding: "40px 32px 60px" },
+  desktopGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 },
+  sectionCard: {
+    background: "var(--bg-card, #1e293b)",
+    border: "1px solid var(--border, #334155)",
+    borderRadius: 20,
+    padding: 28,
+    boxShadow: "0 4px 32px rgba(0,0,0,0.15)",
+  },
+
+  // Mobile stepper
+  stepperBar: {
+    display: "flex",
+    alignItems: "flex-start",
+    padding: "16px 20px 8px",
+    background: "var(--bg, #0f172a)",
+    borderBottom: "1px solid var(--border, #1e293b)",
+  },
+  stepCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: "50%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stepIconBig: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  mobileBody: { padding: "24px 20px 0" },
+  mobileBottomBar: {
+    position: "fixed" as const,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: "16px 20px",
+    background: "var(--bg, #0f172a)",
+    borderTop: "1px solid var(--border, #1e293b)",
+    backdropFilter: "blur(16px)",
+    zIndex: 100,
+    boxShadow: "0 -8px 32px rgba(0,0,0,0.3)",
+  },
+
+  // Inputs
+  inputWrap: {
+    position: "relative" as const,
+    display: "flex",
+    alignItems: "center",
+  },
+  inputIcon: {
+    position: "absolute" as const,
+    left: 14,
+    top: "50%",
+    transform: "translateY(-50%)",
+    color: "var(--fg-dim, #64748b)",
+    pointerEvents: "none" as const,
+  },
+  inputRight: {
+    position: "absolute" as const,
+    right: 14,
+    top: "50%",
+    transform: "translateY(-50%)",
+    display: "flex",
+    alignItems: "center",
+  },
+  input: {
+    width: "100%",
+    background: "var(--bg, #0f172a)",
+    border: "1.5px solid var(--border, #334155)",
+    borderRadius: 12,
+    padding: "14px 14px 14px 44px",
+    fontSize: 15,
+    color: "var(--fg, #f1f5f9)",
+    outline: "none",
+    transition: "border-color 0.2s",
+  },
+  label: {
+    fontSize: 12,
+    fontWeight: 700,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.07em",
+    color: "var(--fg-dim, #64748b)",
+  },
+  errorText: {
+    fontSize: 12,
+    color: "#ef4444",
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    margin: 0,
+  },
+  warnText: {
+    fontSize: 12,
+    color: "#f59e0b",
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 4,
+  },
+  hintText: {
+    fontSize: 12,
+    color: "var(--fg-dim, #64748b)",
+    margin: 0,
+  },
+
+  // Dropzone
+  dropzone: {
+    borderRadius: 16,
+    border: "2px dashed",
+    padding: "32px 24px",
+    textAlign: "center" as const,
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+  },
+  uploadIconWrap: { marginBottom: 12, display: "flex", justifyContent: "center" },
+  dropText: { fontSize: 14, color: "var(--fg-muted, #94a3b8)", margin: "0 0 6px" },
+  dropSub: { fontSize: 12, color: "var(--fg-dim, #64748b)", margin: 0 },
+  removeBtn: {
+    background: "rgba(239,68,68,0.1)",
+    border: "none",
+    borderRadius: 8,
+    padding: 8,
+    cursor: "pointer",
+    color: "#ef4444",
+    display: "flex",
+    alignItems: "center",
+  },
+
+  // Buttons
+  btnPrimary: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+    color: "white",
+    border: "none",
+    borderRadius: 14,
+    padding: "16px 28px",
+    fontSize: 15,
+    fontWeight: 700,
+    cursor: "pointer",
+    boxShadow: "0 4px 20px rgba(99,102,241,0.4)",
+    transition: "all 0.2s ease",
+    letterSpacing: "0.01em",
+  },
+  btnSecondary: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    background: "var(--bg-card, #1e293b)",
+    color: "var(--fg, #f1f5f9)",
+    border: "1.5px solid var(--border, #334155)",
+    borderRadius: 14,
+    padding: "16px 20px",
+    fontSize: 15,
+    fontWeight: 600,
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+  },
+
+  // Success
+  successWrap: { minHeight: "100vh", display: "flex", flexDirection: "column" as const, alignItems: "center", justifyContent: "center", padding: 24 },
+  successCard: {
+    background: "var(--bg-card, #1e293b)",
+    border: "1px solid var(--border, #334155)",
+    borderRadius: 24,
+    padding: "40px 32px",
+    maxWidth: 480,
+    width: "100%",
+    textAlign: "center" as const,
+    boxShadow: "0 25px 60px rgba(0,0,0,0.3)",
+  },
+  successIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: "50%",
+    background: "rgba(16,185,129,0.15)",
+    border: "2px solid rgba(16,185,129,0.3)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    margin: "0 auto 24px",
+  },
+  successTitle: { fontSize: 24, fontWeight: 800, color: "var(--fg, #f1f5f9)", margin: "0 0 8px", letterSpacing: "-0.03em" },
+  successSub: { fontSize: 14, color: "var(--fg-dim, #64748b)", margin: "0 0 28px" },
+  summaryCard: {
+    background: "var(--bg, #0f172a)",
+    border: "1px solid var(--border, #334155)",
+    borderRadius: 16,
+    padding: "16px 20px",
+    marginBottom: 28,
+    textAlign: "left" as const,
+  },
+
+  // Error
+  errorBanner: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "12px 16px",
+    borderRadius: 12,
+    background: "rgba(239,68,68,0.1)",
+    border: "1px solid rgba(239,68,68,0.3)",
+    color: "#ef4444",
+    fontSize: 13,
+    marginBottom: 0,
+    animation: "fadeUp 0.25s ease",
+  },
+
+  footer: { textAlign: "center" as const, fontSize: 12, color: "var(--fg-dim, #64748b)", marginTop: 40 },
+};
