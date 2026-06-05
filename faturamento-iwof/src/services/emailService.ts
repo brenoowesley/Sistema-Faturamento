@@ -1,4 +1,18 @@
-import { google } from 'googleapis';
+/**
+ * @deprecated ⚠️ ESTE ARQUIVO NÃO É MAIS UTILIZADO EM PRODUÇÃO.
+ *
+ * O envio de e-mails de faturamento foi migrado para o Cloud Run:
+ *   → cloud-functions/consumer-disparo-emails/index.js
+ *
+ * O fluxo atual é:
+ *   1. POST /api/faturamento/disparar-emails  (publica no Pub/Sub)
+ *   2. Pub/Sub → Cloud Run consumer          (envia o e-mail via SMTP)
+ *
+ * A função `prepareEmailData()` abaixo NÃO deve ser chamada por nenhum
+ * endpoint. Ela foi mantida apenas como referência histórica.
+ * Em caso de dúvidas, consultar o diagnóstico: diagnostico_emails_duplicados.md
+ */
+
 import nodemailer from 'nodemailer';
 import { createClient } from '@supabase/supabase-js';
 import { getBillingTemplate } from './email/templates/billingTemplate';

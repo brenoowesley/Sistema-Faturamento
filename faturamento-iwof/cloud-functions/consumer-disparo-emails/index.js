@@ -244,33 +244,37 @@ app.post('/', async (req, res) => {
             }
         }
 
-        // ═══════════════════════════════════════
-        // 2. IDEMPOTÊNCIA: Checar se já processou
-        // ═══════════════════════════════════════
-        const { data: existingLog } = await supabaseAdmin
+        // ═══════════════════════════════════════════════════════════════
+        // 2. IDEMPOTÊNCIA ATÔMICA: INSERT com detecção de conflito UNIQUE
+        // ───────────────────────────────────────────────────────────────
+        // Estratégia: tentamos reservar o processamento com um único INSERT.
+        // Se a tabela tiver UNIQUE(lote_id, cliente_id), o banco rejeita o
+        // segundo INSERT com erro 23505 (unique_violation), garantindo que
+        // apenas UM worker processe cada cliente — sem race condition entre
+        // o SELECT e o INSERT que existia antes.
+        // ═══════════════════════════════════════════════════════════════
+        const { data: processandoLog, error: insertErr } = await supabaseAdmin
             .from('logs_envio_email')
-            .select('id, status')
-            .eq('lote_id', loteId)
-            .eq('cliente_id', clienteId)
-            .limit(1)
+            .insert({
+                lote_id: loteId,
+                cliente_id: clienteId,
+                cliente_nome: razaoSocial || clienteNome,
+                destinatarios,
+                assunto: assunto || `Faturamento Mensal - ${razaoSocial}`,
+                status: 'Processando',
+            })
+            .select('id')
             .single();
 
-        if (existingLog) {
-            console.log(`[CONSUMER] ⏭️ Já processado (status: ${existingLog.status}). Pulando.`);
-            return res.status(204).send();
+        if (insertErr) {
+            // Erro 23505 = unique_violation → outro worker já assumiu este cliente
+            if (insertErr.code === '23505') {
+                console.log(`[CONSUMER] ⏭️ Conflito de idempotência (UNIQUE violation). Outro worker já assumiu ${razaoSocial || clienteNome}. Saindo.`);
+                return res.status(204).send();
+            }
+            // Qualquer outro erro de INSERT é inesperado — propagar para o handler de erros
+            throw new Error(`Falha ao criar log de Processando: ${insertErr.message}`);
         }
-
-        // ⚠️ INSERE "PROCESSANDO" PARA BLOQUEAR RACE CONDITIONS (Disparos múltiplos)
-        // Se duas requisições entrarem ao mesmo tempo, a primeira cria isso e a segunda vai cair na checagem acima 
-        // ou falhar na restrição do banco. De qualquer forma, garante que o worker assumiu o envio.
-        const { data: processandoLog } = await supabaseAdmin.from('logs_envio_email').insert({
-            lote_id: loteId,
-            cliente_id: clienteId,
-            cliente_nome: razaoSocial || clienteNome,
-            destinatarios,
-            assunto: assunto || `Faturamento Mensal - ${razaoSocial}`,
-            status: 'Processando',
-        }).select('id').single();
 
         const logId = processandoLog?.id;
 
@@ -368,22 +372,32 @@ app.post('/', async (req, res) => {
 
         try {
             if (payload?.loteId) {
-                // Remove o log temporário de "Processando" para substituí-lo pelo erro final
-                await supabaseAdmin.from('logs_envio_email')
-                    .delete()
+                // Atualiza o log de "Processando" para "Erro" (UPDATE é seguro pois já somos donos do registro)
+                const { error: updateErr } = await supabaseAdmin
+                    .from('logs_envio_email')
+                    .update({
+                        status: 'Erro',
+                        mensagem_erro: (error.message || 'Erro desconhecido').substring(0, 500),
+                    })
                     .eq('lote_id', payload.loteId)
                     .eq('cliente_id', payload.clienteId)
                     .eq('status', 'Processando');
 
-                await supabaseAdmin.from('logs_envio_email').insert({
-                    lote_id: payload.loteId,
-                    cliente_id: payload.clienteId || null,
-                    cliente_nome: payload.razaoSocial || payload.clienteNome || '—',
-                    destinatarios: payload.destinatarios || '',
-                    assunto: payload.assunto || '',
-                    status: 'Erro',
-                    mensagem_erro: (error.message || 'Erro desconhecido').substring(0, 500),
-                });
+                if (updateErr) {
+                    // Se não encontrou o log de Processando (ex: conflito foi detectado antes)
+                    // tenta inserir diretamente como Erro, ignorando conflito UNIQUE
+                    console.warn(`[CONSUMER] UPDATE para Erro falhou (${updateErr.message}). Tentando INSERT...`);
+                    await supabaseAdmin.from('logs_envio_email').upsert({
+                        lote_id: payload.loteId,
+                        cliente_id: payload.clienteId || null,
+                        cliente_nome: payload.razaoSocial || payload.clienteNome || '—',
+                        destinatarios: payload.destinatarios || '',
+                        assunto: payload.assunto || '',
+                        status: 'Erro',
+                        mensagem_erro: (error.message || 'Erro desconhecido').substring(0, 500),
+                    }, { onConflict: 'lote_id,cliente_id', ignoreDuplicates: false });
+                }
+
                 console.log(`[CONSUMER] Log de erro gravado no Supabase.`);
 
                 // F-10: mesmo em caso de erro, verificar se o lote pode ser fechado

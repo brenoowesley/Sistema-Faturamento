@@ -82,10 +82,13 @@ export async function POST(request: Request) {
         if (consErr || !consolidados) throw new Error(`Erro ao buscar consolidados: ${consErr?.message}`);
 
         // 3. Buscar logs já processados para idempotência (não republicar quem já recebeu)
+        // Inclui status 'Processando' para evitar republicação de clientes em andamento
+        // (ex: operador clicou duas vezes no botão antes da resposta)
         const { data: logsExistentes } = await supabaseAdmin
             .from('logs_envio_email')
             .select('cliente_id, status')
-            .eq('lote_id', loteId);
+            .eq('lote_id', loteId)
+            .in('status', ['Sucesso', 'Processando']); // 'Erro' pode ser retentado
 
         const clientesJaProcessados = new Set(
             (logsExistentes || [])
