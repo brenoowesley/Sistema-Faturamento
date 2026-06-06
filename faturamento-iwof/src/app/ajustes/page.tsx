@@ -539,7 +539,11 @@ export default function AjustesPage() {
             });
             if (!res.ok) throw new Error(await res.text());
             setShowModalAprovacao(false);
-            fetchSolicitacoes();
+            // Recarrega solicitações E ajustes para refletir o novo lançamento
+            await Promise.all([fetchSolicitacoes(), fetchAjustes()]);
+            // Navega para a aba do tipo de ajuste criado
+            setActiveMainTab("gestao");
+            setActiveTab(aprovacaoData.tipo_ajuste === "DESCONTO" ? "descontos" : "acrescimos");
         } catch (err: any) {
             alert("Erro ao aprovar: " + err.message);
         } finally {
