@@ -200,7 +200,7 @@ export async function POST(req: NextRequest) {
             if (uploadError) {
                 console.error("Erro ao fazer upload do anexo:", uploadError);
                 return NextResponse.json(
-                    { error: "Erro ao fazer upload do anexo" },
+                    { error: `Erro ao fazer upload do anexo: ${uploadError.message}` },
                     { status: 500 }
                 );
             }
