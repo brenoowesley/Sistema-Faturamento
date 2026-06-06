@@ -238,14 +238,14 @@ export default function FormularioOnusPage() {
     setIsSubmitting(true);
     try {
       const fd = new window.FormData();
-      fd.append("cnpj", cnpjDigits(formData.cnpj));
+      fd.append("cnpj_loja", cnpjDigits(formData.cnpj));
       fd.append("nome_loja", formData.nome_loja);
       fd.append("nome_usuario", formData.nome_usuario);
       fd.append("data_agendamento", formData.data_agendamento);
       fd.append("descricao", formData.descricao);
       fd.append("valor", parseBRL(formData.valor).toFixed(2));
       fd.append("canal_recebimento", "formulario");
-      if (formData.email_retorno) fd.append("email_retorno", formData.email_retorno);
+      if (formData.email_retorno) fd.append("email_solicitante", formData.email_retorno);
       if (anexo) fd.append("anexo", anexo);
       const res = await fetch("/api/onus/enviar", { method: "POST", body: fd });
       if (!res.ok) {
