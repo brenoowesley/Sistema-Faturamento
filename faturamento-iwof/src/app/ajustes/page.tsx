@@ -774,6 +774,7 @@ export default function AjustesPage() {
             data: ajuste.data_ocorrencia,
             observacaoInterna: ajuste.observacao_interna || "",
             repasseProfissional: ajuste.repasse_profissional || false,
+            canal: (ajuste as any).canal_recebimento || "tasky",
         });
         setEditingId(ajuste.id);
         if (ajuste.tipo === "DESCONTO") setShowModalDesconto(true);
