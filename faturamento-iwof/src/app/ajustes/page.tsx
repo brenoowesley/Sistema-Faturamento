@@ -79,6 +79,8 @@ interface ClienteDB {
     nome_fantasia: string | null;
     nome_conta_azul: string | null;
     cnpj: string;
+    ciclo_faturamento_id: string | null;
+    ciclo_nome: string | null;
 }
 
 interface OnusSolicitacao {
@@ -337,6 +339,7 @@ export default function AjustesPage() {
         data: new Date().toISOString().split("T")[0],
         observacaoInterna: "",
         repasseProfissional: false,
+        canal: "tasky" as "tasky" | "email" | "whatsapp",
     });
 
     // Filtros
@@ -449,13 +452,18 @@ export default function AjustesPage() {
     const fetchClientes = useCallback(async () => {
         const { data, error } = await supabase
             .from("clientes")
-            .select("id, razao_social, nome_fantasia, cnpj, nome_conta_azul")
+            .select("id, razao_social, nome_fantasia, cnpj, nome_conta_azul, ciclo_faturamento_id, ciclos_faturamento(nome)")
             .eq("status", true)
             .order("nome_conta_azul", { ascending: true });
 
         if (!error && data) {
-            setClientes(data);
-            const uniqueRazoes = Array.from(new Set(data.map(c => c.razao_social).filter(Boolean)));
+            // Flatten ciclo nome into the object
+            const enriched = (data as any[]).map(c => ({
+                ...c,
+                ciclo_nome: c.ciclos_faturamento?.nome || null,
+            }));
+            setClientes(enriched);
+            const uniqueRazoes = Array.from(new Set(enriched.map((c: any) => c.razao_social).filter(Boolean)));
             setRazoesSociais(uniqueRazoes.sort());
         }
     }, [supabase]);
@@ -673,7 +681,8 @@ export default function AjustesPage() {
             motivo: formData.motivo,
             data_ocorrencia: formData.data,
             observacao_interna: formData.observacaoInterna,
-            repasse_profissional: formData.repasseProfissional
+            repasse_profissional: formData.repasseProfissional,
+            canal_recebimento: formData.canal,
         };
 
         if (editingId) {
@@ -683,7 +692,7 @@ export default function AjustesPage() {
         }
 
         const { error } = await supabase.from("ajustes_faturamento").upsert(payload, {
-            onConflict: editingId ? "id" : undefined // If editing, use ID for upsert, else let DB handle new insert
+            onConflict: editingId ? "id" : undefined
         });
 
         if (error) {
@@ -708,7 +717,8 @@ export default function AjustesPage() {
             motivo: formData.motivo,
             data_ocorrencia: formData.data,
             observacao_interna: formData.observacaoInterna,
-            repasse_profissional: formData.repasseProfissional
+            repasse_profissional: formData.repasseProfissional,
+            canal_recebimento: formData.canal,
         };
 
         if (editingId) {
@@ -750,6 +760,7 @@ export default function AjustesPage() {
             data: new Date().toISOString().split("T")[0],
             observacaoInterna: "",
             repasseProfissional: false,
+            canal: "tasky",
         });
         setEditingId(null);
     };
@@ -2229,6 +2240,13 @@ export default function AjustesPage() {
                                 </label>
                             </div>
                         </div>
+
+                        {/* Canal de Recebimento */}
+                        <CanalRecebimento
+                            value={formData.canal}
+                            onChange={canal => setFormData({ ...formData, canal })}
+                            isNordestao={(clientes.find(c => c.id === formData.clienteId)?.ciclo_nome || "").toLowerCase().includes("nordest")}
+                        />
                     </div>
 
                     <div className="flex justify-end gap-3 mt-4">
@@ -2346,6 +2364,13 @@ export default function AjustesPage() {
                                 </label>
                             </div>
                         </div>
+
+                        {/* Canal de Recebimento */}
+                        <CanalRecebimento
+                            value={formData.canal}
+                            onChange={canal => setFormData({ ...formData, canal })}
+                            isNordestao={(clientes.find(c => c.id === formData.clienteId)?.ciclo_nome || "").toLowerCase().includes("nordest")}
+                        />
                     </div>
 
                     <div className="flex justify-end gap-3 mt-4">
@@ -2570,5 +2595,76 @@ export default function AjustesPage() {
                 </div>
             </Modal>
         </div >
+    );
+}
+
+/* ================================================================
+   SUB-COMPONENT: CanalRecebimento
+   ================================================================ */
+function CanalRecebimento({
+    value,
+    onChange,
+    isNordestao,
+}: {
+    value: "tasky" | "email" | "whatsapp";
+    onChange: (v: "tasky" | "email" | "whatsapp") => void;
+    isNordestao: boolean;
+}) {
+    const canais = [
+        {
+            id: "tasky" as const,
+            label: "Tasky",
+            icon: "📋",
+            color: "var(--primary)",
+        },
+        {
+            id: "email" as const,
+            label: "E-mail",
+            icon: "✉️",
+            color: "#6366f1",
+        },
+        ...(isNordestao
+            ? [{ id: "whatsapp" as const, label: "WhatsApp", icon: "💬", color: "#25d366" }]
+            : []),
+    ];
+
+    // If current value is whatsapp but loja is not nordestao, reset
+    if (!isNordestao && value === "whatsapp") {
+        onChange("tasky");
+    }
+
+    return (
+        <div className="space-y-2 pt-2 border-t border-[var(--border)]">
+            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest flex items-center gap-2">
+                Canal de Recebimento
+            </label>
+            <div className="flex flex-wrap gap-2">
+                {canais.map((canal) => {
+                    const isActive = value === canal.id;
+                    return (
+                        <button
+                            key={canal.id}
+                            type="button"
+                            onClick={() => onChange(canal.id)}
+                            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all"
+                            style={{
+                                background: isActive ? `${canal.color}22` : "var(--bg-card)",
+                                borderColor: isActive ? canal.color : "var(--border)",
+                                color: isActive ? canal.color : "var(--fg-dim)",
+                                boxShadow: isActive ? `0 0 8px ${canal.color}44` : "none",
+                            }}
+                        >
+                            <span>{canal.icon}</span>
+                            {canal.label}
+                        </button>
+                    );
+                })}
+            </div>
+            {isNordestao && (
+                <p className="text-[10px] text-emerald-400 flex items-center gap-1">
+                    💬 WhatsApp disponível — loja do ciclo Nordestão
+                </p>
+            )}
+        </div>
     );
 }
