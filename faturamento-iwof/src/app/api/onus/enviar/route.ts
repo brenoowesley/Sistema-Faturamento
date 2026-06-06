@@ -184,32 +184,45 @@ export async function POST(req: NextRequest) {
         let anexo_url: string | null = null;
 
         if (anexo && anexo.size > 0) {
-            const timestamp = Date.now();
-            const safeFilename = anexo.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-            const filePath = `${timestamp}_${safeFilename}`;
+            try {
+                const BUCKET = "onus-anexos";
 
-            const buffer = Buffer.from(await anexo.arrayBuffer());
-
-            const { error: uploadError } = await supabase.storage
-                .from("onus-anexos")
-                .upload(filePath, buffer, {
-                    contentType: anexo.type || "application/octet-stream",
-                    upsert: false,
+                // Garante que o bucket existe (cria se não existir)
+                const { error: bucketError } = await supabase.storage.createBucket(BUCKET, {
+                    public: true,
+                    fileSizeLimit: 10 * 1024 * 1024, // 10 MB
+                    allowedMimeTypes: ["application/pdf", "image/png", "image/jpeg", "image/jpg"],
                 });
 
-            if (uploadError) {
-                console.error("Erro ao fazer upload do anexo:", uploadError);
-                return NextResponse.json(
-                    { error: `Erro ao fazer upload do anexo: ${uploadError.message}` },
-                    { status: 500 }
-                );
+                // Ignora erro se bucket já existe (código 409 / "already exists")
+                if (bucketError && !bucketError.message.includes("already exists")) {
+                    console.warn("Aviso ao criar bucket:", bucketError.message);
+                }
+
+                const timestamp = Date.now();
+                const safeFilename = anexo.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+                const filePath = `${timestamp}_${safeFilename}`;
+                const buffer = Buffer.from(await anexo.arrayBuffer());
+
+                const { error: uploadError } = await supabase.storage
+                    .from(BUCKET)
+                    .upload(filePath, buffer, {
+                        contentType: anexo.type || "application/octet-stream",
+                        upsert: false,
+                    });
+
+                if (uploadError) {
+                    // Não bloqueia o envio — loga e continua sem anexo
+                    console.error("Falha no upload do anexo (não bloqueante):", uploadError.message);
+                } else {
+                    const { data: publicUrlData } = supabase.storage
+                        .from(BUCKET)
+                        .getPublicUrl(filePath);
+                    anexo_url = publicUrlData.publicUrl;
+                }
+            } catch (uploadErr: any) {
+                console.error("Erro inesperado no upload do anexo:", uploadErr?.message);
             }
-
-            const { data: publicUrlData } = supabase.storage
-                .from("onus-anexos")
-                .getPublicUrl(filePath);
-
-            anexo_url = publicUrlData.publicUrl;
         }
 
         // Auto-match cliente by CNPJ
