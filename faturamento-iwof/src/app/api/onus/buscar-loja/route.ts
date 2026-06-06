@@ -40,8 +40,10 @@ export async function GET(req: NextRequest) {
         }
 
         if (data) {
+            const nome_loja = data.nome_conta_azul || data.nome_fantasia || data.razao_social || "";
             return NextResponse.json({
                 found: true,
+                nome_loja,
                 loja: {
                     id: data.id,
                     razao_social: data.razao_social,
