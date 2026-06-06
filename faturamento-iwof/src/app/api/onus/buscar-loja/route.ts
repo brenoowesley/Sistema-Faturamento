@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
         }
 
         if (data) {
-            const nome_loja = data.nome_conta_azul || data.nome_fantasia || data.razao_social || "";
+            const nome_loja = data.nome_conta_azul || "";
             return NextResponse.json({
                 found: true,
                 nome_loja,

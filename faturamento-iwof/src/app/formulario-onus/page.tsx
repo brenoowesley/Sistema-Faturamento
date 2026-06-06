@@ -363,12 +363,12 @@ export default function FormularioOnusPage() {
         )}
       </FieldGroup>
 
-      <FieldGroup label="Nome da Loja" required error={formErrors.nome_loja}>
+      <FieldGroup label="Nome Conta Azul" required error={formErrors.nome_loja}>
         <div style={styles.inputWrap}>
           <span style={styles.inputIcon}><Building2 size={18} /></span>
           <input
             style={styles.input}
-            placeholder="Nome da loja"
+            placeholder="Preenchido automaticamente pelo CNPJ"
             value={formData.nome_loja}
             onChange={(e) => updateField("nome_loja", e.target.value)}
           />
