@@ -343,7 +343,7 @@ export default function FormularioOnusPage() {
     <>
       <FieldGroup label="CNPJ da Loja" required error={formErrors.cnpj}>
         <div style={styles.inputWrap}>
-          <Building2 size={18} style={styles.inputIcon} />
+          <span style={styles.inputIcon}><Building2 size={18} /></span>
           <input
             style={styles.input}
             placeholder="00.000.000/0000-00"
@@ -365,7 +365,7 @@ export default function FormularioOnusPage() {
 
       <FieldGroup label="Nome da Loja" required error={formErrors.nome_loja}>
         <div style={styles.inputWrap}>
-          <Building2 size={18} style={styles.inputIcon} />
+          <span style={styles.inputIcon}><Building2 size={18} /></span>
           <input
             style={styles.input}
             placeholder="Nome da loja"
@@ -381,7 +381,7 @@ export default function FormularioOnusPage() {
     <>
       <FieldGroup label="Nome do Usuário" required error={formErrors.nome_usuario}>
         <div style={styles.inputWrap}>
-          <User size={18} style={styles.inputIcon} />
+          <span style={styles.inputIcon}><User size={18} /></span>
           <input
             style={styles.input}
             placeholder="Nome completo do usuário"
@@ -394,7 +394,7 @@ export default function FormularioOnusPage() {
 
       <FieldGroup label="Data do Agendamento" required error={formErrors.data_agendamento}>
         <div style={styles.inputWrap}>
-          <Calendar size={18} style={styles.inputIcon} />
+          <span style={styles.inputIcon}><Calendar size={18} /></span>
           <input
             type="date"
             style={styles.input}
@@ -405,10 +405,10 @@ export default function FormularioOnusPage() {
       </FieldGroup>
 
       <FieldGroup label="Descrição" required error={formErrors.descricao}>
-        <div style={{ position: "relative" }}>
-          <FileText size={18} style={{ ...styles.inputIcon, top: 14 }} />
+        <div style={styles.inputWrap}>
+          <span style={{ ...styles.inputIcon, alignSelf: "flex-start", paddingTop: 14 }}><FileText size={18} /></span>
           <textarea
-            style={{ ...styles.input, minHeight: 110, paddingTop: 12, resize: "vertical" }}
+            style={{ ...styles.input, minHeight: 110, paddingTop: 14, paddingBottom: 14, resize: "vertical", border: "none", borderRadius: 0 }}
             placeholder="Descreva o motivo do ônus..."
             value={formData.descricao}
             onChange={(e) => updateField("descricao", e.target.value)}
@@ -419,7 +419,7 @@ export default function FormularioOnusPage() {
 
       <FieldGroup label="Valor (R$)" required error={formErrors.valor}>
         <div style={styles.inputWrap}>
-          <DollarSign size={18} style={styles.inputIcon} />
+          <span style={styles.inputIcon}><DollarSign size={18} /></span>
           <input
             style={{ ...styles.input, fontSize: 20, fontWeight: 700, letterSpacing: 1 }}
             placeholder="0,00"
@@ -487,7 +487,7 @@ export default function FormularioOnusPage() {
   const fieldContato = (
     <FieldGroup label="E-mail para retorno" error={formErrors.email_retorno}>
       <div style={styles.inputWrap}>
-        <Mail size={18} style={styles.inputIcon} />
+        <span style={styles.inputIcon}><Mail size={18} /></span>
         <input
           type="email"
           style={styles.input}
@@ -870,38 +870,43 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 -8px 32px rgba(0,0,0,0.3)",
   },
 
-  // Inputs
+  // Inputs — padrão: bordered flex container, ícone e input são flex items
   inputWrap: {
-    position: "relative" as const,
     display: "flex",
     alignItems: "center",
-  },
-  inputIcon: {
-    position: "absolute" as const,
-    left: 14,
-    top: "50%",
-    transform: "translateY(-50%)",
-    color: "var(--fg-dim, #64748b)",
-    pointerEvents: "none" as const,
-  },
-  inputRight: {
-    position: "absolute" as const,
-    right: 14,
-    top: "50%",
-    transform: "translateY(-50%)",
-    display: "flex",
-    alignItems: "center",
-  },
-  input: {
-    width: "100%",
     background: "var(--bg, #0f172a)",
     border: "1.5px solid var(--border, #334155)",
     borderRadius: 12,
-    padding: "14px 14px 14px 44px",
+    overflow: "hidden" as const,
+    transition: "border-color 0.2s",
+  },
+  // Ícone como flex item (sem position absolute — sem conflito)
+  inputIcon: {
+    display: "flex",
+    alignItems: "center",
+    flexShrink: 0,
+    padding: "0 10px 0 14px",
+    color: "var(--fg-dim, #64748b)",
+    pointerEvents: "none" as const,
+  },
+  // Status badge direito (CNPJ)
+  inputRight: {
+    display: "flex",
+    alignItems: "center",
+    flexShrink: 0,
+    padding: "0 14px 0 8px",
+    color: "var(--fg-dim, #64748b)",
+  },
+  // Input sem borda própria — borda está no inputWrap
+  input: {
+    flex: 1,
+    minWidth: 0,
+    background: "transparent",
+    border: "none",
+    outline: "none",
+    padding: "14px 14px 14px 0",
     fontSize: 15,
     color: "var(--fg, #f1f5f9)",
-    outline: "none",
-    transition: "border-color 0.2s",
   },
   label: {
     fontSize: 12,
