@@ -267,7 +267,12 @@ export async function POST(req: NextRequest) {
         if (insertError) {
             console.error("Erro ao inserir solicitação de ônus:", insertError);
             return NextResponse.json(
-                { error: "Erro ao registrar solicitação" },
+                {
+                    error: "Erro ao registrar solicitação",
+                    detail: insertError.message,
+                    code: insertError.code,
+                    hint: insertError.hint ?? null,
+                },
                 { status: 500 }
             );
         }
