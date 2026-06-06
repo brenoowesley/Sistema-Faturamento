@@ -369,6 +369,10 @@ export default function AjustesPage() {
     const [dashboardTab, setDashboardTab] = useState<"dashboard" | "pdf">("dashboard");
     const [dashDataInicio, setDashDataInicio] = useState("");
     const [dashDataFim, setDashDataFim] = useState("");
+    const [dashAplicacaoInicio, setDashAplicacaoInicio] = useState("");
+    const [dashAplicacaoFim, setDashAplicacaoFim] = useState("");
+    const [dashCanal, setDashCanal] = useState<"" | "tasky" | "email" | "whatsapp">("" );
+    const [dashStatusAplicacao, setDashStatusAplicacao] = useState<"" | "aplicado" | "pendente">("" );
     const [expandedLojas, setExpandedLojas] = useState<Set<string>>(new Set());
 
     const applyFilters = useCallback((lista: Ajuste[]) => {
@@ -588,13 +592,34 @@ export default function AjustesPage() {
     // ─── DASHBOARD: Computação de dados ────────────────────────────────────────
     const dashboardAjustes = (() => {
         let filtered = ajustes;
+        // Filtro por período de ocorrência
         if (dashDataInicio || dashDataFim) {
-            filtered = ajustes.filter(a => {
+            filtered = filtered.filter(a => {
                 const d = (a.data_aplicacao || a.data_ocorrencia || "").split("T")[0];
                 if (dashDataInicio && d < dashDataInicio) return false;
                 if (dashDataFim && d > dashDataFim) return false;
                 return true;
             });
+        }
+        // Filtro por período de aplicação
+        if (dashAplicacaoInicio || dashAplicacaoFim) {
+            filtered = filtered.filter(a => {
+                if (!a.data_aplicacao) return false;
+                const d = a.data_aplicacao.split("T")[0];
+                if (dashAplicacaoInicio && d < dashAplicacaoInicio) return false;
+                if (dashAplicacaoFim && d > dashAplicacaoFim) return false;
+                return true;
+            });
+        }
+        // Filtro por canal
+        if (dashCanal) {
+            filtered = filtered.filter(a => (a as any).canal_recebimento === dashCanal);
+        }
+        // Filtro por status de aplicação
+        if (dashStatusAplicacao === "aplicado") {
+            filtered = filtered.filter(a => a.status_aplicacao);
+        } else if (dashStatusAplicacao === "pendente") {
+            filtered = filtered.filter(a => !a.status_aplicacao);
         }
         return filtered;
     })();
@@ -1733,25 +1758,78 @@ export default function AjustesPage() {
 
                         {dashboardTab === "dashboard" && (
                             <div className="space-y-6">
-                                {/* Filtro de Período */}
-                                <div className="bg-[var(--bg-card)] p-5 rounded-2xl border border-[var(--border)] shadow-xl">
+                                {/* Filtros do Dashboard */}
+                                <div className="bg-[var(--bg-card)] p-5 rounded-2xl border border-[var(--border)] shadow-xl space-y-4">
+                                    {/* Linha 1: Período de ocorrência + Export */}
                                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                                         <div>
-                                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Data Início</label>
+                                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Data Ocorrência — Início</label>
                                             <input type="date" className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white p-2.5 rounded-xl text-sm focus:border-indigo-500 outline-none" value={dashDataInicio} onChange={e => setDashDataInicio(e.target.value)} />
                                         </div>
                                         <div>
-                                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Data Fim</label>
+                                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Data Ocorrência — Fim</label>
                                             <input type="date" className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white p-2.5 rounded-xl text-sm focus:border-indigo-500 outline-none" value={dashDataFim} onChange={e => setDashDataFim(e.target.value)} />
                                         </div>
                                         <div>
-                                            <button onClick={() => { setDashDataInicio(""); setDashDataFim(""); }} className="px-4 py-2.5 text-sm font-bold text-[var(--fg-dim)] hover:text-white transition-colors flex items-center gap-2">
-                                                <X size={14} /> Limpar
+                                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Data Aplicação — Início</label>
+                                            <input type="date" className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white p-2.5 rounded-xl text-sm focus:border-indigo-500 outline-none" value={dashAplicacaoInicio} onChange={e => setDashAplicacaoInicio(e.target.value)} />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Data Aplicação — Fim</label>
+                                            <input type="date" className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white p-2.5 rounded-xl text-sm focus:border-indigo-500 outline-none" value={dashAplicacaoFim} onChange={e => setDashAplicacaoFim(e.target.value)} />
+                                        </div>
+                                    </div>
+
+                                    {/* Linha 2: Canal + Status + Limpar + Export */}
+                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                                        <div>
+                                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Canal de Recebimento</label>
+                                            <div className="flex gap-2">
+                                                {([["", "Todos"], ["tasky", "📋 Tasky"], ["email", "✉️ Email"], ["whatsapp", "💬 WhatsApp"]] as [string, string][]).map(([val, label]) => (
+                                                    <button
+                                                        key={val}
+                                                        type="button"
+                                                        onClick={() => setDashCanal(val as any)}
+                                                        className="flex-1 px-2 py-2 rounded-lg text-xs font-bold border transition-all"
+                                                        style={{
+                                                            background: dashCanal === val ? "var(--primary)" : "var(--bg-main)",
+                                                            borderColor: dashCanal === val ? "var(--primary)" : "var(--border)",
+                                                            color: dashCanal === val ? "white" : "var(--fg-dim)",
+                                                        }}
+                                                    >
+                                                        {label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Status de Aplicação</label>
+                                            <div className="flex gap-2">
+                                                {([["", "Todos"], ["aplicado", "✅ Aplicado"], ["pendente", "⏳ Pendente"]] as [string, string][]).map(([val, label]) => (
+                                                    <button
+                                                        key={val}
+                                                        type="button"
+                                                        onClick={() => setDashStatusAplicacao(val as any)}
+                                                        className="flex-1 px-2 py-2 rounded-lg text-xs font-bold border transition-all"
+                                                        style={{
+                                                            background: dashStatusAplicacao === val ? (val === "aplicado" ? "#10b981" : val === "pendente" ? "#f59e0b" : "var(--primary)") : "var(--bg-main)",
+                                                            borderColor: dashStatusAplicacao === val ? (val === "aplicado" ? "#10b981" : val === "pendente" ? "#f59e0b" : "var(--primary)") : "var(--border)",
+                                                            color: dashStatusAplicacao === val ? "white" : "var(--fg-dim)",
+                                                        }}
+                                                    >
+                                                        {label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <button onClick={() => { setDashDataInicio(""); setDashDataFim(""); setDashAplicacaoInicio(""); setDashAplicacaoFim(""); setDashCanal(""); setDashStatusAplicacao(""); }} className="w-full px-4 py-2.5 text-sm font-bold text-[var(--fg-dim)] hover:text-white border border-[var(--border)] rounded-xl transition-colors flex items-center justify-center gap-2">
+                                                <X size={14} /> Limpar Filtros
                                             </button>
                                         </div>
                                         <div>
                                             <button onClick={handleExportDashboardXLSX} className="btn bg-emerald-600 hover:bg-emerald-700 w-full rounded-xl border-none text-white font-bold h-[42px] flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-600/20">
-                                                <Upload size={16} className="rotate-180" /> Exportar XLSX Completo
+                                                <Upload size={16} className="rotate-180" /> Exportar XLSX
                                             </button>
                                         </div>
                                     </div>
