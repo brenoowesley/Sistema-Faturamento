@@ -48,21 +48,18 @@ async function sendEmail(to: string, subject: string, html: string) {
    TEMPLATES DE E-MAIL
    ───────────────────────────────────────────────────────────── */
 
-// Logo iWof em SVG — inline para máxima compatibilidade com clientes de e-mail
-const IWOF_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="90" height="28" viewBox="0 0 90 28" fill="none">
-  <text x="0" y="22" font-family="'Segoe UI',Arial,sans-serif" font-size="22" font-weight="800" letter-spacing="-0.5" fill="#ffffff">i<tspan fill="#60a5fa">W</tspan>of</text>
-</svg>`;
-
-const IWOF_LOGO_SVG_DARK = `<svg xmlns="http://www.w3.org/2000/svg" width="90" height="28" viewBox="0 0 90 28" fill="none">
-  <text x="0" y="22" font-family="'Segoe UI',Arial,sans-serif" font-size="22" font-weight="800" letter-spacing="-0.5" fill="#1e293b">i<tspan fill="#2563eb">W</tspan>of</text>
-</svg>`;
+// Logo iWof — mesmo usado na Sidebar (PNG hospedado no Imgur)
+// Claro (fundo colorido): https://i.imgur.com/ag93VEM.png
+// Escuro (fundo branco):  https://i.imgur.com/MKGrpJX.png
+const IWOF_LOGO_IMG = `<img src="https://i.imgur.com/ag93VEM.png" alt="iWof" style="height:36px;width:auto;display:block;">`;
+const IWOF_LOGO_IMG_DARK = `<img src="https://i.imgur.com/MKGrpJX.png" alt="iWof" style="height:32px;width:auto;display:block;">`;
 
 function logoBar(accentColor: string) {
     return `<tr>
       <td style="background:${accentColor};padding:20px 32px 0;">
         <table width="100%" cellpadding="0" cellspacing="0">
           <tr>
-            <td style="text-align:left;">${IWOF_LOGO_SVG}</td>
+            <td style="text-align:left;">${IWOF_LOGO_IMG}</td>
             <td style="text-align:right;">
               <span style="color:rgba(255,255,255,0.55);font-size:11px;font-family:'Segoe UI',sans-serif;letter-spacing:0.05em;text-transform:uppercase;">Sistema de Faturamento</span>
             </td>
@@ -103,7 +100,7 @@ function wrapEmail(headerRows: string, bodyHtml: string) {
       <tr><td style="background:#f8fafc;padding:20px 32px;border-top:1px solid #e2e8f0;">
         <table width="100%" cellpadding="0" cellspacing="0">
           <tr>
-            <td>${IWOF_LOGO_SVG_DARK}</td>
+            <td>${IWOF_LOGO_IMG_DARK}</td>
             <td style="text-align:right;vertical-align:middle;">
               <p style="color:#94a3b8;font-size:11px;margin:0;line-height:1.5;">© ${year} iWof Tecnologia<br>E-mail automático — não responda.</p>
             </td>

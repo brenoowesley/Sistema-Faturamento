@@ -16,9 +16,9 @@ function parseValor(valorStr: string): number {
     return parsed;
 }
 
-// Logo iWof SVG — inline para máxima compatibilidade com clientes de e-mail
-const IWOF_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="90" height="28" viewBox="0 0 90 28" fill="none"><text x="0" y="22" font-family="'Segoe UI',Arial,sans-serif" font-size="22" font-weight="800" letter-spacing="-0.5" fill="#ffffff">i<tspan fill="#60a5fa">W</tspan>of</text></svg>`;
-const IWOF_LOGO_SVG_DARK = `<svg xmlns="http://www.w3.org/2000/svg" width="90" height="28" viewBox="0 0 90 28" fill="none"><text x="0" y="22" font-family="'Segoe UI',Arial,sans-serif" font-size="22" font-weight="800" letter-spacing="-0.5" fill="#1e293b">i<tspan fill="#2563eb">W</tspan>of</text></svg>`;
+// Logo iWof — mesmo usado na Sidebar (PNG hospedado no Imgur)
+const IWOF_LOGO_SVG = `<img src="https://i.imgur.com/ag93VEM.png" alt="iWof" style="height:36px;width:auto;display:block;">`;
+const IWOF_LOGO_SVG_DARK = `<img src="https://i.imgur.com/MKGrpJX.png" alt="iWof" style="height:32px;width:auto;display:block;">`;
 
 function buildConfirmationEmail(data: {
     nome_usuario: string;
