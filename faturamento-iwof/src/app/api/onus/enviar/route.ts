@@ -16,6 +16,10 @@ function parseValor(valorStr: string): number {
     return parsed;
 }
 
+// Logo iWof SVG — inline para máxima compatibilidade com clientes de e-mail
+const IWOF_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="90" height="28" viewBox="0 0 90 28" fill="none"><text x="0" y="22" font-family="'Segoe UI',Arial,sans-serif" font-size="22" font-weight="800" letter-spacing="-0.5" fill="#ffffff">i<tspan fill="#60a5fa">W</tspan>of</text></svg>`;
+const IWOF_LOGO_SVG_DARK = `<svg xmlns="http://www.w3.org/2000/svg" width="90" height="28" viewBox="0 0 90 28" fill="none"><text x="0" y="22" font-family="'Segoe UI',Arial,sans-serif" font-size="22" font-weight="800" letter-spacing="-0.5" fill="#1e293b">i<tspan fill="#2563eb">W</tspan>of</text></svg>`;
+
 function buildConfirmationEmail(data: {
     nome_usuario: string;
     nome_loja: string;
@@ -31,93 +35,77 @@ function buildConfirmationEmail(data: {
         v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
     const canalLabel: Record<string, string> = {
-        tasky: "Tasky",
-        email: "E-mail",
-        formulario: "Formulário",
+        tasky: "📋 Tasky",
+        email: "✉️ E-mail",
+        whatsapp: "💬 WhatsApp",
+        formulario: "📝 Formulário",
         outros: "Outros",
     };
 
-    return `
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body style="margin:0;padding:0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background-color:#f4f6f9;">
-    <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;">
-        <tr>
-            <td style="background-color:#1c5d99;padding:28px 32px;text-align:center;">
-                <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:600;">
-                    Solicitação de Ônus Recebida
-                </h1>
-                <p style="color:#d1e3f6;margin:8px 0 0;font-size:14px;">
-                    iWof — Sistema de Faturamento
-                </p>
-            </td>
-        </tr>
-        <tr>
-            <td style="background-color:#ffffff;padding:32px;">
-                <p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 20px;">
-                    Olá <strong>${data.nome_usuario}</strong>, sua solicitação de ônus foi recebida com sucesso e está em análise pela equipe financeira.
-                </p>
+    const accentColor = "#1c5d99";
+    const year = new Date().getFullYear();
 
-                <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
-                    <tr style="background-color:#f8fafc;">
-                        <td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;width:40%;border-bottom:1px solid #e2e8f0;">Loja</td>
-                        <td style="padding:12px 16px;font-size:14px;color:#1e293b;border-bottom:1px solid #e2e8f0;">${data.nome_loja}</td>
-                    </tr>
-                    <tr>
-                        <td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">CNPJ</td>
-                        <td style="padding:12px 16px;font-size:14px;color:#1e293b;border-bottom:1px solid #e2e8f0;">${data.cnpj_loja}</td>
-                    </tr>
-                    <tr style="background-color:#f8fafc;">
-                        <td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">Data do Agendamento</td>
-                        <td style="padding:12px 16px;font-size:14px;color:#1e293b;border-bottom:1px solid #e2e8f0;">${data.data_agendamento}</td>
-                    </tr>
-                    <tr>
-                        <td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">Descrição</td>
-                        <td style="padding:12px 16px;font-size:14px;color:#1e293b;border-bottom:1px solid #e2e8f0;">${data.descricao}</td>
-                    </tr>
-                    <tr style="background-color:#f8fafc;">
-                        <td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">Valor</td>
-                        <td style="padding:12px 16px;font-size:14px;color:#1e293b;font-weight:600;border-bottom:1px solid #e2e8f0;">${formatCurrency(data.valor)}</td>
-                    </tr>
-                    <tr>
-                        <td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">Canal de Recebimento</td>
-                        <td style="padding:12px 16px;font-size:14px;color:#1e293b;border-bottom:1px solid #e2e8f0;">${canalLabel[data.canal_recebimento] || data.canal_recebimento}</td>
-                    </tr>
-                    ${data.canal_link ? `
-                    <tr style="background-color:#f8fafc;">
-                        <td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">Link do Canal</td>
-                        <td style="padding:12px 16px;font-size:14px;border-bottom:1px solid #e2e8f0;">
-                            <a href="${data.canal_link}" style="color:#1c5d99;text-decoration:underline;">${data.canal_link}</a>
-                        </td>
-                    </tr>` : ""}
-                    ${data.anexo_url ? `
-                    <tr>
-                        <td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;">Anexo</td>
-                        <td style="padding:12px 16px;font-size:14px;">
-                            <a href="${data.anexo_url}" style="color:#1c5d99;text-decoration:underline;">📎 Ver anexo</a>
-                        </td>
-                    </tr>` : ""}
-                </table>
+    return `<!DOCTYPE html><html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>iWof — Solicitação Recebida</title></head>
+<body style="margin:0;padding:24px 0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:#f1f5f9;">
+<table width="100%" cellpadding="0" cellspacing="0">
+  <tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
 
-                <p style="color:#64748b;font-size:13px;line-height:1.5;margin:24px 0 0;padding-top:16px;border-top:1px solid #e2e8f0;">
-                    Você receberá uma notificação quando sua solicitação for analisada. Em caso de dúvidas, entre em contato com a equipe financeira.
-                </p>
-            </td>
-        </tr>
-        <tr>
-            <td style="background-color:#f1f5f9;padding:16px 32px;text-align:center;">
-                <p style="color:#94a3b8;font-size:12px;margin:0;">
-                    © ${new Date().getFullYear()} iWof — Este é um e-mail automático, não responda.
-                </p>
-            </td>
-        </tr>
+      <!-- LOGO BAR -->
+      <tr><td style="background:${accentColor};padding:20px 32px 0;">
+        <table width="100%" cellpadding="0" cellspacing="0"><tr>
+          <td style="text-align:left;">${IWOF_LOGO_SVG}</td>
+          <td style="text-align:right;vertical-align:middle;">
+            <span style="color:rgba(255,255,255,0.55);font-size:11px;letter-spacing:0.05em;text-transform:uppercase;">Sistema de Faturamento</span>
+          </td>
+        </tr></table>
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.15);margin:16px 0 0;">
+      </td></tr>
+
+      <!-- HEADER -->
+      <tr><td style="background:${accentColor};padding:20px 32px 28px;text-align:center;">
+        <h1 style="color:#fff;margin:0;font-size:20px;font-weight:700;">📨 Solicitação de Ônus Recebida</h1>
+        <p style="color:rgba(255,255,255,0.7);margin:6px 0 0;font-size:13px;">Sua solicitação está em análise pela equipe financeira</p>
+      </td></tr>
+
+      <!-- BODY -->
+      <tr><td style="background:#ffffff;padding:32px;">
+        <p style="color:#334155;font-size:15px;line-height:1.6;margin:0 0 20px;">
+          Olá <strong>${data.nome_usuario}</strong>, sua solicitação de ônus foi recebida com sucesso.
+          Você será notificado assim que ela for analisada.
+        </p>
+
+        <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:20px;">
+          <tr style="background:#f8fafc;"><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;width:40%;border-bottom:1px solid #e2e8f0;">Loja</td><td style="padding:12px 16px;font-size:14px;color:#1e293b;border-bottom:1px solid #e2e8f0;">${data.nome_loja}</td></tr>
+          <tr><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">CNPJ</td><td style="padding:12px 16px;font-size:14px;color:#1e293b;font-family:monospace;border-bottom:1px solid #e2e8f0;">${data.cnpj_loja}</td></tr>
+          <tr style="background:#f8fafc;"><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">Data Agendada</td><td style="padding:12px 16px;font-size:14px;color:#1e293b;border-bottom:1px solid #e2e8f0;">${data.data_agendamento}</td></tr>
+          <tr><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">Descrição</td><td style="padding:12px 16px;font-size:14px;color:#1e293b;border-bottom:1px solid #e2e8f0;">${data.descricao}</td></tr>
+          <tr style="background:#f8fafc;"><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">Valor</td><td style="padding:12px 16px;font-size:14px;color:#1e293b;font-weight:700;border-bottom:1px solid #e2e8f0;">${formatCurrency(data.valor)}</td></tr>
+          <tr><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;${data.canal_link || data.anexo_url ? "border-bottom:1px solid #e2e8f0;" : ""}">Canal</td><td style="padding:12px 16px;font-size:14px;color:#1e293b;${data.canal_link || data.anexo_url ? "border-bottom:1px solid #e2e8f0;" : ""}">${canalLabel[data.canal_recebimento] || data.canal_recebimento}</td></tr>
+          ${data.canal_link ? `<tr style="background:#f8fafc;"><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;${data.anexo_url ? "border-bottom:1px solid #e2e8f0;" : ""}">Link do Canal</td><td style="padding:12px 16px;font-size:14px;${data.anexo_url ? "border-bottom:1px solid #e2e8f0;" : ""}"><a href="${data.canal_link}" style="color:#1c5d99;">${data.canal_link}</a></td></tr>` : ""}
+          ${data.anexo_url ? `<tr><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;">Anexo</td><td style="padding:12px 16px;font-size:14px;"><a href="${data.anexo_url}" style="color:#1c5d99;">📎 Ver anexo</a></td></tr>` : ""}
+        </table>
+
+        <p style="color:#64748b;font-size:13px;line-height:1.6;margin:0;padding-top:16px;border-top:1px solid #e2e8f0;">
+          Em caso de dúvidas, entre em contato com a equipe financeira da iWof.
+        </p>
+      </td></tr>
+
+      <!-- FOOTER -->
+      <tr><td style="background:#f8fafc;padding:20px 32px;border-top:1px solid #e2e8f0;">
+        <table width="100%" cellpadding="0" cellspacing="0"><tr>
+          <td>${IWOF_LOGO_SVG_DARK}</td>
+          <td style="text-align:right;vertical-align:middle;">
+            <p style="color:#94a3b8;font-size:11px;margin:0;line-height:1.5;">© ${year} iWof Tecnologia<br>E-mail automático — não responda.</p>
+          </td>
+        </tr></table>
+      </td></tr>
+
     </table>
-</body>
-</html>`;
+  </td></tr>
+</table>
+</body></html>`;
 }
 
 export async function POST(req: NextRequest) {

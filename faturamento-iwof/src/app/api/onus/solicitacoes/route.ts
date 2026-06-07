@@ -48,12 +48,37 @@ async function sendEmail(to: string, subject: string, html: string) {
    TEMPLATES DE E-MAIL
    ───────────────────────────────────────────────────────────── */
 
+// Logo iWof em SVG — inline para máxima compatibilidade com clientes de e-mail
+const IWOF_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="90" height="28" viewBox="0 0 90 28" fill="none">
+  <text x="0" y="22" font-family="'Segoe UI',Arial,sans-serif" font-size="22" font-weight="800" letter-spacing="-0.5" fill="#ffffff">i<tspan fill="#60a5fa">W</tspan>of</text>
+</svg>`;
+
+const IWOF_LOGO_SVG_DARK = `<svg xmlns="http://www.w3.org/2000/svg" width="90" height="28" viewBox="0 0 90 28" fill="none">
+  <text x="0" y="22" font-family="'Segoe UI',Arial,sans-serif" font-size="22" font-weight="800" letter-spacing="-0.5" fill="#1e293b">i<tspan fill="#2563eb">W</tspan>of</text>
+</svg>`;
+
+function logoBar(accentColor: string) {
+    return `<tr>
+      <td style="background:${accentColor};padding:20px 32px 0;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td style="text-align:left;">${IWOF_LOGO_SVG}</td>
+            <td style="text-align:right;">
+              <span style="color:rgba(255,255,255,0.55);font-size:11px;font-family:'Segoe UI',sans-serif;letter-spacing:0.05em;text-transform:uppercase;">Sistema de Faturamento</span>
+            </td>
+          </tr>
+        </table>
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.15);margin:16px 0 0;">
+      </td>
+    </tr>`;
+}
+
 function header(title: string, subtitle: string, color = "#1c5d99") {
-    return `
-    <td style="background:${color};padding:28px 32px;text-align:center;">
-        <h1 style="color:#fff;margin:0;font-size:22px;font-weight:600;">${title}</h1>
-        <p style="color:rgba(255,255,255,0.75);margin:8px 0 0;font-size:14px;">${subtitle}</p>
-    </td>`;
+    return `${logoBar(color)}
+    <tr><td style="background:${color};padding:24px 32px 28px;text-align:center;">
+        <h1 style="color:#fff;margin:0;font-size:20px;font-weight:700;line-height:1.3;">${title}</h1>
+        <p style="color:rgba(255,255,255,0.7);margin:6px 0 0;font-size:13px;">${subtitle}</p>
+    </td></tr>`;
 }
 
 function row(label: string, value: string, bg = "#fff") {
@@ -64,16 +89,31 @@ function row(label: string, value: string, bg = "#fff") {
     </tr>`;
 }
 
-function wrapEmail(headerHtml: string, bodyHtml: string) {
-    return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
-    <body style="margin:0;padding:0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:#f4f6f9;">
-    <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;">
-        <tr>${headerHtml}</tr>
-        <tr><td style="background:#fff;padding:32px;">${bodyHtml}</td></tr>
-        <tr><td style="background:#f1f5f9;padding:16px 32px;text-align:center;">
-            <p style="color:#94a3b8;font-size:12px;margin:0;">© ${new Date().getFullYear()} iWof — E-mail automático, não responda.</p>
-        </td></tr>
-    </table></body></html>`;
+function wrapEmail(headerRows: string, bodyHtml: string) {
+    const year = new Date().getFullYear();
+    return `<!DOCTYPE html><html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"
+><title>iWof — Notificação</title></head>
+<body style="margin:0;padding:24px 0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:#f1f5f9;">
+<table width="100%" cellpadding="0" cellspacing="0">
+  <tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+      ${headerRows}
+      <tr><td style="background:#ffffff;padding:32px;">${bodyHtml}</td></tr>
+      <tr><td style="background:#f8fafc;padding:20px 32px;border-top:1px solid #e2e8f0;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td>${IWOF_LOGO_SVG_DARK}</td>
+            <td style="text-align:right;vertical-align:middle;">
+              <p style="color:#94a3b8;font-size:11px;margin:0;line-height:1.5;">© ${year} iWof Tecnologia<br>E-mail automático — não responda.</p>
+            </td>
+          </tr>
+        </table>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>`;
 }
 
 function buildAprovacaoEmail(sol: any): string {
