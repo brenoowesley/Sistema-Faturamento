@@ -14,26 +14,26 @@ const fmtDate = (d: string) =>
 
 function createTransporter() {
     return nodemailer.createTransport({
-        host: "smtp.gmail.com",
-        port: 465,
-        secure: true,
+        host: process.env.SMTP_HOST || "smtp.gmail.com",
+        port: Number(process.env.SMTP_PORT) || 465,
+        secure: (Number(process.env.SMTP_PORT) || 465) === 465,
         auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS,
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS,
         },
     });
 }
 
 /** Envia e-mail de forma não-bloqueante. Não lança erro — apenas loga. */
 async function sendEmail(to: string, subject: string, html: string) {
-    if (!to || !process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-        console.log(`[email] Skipped — to="${to}" EMAIL_USER=${!!process.env.EMAIL_USER}`);
+    if (!to || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+        console.log(`[email] Skipped — to="${to}" SMTP_USER=${!!process.env.SMTP_USER} SMTP_PASS=${!!process.env.SMTP_PASS}`);
         return;
     }
     try {
         const transporter = createTransporter();
         await transporter.sendMail({
-            from: `"iWof Financeiro" <${process.env.EMAIL_USER}>`,
+            from: `"iWof Financeiro" <${process.env.SMTP_USER}>`,
             to,
             subject,
             html,

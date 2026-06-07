@@ -11,9 +11,11 @@ export async function GET(req: NextRequest) {
     const to = searchParams.get("to");
 
     const diagnostics = {
-        EMAIL_USER_set: !!process.env.EMAIL_USER,
-        EMAIL_PASS_set: !!process.env.EMAIL_PASS,
-        EMAIL_USER_value: process.env.EMAIL_USER ? process.env.EMAIL_USER.replace(/(.{3}).*(@.*)/, "$1***$2") : null,
+        SMTP_HOST: process.env.SMTP_HOST || "smtp.gmail.com",
+        SMTP_PORT: process.env.SMTP_PORT || "465",
+        SMTP_USER_set: !!process.env.SMTP_USER,
+        SMTP_PASS_set: !!process.env.SMTP_PASS,
+        SMTP_USER_value: process.env.SMTP_USER ? process.env.SMTP_USER.replace(/(.{3}).*(@.*)/, "$1***$2") : null,
         nodemailer_version: require("nodemailer/package.json").version,
         to_provided: !!to,
     };
@@ -25,21 +27,21 @@ export async function GET(req: NextRequest) {
         });
     }
 
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
         return NextResponse.json({
-            error: "EMAIL_USER ou EMAIL_PASS não configurados",
+            error: "SMTP_USER ou SMTP_PASS não configurados",
             diagnostics,
         }, { status: 500 });
     }
 
     try {
         const transporter = nodemailer.createTransport({
-            host: "smtp.gmail.com",
-            port: 465,
-            secure: true,
+            host: process.env.SMTP_HOST || "smtp.gmail.com",
+            port: Number(process.env.SMTP_PORT) || 465,
+            secure: (Number(process.env.SMTP_PORT) || 465) === 465,
             auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS,
+                user: process.env.SMTP_USER,
+                pass: process.env.SMTP_PASS,
             },
         });
 
@@ -47,7 +49,7 @@ export async function GET(req: NextRequest) {
         await transporter.verify();
 
         await transporter.sendMail({
-            from: `"iWof Diagnóstico" <${process.env.EMAIL_USER}>`,
+            from: `"iWof Diagnóstico" <${process.env.SMTP_USER}>`,
             to,
             subject: "✅ Teste de E-mail — iWof Funcionando",
             html: `<p>Este é um e-mail de diagnóstico enviado em <strong>${new Date().toLocaleString("pt-BR")}</strong>.</p><p>Se você recebeu isto, o sistema de e-mail está operacional.</p>`,
