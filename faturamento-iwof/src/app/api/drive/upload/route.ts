@@ -193,21 +193,26 @@ export async function POST(request: Request) {
         const metadataChunks = chunkArray(metadataArray, CONCURRENT_LIMIT);
 
         // Fix N+1: pré-busca todos os numero_nf do chunk em uma única query IN
-        // Em vez de 1 query por arquivo (200 queries), usamos 1 query para todos
+        // Faz JOIN com clientes para obter o nome da empresa (nome_conta_azul ou razao_social)
+        // numero_nf é VARCHAR na tabela, convertemos para string ao comparar
         const nfNumerosNoChunk = metadataArray
             .filter((m: any) => m.docType === 'nf' && m.numeroNF)
-            .map((m: any) => m.numeroNF);
+            .map((m: any) => String(m.numeroNF));
 
         const nfEmpresaMap = new Map<string, string>();
         if (nfNumerosNoChunk.length > 0) {
-            const { data: nfConsData } = await supabaseAdmin
+            const { data: nfConsData, error: nfErr } = await supabaseAdmin
                 .from('faturamento_consolidados')
-                .select('numero_nf, nome_empresa')
+                .select('numero_nf, clientes(nome_conta_azul, razao_social)')
                 .in('numero_nf', nfNumerosNoChunk);
-            if (nfConsData) {
+            if (nfErr) {
+                console.error('[Drive NF Map] Erro ao pré-carregar empresas por NF:', nfErr.message);
+            } else if (nfConsData) {
                 for (const row of nfConsData) {
-                    if (row.numero_nf && row.nome_empresa) {
-                        nfEmpresaMap.set(String(row.numero_nf), row.nome_empresa.trim());
+                    const cli = Array.isArray(row.clientes) ? row.clientes[0] : row.clientes as any;
+                    const nomeEmpresa = cli?.nome_conta_azul || cli?.razao_social;
+                    if (row.numero_nf && nomeEmpresa) {
+                        nfEmpresaMap.set(String(row.numero_nf), (nomeEmpresa as string).trim());
                     }
                 }
             }

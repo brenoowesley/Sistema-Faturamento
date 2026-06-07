@@ -100,7 +100,9 @@ export async function POST(request: Request) {
         );
 
         const topic = pubsub.topic('topic-disparo-emails');
-        const publishPromises: Promise<string>[] = [];
+        // Acumula os payloads (NÃO as Promises) — as Promises serão criadas apenas no momento do envio
+        // Isso garante throttling real: no máximo BATCH_SIZE conexões simultâneas ao Pub/Sub
+        const pendingPayloads: Buffer[] = [];
         const now = new Date();
         const mes = (now.getMonth() + 1).toString().padStart(2, '0');
         const ano = now.getFullYear().toString();
@@ -173,21 +175,22 @@ export async function POST(request: Request) {
             };
 
             const dataBuffer = Buffer.from(JSON.stringify(payload));
-            publishPromises.push(topic.publishMessage({ data: dataBuffer }));
+            pendingPayloads.push(dataBuffer);
         }
 
-        // 5. Disparo em lotes para o Pub/Sub (throttling: máx 20 simultâneos)
-        // Evita RESOURCE_EXHAUSTED e timeout da Vercel com 200+ lojas
+        // 5. Throttling real do Pub/Sub (máx 20 simultâneos)
+        // As Promises são criadas DENTRO de cada lote — não antes — garantindo concorrência controlada
         // F-08: flag de controle para o rollback no finally
         let publicacaoOk = false;
         try {
-            if (publishPromises.length > 0) {
+            if (pendingPayloads.length > 0) {
                 const BATCH_SIZE = 20;
-                console.log(`[Disparo] Publicando ${publishPromises.length} mensagens em lotes de ${BATCH_SIZE}...`);
-                for (let i = 0; i < publishPromises.length; i += BATCH_SIZE) {
-                    const batch = publishPromises.slice(i, i + BATCH_SIZE);
-                    await Promise.all(batch);
-                    console.log(`[Disparo] Lote ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(publishPromises.length / BATCH_SIZE)} concluído.`);
+                console.log(`[Disparo] Publicando ${pendingPayloads.length} mensagens em lotes de ${BATCH_SIZE}...`);
+                for (let i = 0; i < pendingPayloads.length; i += BATCH_SIZE) {
+                    const batch = pendingPayloads.slice(i, i + BATCH_SIZE);
+                    // publishMessage() chamado AQUI — apenas neste momento as conexões são abertas
+                    await Promise.all(batch.map(buf => topic.publishMessage({ data: buf })));
+                    console.log(`[Disparo] Lote ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(pendingPayloads.length / BATCH_SIZE)} concluído.`);
                 }
             }
             publicacaoOk = true;
@@ -204,7 +207,7 @@ export async function POST(request: Request) {
 
         return NextResponse.json({
             success: true,
-            message: `Disparo de ${publishPromises.length} e-mails iniciado via GCP!${skippedCount > 0 ? ` (${skippedCount} sem e-mail registrados como falha)` : ''}${alreadySentCount > 0 ? ` (${alreadySentCount} já processados anteriormente)` : ''}`
+            message: `Disparo de ${pendingPayloads.length} e-mails iniciado via GCP!${skippedCount > 0 ? ` (${skippedCount} sem e-mail registrados como falha)` : ''}${alreadySentCount > 0 ? ` (${alreadySentCount} já processados anteriormente)` : ''}`
         });
 
     } catch (error: any) {
