@@ -3,6 +3,9 @@ import { createClient } from '@supabase/supabase-js';
 import { PubSub } from '@google-cloud/pubsub';
 import { getBillingTemplate } from '@/services/email/templates/billingTemplate';
 
+// Fix escala: aumenta timeout para suportar 200 lojas (requer Vercel Pro)
+export const maxDuration = 60;
+
 const supabaseAdmin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -173,12 +176,19 @@ export async function POST(request: Request) {
             publishPromises.push(topic.publishMessage({ data: dataBuffer }));
         }
 
-        // 5. Disparo simultâneo para o Pub/Sub
+        // 5. Disparo em lotes para o Pub/Sub (throttling: máx 20 simultâneos)
+        // Evita RESOURCE_EXHAUSTED e timeout da Vercel com 200+ lojas
         // F-08: flag de controle para o rollback no finally
         let publicacaoOk = false;
         try {
             if (publishPromises.length > 0) {
-                await Promise.all(publishPromises);
+                const BATCH_SIZE = 20;
+                console.log(`[Disparo] Publicando ${publishPromises.length} mensagens em lotes de ${BATCH_SIZE}...`);
+                for (let i = 0; i < publishPromises.length; i += BATCH_SIZE) {
+                    const batch = publishPromises.slice(i, i + BATCH_SIZE);
+                    await Promise.all(batch);
+                    console.log(`[Disparo] Lote ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(publishPromises.length / BATCH_SIZE)} concluído.`);
+                }
             }
             publicacaoOk = true;
         } finally {

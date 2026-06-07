@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { google } from "googleapis";
 
+// Fix escala: aumenta timeout para suportar 200 lojas (requer Vercel Pro)
+export const maxDuration = 60;
+
 const auth = new google.auth.GoogleAuth({
     credentials: {
         client_email: process.env.GOOGLE_CLIENT_EMAIL,
@@ -78,16 +81,16 @@ export async function POST(req: NextRequest) {
 
         if (loteErr || !lote) throw new Error("Lote não encontrado");
 
-        // 2. Fetch Consolidated Data (Financeiro Fechado)
+        // Fix escala: select específico em vez de select("*") para reduzir payload
         const { data: consolidados, error: consErr } = await supabase
             .from("faturamento_consolidados")
             .select(`
-                *,
-                data_competencia,
-                observacao_report,
+                id, valor_bruto, acrescimos, descontos, valor_ir_xml,
+                numero_nf, data_competencia, observacao_report,
                 clientes (
                     id, nome_fantasia, razao_social, cnpj, endereco, bairro, cidade, estado, cep,
                     codigo_ibge, email_principal, emails_faturamento, nome_conta_azul, loja_mae_id,
+                    boleto_unificado,
                     ciclos_faturamento(nome),
                     produtos_faturamento(porcentagem_nf)
                 )
@@ -547,7 +550,8 @@ export async function POST(req: NextRequest) {
         // Usaremos um array de 'Tasks' para disparar
         const gcpFetchTasks: (() => Promise<Response>)[] = [];
 
-        // 1. TAREFA HC (PACOTE ÚNICO)
+        // Fix escala: valida tamanho do payload HC antes de enviar ao GCP
+        // O GCP tem limite de 10MB por mensagem HTTP. Acima de 9MB logamos um aviso.
         if ((!tipo || tipo === "HC") && pubHCUrl && payloadHC.length > 0) {
             const masterHCPayload = {
                 nome_pasta_ciclo: cycleNameStr,
@@ -558,6 +562,16 @@ export async function POST(req: NextRequest) {
                 driveFolderId: rootFolderId
             };
 
+            const hcPayloadStr = JSON.stringify(masterHCPayload);
+            const hcSizeKB = Buffer.byteLength(hcPayloadStr, 'utf8') / 1024;
+            console.log(`[GCP HC] Payload size: ${hcSizeKB.toFixed(0)} KB | Lojas: ${payloadHC.length}`);
+            if (hcSizeKB > 9000) {
+                console.error(`[GCP HC] ⚠️ Payload muito grande (${hcSizeKB.toFixed(0)} KB). Limite GCP: 10MB.`);
+                return NextResponse.json({
+                    error: `Payload HC muito grande (${Math.round(hcSizeKB)} KB). O GCP aceita até 10MB. Reduza o lote ou divida por ciclo.`
+                }, { status: 413 });
+            }
+
             console.log("\n[ANALISE DE PAYLOAD GCP - HC] Verificando injeção de Ajustes Manuais:");
             if (payloadHC.length > 0 && payloadHC[0].ajustes_manuais) {
                 console.log(JSON.stringify(payloadHC[0].ajustes_manuais, null, 2));
@@ -565,11 +579,11 @@ export async function POST(req: NextRequest) {
                 console.log("AVISO: A chave 'ajustes_manuais' está ausente ou vazia no primeiro item do Payload HC.");
             }
 
-            gcpFetchTasks.push(() => fetch(pubHCUrl, { method: "POST", headers, body: JSON.stringify(masterHCPayload) }));
+            gcpFetchTasks.push(() => fetch(pubHCUrl, { method: "POST", headers, body: hcPayloadStr }));
             console.log(`[GCP HC] Disparando 1 pacote global com ${payloadHC.length} lojas.`);
         }
 
-        // 2. TAREFA NC (PACOTE ÚNICO)
+        // Fix escala: valida tamanho do payload NC antes de enviar ao GCP
         if ((!tipo || tipo === "NC") && pubNCUrl && payloadNC.length > 0) {
             const masterNCPayload = {
                 nome_pasta_ciclo: cycleNameStr,
@@ -580,6 +594,16 @@ export async function POST(req: NextRequest) {
                 driveFolderId: rootFolderId
             };
 
+            const ncPayloadStr = JSON.stringify(masterNCPayload);
+            const ncSizeKB = Buffer.byteLength(ncPayloadStr, 'utf8') / 1024;
+            console.log(`[GCP NC] Payload size: ${ncSizeKB.toFixed(0)} KB | Lojas: ${payloadNC.length}`);
+            if (ncSizeKB > 9000) {
+                console.error(`[GCP NC] ⚠️ Payload muito grande (${ncSizeKB.toFixed(0)} KB). Limite GCP: 10MB.`);
+                return NextResponse.json({
+                    error: `Payload NC muito grande (${Math.round(ncSizeKB)} KB). O GCP aceita até 10MB. Reduza o lote ou divida por ciclo.`
+                }, { status: 413 });
+            }
+
             console.log("\n[ANALISE DE PAYLOAD GCP - NC] Verificando injeção de Ajustes Manuais:");
             if (payloadNC.length > 0 && payloadNC[0].ajustes_manuais) {
                 console.log(JSON.stringify(payloadNC[0].ajustes_manuais, null, 2));
@@ -587,7 +611,7 @@ export async function POST(req: NextRequest) {
                 console.log("AVISO: A chave 'ajustes_manuais' está ausente ou vazia no primeiro item do Payload NC.");
             }
 
-            gcpFetchTasks.push(() => fetch(pubNCUrl, { method: "POST", headers, body: JSON.stringify(masterNCPayload) }));
+            gcpFetchTasks.push(() => fetch(pubNCUrl, { method: "POST", headers, body: ncPayloadStr }));
             console.log(`[GCP NC] Disparando 1 pacote global com ${payloadNC.length} lojas.`);
         }
 

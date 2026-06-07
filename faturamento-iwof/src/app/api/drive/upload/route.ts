@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { createClient } from '@supabase/supabase-js';
 
+// Fix escala: aumenta timeout para 200 arquivos (requer Vercel Pro)
+export const maxDuration = 60;
+
 // 1. Configuração do Google Drive Auth
 const auth = new google.auth.GoogleAuth({
     credentials: {
@@ -189,6 +192,28 @@ export async function POST(request: Request) {
         const CONCURRENT_LIMIT = 5;
         const metadataChunks = chunkArray(metadataArray, CONCURRENT_LIMIT);
 
+        // Fix N+1: pré-busca todos os numero_nf do chunk em uma única query IN
+        // Em vez de 1 query por arquivo (200 queries), usamos 1 query para todos
+        const nfNumerosNoChunk = metadataArray
+            .filter((m: any) => m.docType === 'nf' && m.numeroNF)
+            .map((m: any) => m.numeroNF);
+
+        const nfEmpresaMap = new Map<string, string>();
+        if (nfNumerosNoChunk.length > 0) {
+            const { data: nfConsData } = await supabaseAdmin
+                .from('faturamento_consolidados')
+                .select('numero_nf, nome_empresa')
+                .in('numero_nf', nfNumerosNoChunk);
+            if (nfConsData) {
+                for (const row of nfConsData) {
+                    if (row.numero_nf && row.nome_empresa) {
+                        nfEmpresaMap.set(String(row.numero_nf), row.nome_empresa.trim());
+                    }
+                }
+            }
+            console.log(`[Drive NF Map] ${nfEmpresaMap.size}/${nfNumerosNoChunk.length} NFs resolvidas em 1 query.`);
+        }
+
         for (const metaChunk of metadataChunks) {
             const chunkPromises = metaChunk.map(async (meta: any) => {
                 const file = files.find(f => f.name === meta.filename);
@@ -200,20 +225,12 @@ export async function POST(request: Request) {
                 // --- Lógica de Pareamento Dinâmico ---
                 let empresaParaPasta = (meta.nome_empresa_extraido || meta.nome_conta_azul || "Indefinido").trim();
 
+                // Fix N+1: usa o mapa pré-carregado em vez de query individual
                 if (meta.docType === 'nf' && meta.numeroNF) {
-                    try {
-                        const { data: consData, error: consErr } = await supabaseAdmin
-                            .from('faturamento_consolidados')
-                            .select('nome_empresa')
-                            .eq('numero_nf', meta.numeroNF)
-                            .maybeSingle();
-
-                        if (!consErr && consData?.nome_empresa) {
-                            empresaParaPasta = consData.nome_empresa.trim();
-                            console.log(`[Drive Pairing] NF ${meta.numeroNF} vinculada à empresa: ${empresaParaPasta}`);
-                        }
-                    } catch (e) {
-                        console.error(`[Drive Pairing Error] Falha ao buscar empresa para NF ${meta.numeroNF}:`, e);
+                    const nfEmpresa = nfEmpresaMap.get(String(meta.numeroNF));
+                    if (nfEmpresa) {
+                        empresaParaPasta = nfEmpresa;
+                        console.log(`[Drive Pairing] NF ${meta.numeroNF} → ${empresaParaPasta} (via mapa pré-carregado)`);
                     }
                 }
 
