@@ -701,13 +701,23 @@ export default function CentralLancamentos() {
     const importarNFSeFromZip = useCallback(async (file: File) => {
         setImportandoNFSe(true);
         setNfseImportLog(null);
+
+        // Normaliza CNPJ para 14 dígitos com zeros à esquerda
+        const normCnpj = (raw: unknown): string =>
+            String(raw ?? "").replace(/\D/g, "").padStart(14, "0").slice(-14);
+
         try {
             const zip = new JSZip();
             const contents = await zip.loadAsync(file);
+            const allNames = Object.keys(contents.files);
+
+            console.log("[LP NFSe] Arquivos no ZIP:", allNames);
+
             const parser = new XMLParser({ ignoreAttributes: false, parseTagValue: false });
 
             /* ── FASE 1: XMLs ─────────────────────────────────────── */
             const xmlMap = new Map<string, { numero: string; irrf: number }>();
+            let xmlFilesFound = 0;
 
             const findTag = (obj: any, tag: string): any => {
                 if (!obj || typeof obj !== "object") return undefined;
@@ -721,37 +731,56 @@ export default function CentralLancamentos() {
                 return undefined;
             };
 
-            for (const fname of Object.keys(contents.files)) {
+            for (const fname of allNames) {
+                if (contents.files[fname].dir) continue;
                 if (!fname.toLowerCase().endsWith(".xml")) continue;
+                xmlFilesFound++;
+
                 const xmlText = await contents.files[fname].async("text");
                 const jsonObj = parser.parse(xmlText);
 
                 const infNfse = findTag(jsonObj, "InfNfse");
                 const ctx = infNfse || jsonObj;
 
-                const tomador = findTag(ctx, "TomadorServico") || findTag(ctx, "Tomador") || findTag(ctx, "IdentificacaoTomador");
-                const cnpjRaw = tomador ? (findTag(tomador, "Cnpj") || findTag(tomador, "Cpf") || findTag(tomador, "CPFCNPJ")) : undefined;
-                const numero = findTag(ctx, "Numero");
-                const valorIR = findTag(ctx, "ValorIr") || 0;
+                const tomador =
+                    findTag(ctx, "TomadorServico") ||
+                    findTag(ctx, "Tomador") ||
+                    findTag(ctx, "IdentificacaoTomador");
 
-                if (cnpjRaw) {
-                    const cleanCnpj = String(cnpjRaw).replace(/\D/g, "");
-                    if (!xmlMap.has(cleanCnpj)) {
-                        xmlMap.set(cleanCnpj, {
-                            numero: String(numero || "S/N"),
+                // fast-xml-parser pode retornar número quando tag tem só dígitos
+                const cnpjRawTomador = tomador
+                    ? (findTag(tomador, "Cnpj") ?? findTag(tomador, "Cpf") ?? findTag(tomador, "CPFCNPJ"))
+                    : undefined;
+
+                // Fallback: pega qualquer CNPJ no XML raiz se tomador não encontrado
+                const cnpjRaw = cnpjRawTomador ?? findTag(ctx, "CpfCnpj") ?? findTag(ctx, "Cnpj");
+                const numero = findTag(ctx, "Numero") ?? findTag(ctx, "NumeroNfse") ?? findTag(ctx, "NumNfse");
+                const valorIR = findTag(ctx, "ValorIr") ?? findTag(ctx, "ValorRetencaoIr") ?? 0;
+
+                const cnpjNorm = normCnpj(cnpjRaw);
+                console.log(`[LP NFSe XML] ${fname.split("/").pop()} → cnpjRaw=${cnpjRaw} norm=${cnpjNorm} numero=${numero}`);
+
+                if (cnpjNorm.replace(/^0+/, "") && numero) {
+                    if (!xmlMap.has(cnpjNorm)) {
+                        xmlMap.set(cnpjNorm, {
+                            numero: String(numero),
                             irrf: Number(parseFloat(String(valorIR)).toFixed(2)) || 0,
                         });
                     }
                 }
             }
 
-            /* ── FASE 2: PDF OCR — fallback para os sem XML ───────── */
-            // Extrai CNPJ + número da NFS-e via pdfjs para PDFs cujo CNPJ não está no xmlMap
-            const pdfFiles = Object.keys(contents.files).filter(n => n.toLowerCase().endsWith(".pdf") && !contents.files[n].dir);
+            console.log("[LP NFSe] XMLs encontrados:", xmlFilesFound, "| CNPJs extraídos:", xmlMap.size);
 
+            /* ── FASE 2: PDF OCR — fallback ───────────────────────── */
+            const pdfNames = allNames.filter(n =>
+                !contents.files[n].dir && n.toLowerCase().endsWith(".pdf")
+            );
             const pdfMap = new Map<string, { numero: string }>();
 
-            for (const fname of pdfFiles) {
+            console.log("[LP NFSe] PDFs encontrados:", pdfNames.length);
+
+            for (const fname of pdfNames) {
                 try {
                     const arrayBuffer = await contents.files[fname].async("arraybuffer");
                     const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
@@ -760,31 +789,37 @@ export default function CentralLancamentos() {
 
                     for (let p = 1; p <= pdfDoc.numPages; p++) {
                         const page = await pdfDoc.getPage(p);
-                        const textContent = await page.getTextContent();
-                        fullText += textContent.items.map((item: any) => item.str).join(" ") + " ";
+                        const tc = await page.getTextContent();
+                        fullText += tc.items.map((item: any) => item.str).join(" ") + " ";
                     }
 
-                    // Extrair CNPJ do Tomador
+                    // Extrair CNPJ do Tomador — prioriza label TOMADOR
                     let cnpjPDF = "";
-                    const tomadorMatch = fullText.match(/TOMADOR[\s\S]*?([0-9]{2}[.\s]?[0-9]{3}[.\s]?[0-9]{3}\/[0-9]{4}-[0-9]{2})/i);
+                    const tomadorMatch = fullText.match(
+                        /TOMADOR[\s\S]{0,200}?([0-9]{2}[.\s]?[0-9]{3}[.\s]?[0-9]{3}[/\/][0-9]{4}-[0-9]{2})/i
+                    );
                     if (tomadorMatch) {
-                        cnpjPDF = tomadorMatch[1].replace(/\D/g, "");
+                        cnpjPDF = normCnpj(tomadorMatch[1]);
                     } else {
-                        // Fallback: segundo CNPJ encontrado no documento (geralmente o tomador)
-                        const allCnpjs = fullText.match(/([0-9]{2}[.\s]?[0-9]{3}[.\s]?[0-9]{3}\/[0-9]{4}-[0-9]{2})/g);
+                        const allCnpjs = fullText.match(/[0-9]{2}[.\s]?[0-9]{3}[.\s]?[0-9]{3}[/\/][0-9]{4}-[0-9]{2}/g);
+                        console.log(`[LP NFSe PDF] ${fname.split("/").pop()} CNPJs encontrados:`, allCnpjs);
                         if (allCnpjs && allCnpjs.length >= 2) {
-                            cnpjPDF = allCnpjs[1].replace(/\D/g, "");
+                            cnpjPDF = normCnpj(allCnpjs[1]);
                         } else if (allCnpjs && allCnpjs.length === 1) {
-                            cnpjPDF = allCnpjs[0].replace(/\D/g, "");
+                            cnpjPDF = normCnpj(allCnpjs[0]);
                         }
                     }
 
                     // Extrair Número da NFS-e
                     let numeroPDF = "";
-                    const nfseMatch = fullText.match(/N[uú]mero\s+da\s+NFS-e[\s:]*(\d+)/i)
-                        || fullText.match(/NFS-e\s+N[º°oa]?\s*[:\-]?\s*(\d+)/i)
-                        || fullText.match(/N[ºo°]\s+(\d{3,})/i);
+                    const nfseMatch =
+                        fullText.match(/N[uú]mero\s+da\s+NFS-e[\s:]*(\d+)/i) ||
+                        fullText.match(/NFS-e\s*[Nn][º°oa]?\s*[:\-]?\s*(\d+)/i) ||
+                        fullText.match(/Nota\s+Fiscal\s+de\s+Servi[cç]o.*?n[º°]?\s*(\d+)/i) ||
+                        fullText.match(/\bN[º°]\s+(\d{3,})/i);
                     if (nfseMatch) numeroPDF = nfseMatch[1];
+
+                    console.log(`[LP NFSe PDF] ${fname.split("/").pop()} → cnpj=${cnpjPDF} numero=${numeroPDF}`);
 
                     if (cnpjPDF && numeroPDF && !xmlMap.has(cnpjPDF)) {
                         pdfMap.set(cnpjPDF, { numero: numeroPDF });
@@ -794,42 +829,57 @@ export default function CentralLancamentos() {
                 }
             }
 
-            /* ── FASE 3: Enriquecer lançamentos ───────────────────── */
+            /* ── FASE 3: Cruzamento ───────────────────────────────── */
+            // Lê estado atual para calcular contadores fora do setter
+            // (evita closure stale com variáveis locais dentro de setLancamentos)
             let porXml = 0;
             let porPdf = 0;
             let semMatch = 0;
 
-            setLancamentos(prev => prev.map(l => {
-                if (!l.cnpj) { semMatch++; return l; }
+            // Log da tabela de cruzamento para diagnóstico
+            console.log("[LP NFSe] xmlMap keys:", [...xmlMap.keys()]);
+            console.log("[LP NFSe] pdfMap keys:", [...pdfMap.keys()]);
 
-                // Prioridade 1: XML
-                const xmlData = xmlMap.get(l.cnpj);
-                if (xmlData) {
-                    porXml++;
-                    return { ...l, numeroNFGerada: xmlData.numero, irrf: xmlData.irrf };
-                }
+            setLancamentos(prev => {
+                const updated = prev.map(l => {
+                    const cnpjLanc = normCnpj(l.cnpj);
+                    if (!cnpjLanc.replace(/^0+/, "")) { semMatch++; return l; }
 
-                // Prioridade 2: PDF OCR (fallback)
-                const pdfData = pdfMap.get(l.cnpj);
-                if (pdfData) {
-                    porPdf++;
-                    return { ...l, numeroNFGerada: pdfData.numero };
-                }
+                    console.log(`[LP NFSe] Cruzando lanç. cnpj=${cnpjLanc}...`);
 
-                semMatch++;
-                return l;
-            }));
+                    const xmlData = xmlMap.get(cnpjLanc);
+                    if (xmlData) {
+                        porXml++;
+                        return { ...l, numeroNFGerada: xmlData.numero, irrf: xmlData.irrf };
+                    }
 
-            const parts: string[] = [];
-            if (porXml > 0) parts.push(`${porXml} via XML`);
-            if (porPdf > 0) parts.push(`${porPdf} via PDF (OCR)`);
-            const totalPreenchidos = porXml + porPdf;
+                    const pdfData = pdfMap.get(cnpjLanc);
+                    if (pdfData) {
+                        porPdf++;
+                        return { ...l, numeroNFGerada: pdfData.numero };
+                    }
 
-            setNfseImportLog(
-                totalPreenchidos > 0
-                    ? `✅ ${totalPreenchidos} preenchidos — ${parts.join(", ")}${semMatch > 0 ? ` • ${semMatch} sem CNPJ correspondente` : ""}`
-                    : `⚠️ Nenhum lançamento preenchido — ${xmlMap.size} XMLs e ${pdfMap.size} PDFs lidos, CNPJs não cruzaram.`
-            );
+                    semMatch++;
+                    return l;
+                });
+
+                // Atualiza log APÓS o map (dentro do setter para ter os valores finais)
+                const parts: string[] = [];
+                if (porXml > 0) parts.push(`${porXml} via XML`);
+                if (porPdf > 0) parts.push(`${porPdf} via PDF (OCR)`);
+                const total = porXml + porPdf;
+
+                setTimeout(() => {
+                    setNfseImportLog(
+                        total > 0
+                            ? `✅ ${total} preenchidos — ${parts.join(", ")}${semMatch > 0 ? ` • ${semMatch} sem correspondência` : ""}`
+                            : `⚠️ Nenhum cruzamento — ${xmlFilesFound} XMLs (${xmlMap.size} CNPJs) e ${pdfNames.length} PDFs (${pdfMap.size} CNPJs) lidos. Verifique o console (F12) para detalhes.`
+                    );
+                }, 0);
+
+                return updated;
+            });
+
         } catch (err) {
             console.error("[LP] Erro importação NFS-e:", err);
             setNfseImportLog(`❌ Erro ao processar ZIP: ${err instanceof Error ? err.message : "desconhecido"}`);
