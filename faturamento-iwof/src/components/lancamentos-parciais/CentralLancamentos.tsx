@@ -9,7 +9,7 @@
    - Para exportação NFE.io usa API route própria (cópia isolada).
    ================================================================ */
 
-import { useState, useCallback, useMemo, useEffect, ReactNode } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef, ReactNode } from "react";
 import { useDropzone } from "react-dropzone";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
@@ -342,6 +342,9 @@ export default function CentralLancamentos() {
     const [availableClients, setAvailableClients] = useState<ClientBrief_LP[]>([]);
     const [matchingTargets, setMatchingTargets] = useState<string[]>([]); // Agora armazena Razão Social
     const [searchTargetTerm, setSearchTargetTerm] = useState("");
+    const [importandoNFSe, setImportandoNFSe] = useState(false);
+    const [nfseImportLog, setNfseImportLog] = useState<string | null>(null);
+    const nfseInputRef = useRef<HTMLInputElement>(null);
 
     const uniqueRazaoSociais = useMemo(() => {
         const names = availableClients.map(c => c.razao_social).filter(Boolean);
@@ -687,6 +690,154 @@ export default function CentralLancamentos() {
         accept: { "application/zip": [".zip"] },
         multiple: false,
     });
+
+    /* ================================================================
+       IMPORTAR NFS-e NO STEP 5 (sem sair do preview)
+       Reutiliza o mesmo parser do Step 3 (onDropXml):
+       - Abre um ZIP com XMLs de retorno das NFS-e emitidas
+       - Para cada XML: extrai CNPJ do tomador + número da NF
+       - Cruza com lançamentos pelo CNPJ → preenche numeroNFGerada
+       ================================================================ */
+    const importarNFSeFromZip = useCallback(async (file: File) => {
+        setImportandoNFSe(true);
+        setNfseImportLog(null);
+        try {
+            const zip = new JSZip();
+            const contents = await zip.loadAsync(file);
+            const parser = new XMLParser({ ignoreAttributes: false, parseTagValue: false });
+
+            /* ── FASE 1: XMLs ─────────────────────────────────────── */
+            const xmlMap = new Map<string, { numero: string; irrf: number }>();
+
+            const findTag = (obj: any, tag: string): any => {
+                if (!obj || typeof obj !== "object") return undefined;
+                for (const k in obj) {
+                    if (k.toLowerCase() === tag.toLowerCase()) return obj[k];
+                }
+                for (const k in obj) {
+                    const res = findTag(obj[k], tag);
+                    if (res !== undefined) return res;
+                }
+                return undefined;
+            };
+
+            for (const fname of Object.keys(contents.files)) {
+                if (!fname.toLowerCase().endsWith(".xml")) continue;
+                const xmlText = await contents.files[fname].async("text");
+                const jsonObj = parser.parse(xmlText);
+
+                const infNfse = findTag(jsonObj, "InfNfse");
+                const ctx = infNfse || jsonObj;
+
+                const tomador = findTag(ctx, "TomadorServico") || findTag(ctx, "Tomador") || findTag(ctx, "IdentificacaoTomador");
+                const cnpjRaw = tomador ? (findTag(tomador, "Cnpj") || findTag(tomador, "Cpf") || findTag(tomador, "CPFCNPJ")) : undefined;
+                const numero = findTag(ctx, "Numero");
+                const valorIR = findTag(ctx, "ValorIr") || 0;
+
+                if (cnpjRaw) {
+                    const cleanCnpj = String(cnpjRaw).replace(/\D/g, "");
+                    if (!xmlMap.has(cleanCnpj)) {
+                        xmlMap.set(cleanCnpj, {
+                            numero: String(numero || "S/N"),
+                            irrf: Number(parseFloat(String(valorIR)).toFixed(2)) || 0,
+                        });
+                    }
+                }
+            }
+
+            /* ── FASE 2: PDF OCR — fallback para os sem XML ───────── */
+            // Extrai CNPJ + número da NFS-e via pdfjs para PDFs cujo CNPJ não está no xmlMap
+            const pdfFiles = Object.keys(contents.files).filter(n => n.toLowerCase().endsWith(".pdf") && !contents.files[n].dir);
+
+            const pdfMap = new Map<string, { numero: string }>();
+
+            for (const fname of pdfFiles) {
+                try {
+                    const arrayBuffer = await contents.files[fname].async("arraybuffer");
+                    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+                    const pdfDoc = await loadingTask.promise;
+                    let fullText = "";
+
+                    for (let p = 1; p <= pdfDoc.numPages; p++) {
+                        const page = await pdfDoc.getPage(p);
+                        const textContent = await page.getTextContent();
+                        fullText += textContent.items.map((item: any) => item.str).join(" ") + " ";
+                    }
+
+                    // Extrair CNPJ do Tomador
+                    let cnpjPDF = "";
+                    const tomadorMatch = fullText.match(/TOMADOR[\s\S]*?([0-9]{2}[.\s]?[0-9]{3}[.\s]?[0-9]{3}\/[0-9]{4}-[0-9]{2})/i);
+                    if (tomadorMatch) {
+                        cnpjPDF = tomadorMatch[1].replace(/\D/g, "");
+                    } else {
+                        // Fallback: segundo CNPJ encontrado no documento (geralmente o tomador)
+                        const allCnpjs = fullText.match(/([0-9]{2}[.\s]?[0-9]{3}[.\s]?[0-9]{3}\/[0-9]{4}-[0-9]{2})/g);
+                        if (allCnpjs && allCnpjs.length >= 2) {
+                            cnpjPDF = allCnpjs[1].replace(/\D/g, "");
+                        } else if (allCnpjs && allCnpjs.length === 1) {
+                            cnpjPDF = allCnpjs[0].replace(/\D/g, "");
+                        }
+                    }
+
+                    // Extrair Número da NFS-e
+                    let numeroPDF = "";
+                    const nfseMatch = fullText.match(/N[uú]mero\s+da\s+NFS-e[\s:]*(\d+)/i)
+                        || fullText.match(/NFS-e\s+N[º°oa]?\s*[:\-]?\s*(\d+)/i)
+                        || fullText.match(/N[ºo°]\s+(\d{3,})/i);
+                    if (nfseMatch) numeroPDF = nfseMatch[1];
+
+                    if (cnpjPDF && numeroPDF && !xmlMap.has(cnpjPDF)) {
+                        pdfMap.set(cnpjPDF, { numero: numeroPDF });
+                    }
+                } catch (pdfErr) {
+                    console.warn("[LP NFSe] Erro OCR PDF:", fname, pdfErr);
+                }
+            }
+
+            /* ── FASE 3: Enriquecer lançamentos ───────────────────── */
+            let porXml = 0;
+            let porPdf = 0;
+            let semMatch = 0;
+
+            setLancamentos(prev => prev.map(l => {
+                if (!l.cnpj) { semMatch++; return l; }
+
+                // Prioridade 1: XML
+                const xmlData = xmlMap.get(l.cnpj);
+                if (xmlData) {
+                    porXml++;
+                    return { ...l, numeroNFGerada: xmlData.numero, irrf: xmlData.irrf };
+                }
+
+                // Prioridade 2: PDF OCR (fallback)
+                const pdfData = pdfMap.get(l.cnpj);
+                if (pdfData) {
+                    porPdf++;
+                    return { ...l, numeroNFGerada: pdfData.numero };
+                }
+
+                semMatch++;
+                return l;
+            }));
+
+            const parts: string[] = [];
+            if (porXml > 0) parts.push(`${porXml} via XML`);
+            if (porPdf > 0) parts.push(`${porPdf} via PDF (OCR)`);
+            const totalPreenchidos = porXml + porPdf;
+
+            setNfseImportLog(
+                totalPreenchidos > 0
+                    ? `✅ ${totalPreenchidos} preenchidos — ${parts.join(", ")}${semMatch > 0 ? ` • ${semMatch} sem CNPJ correspondente` : ""}`
+                    : `⚠️ Nenhum lançamento preenchido — ${xmlMap.size} XMLs e ${pdfMap.size} PDFs lidos, CNPJs não cruzaram.`
+            );
+        } catch (err) {
+            console.error("[LP] Erro importação NFS-e:", err);
+            setNfseImportLog(`❌ Erro ao processar ZIP: ${err instanceof Error ? err.message : "desconhecido"}`);
+        } finally {
+            setImportandoNFSe(false);
+            if (nfseInputRef.current) nfseInputRef.current.value = "";
+        }
+    }, []);
 
     /* ================================================================
        STEP 4: EXPORTAÇÃO NFE.io
@@ -1486,27 +1637,69 @@ export default function CentralLancamentos() {
                     </div>
 
                     {/* ── ACTION BUTTONS ── */}
-                    <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-                        <div>
-                            <p style={{ fontWeight: 600, color: "#fff", margin: 0 }}>Ações de Exportação</p>
-                            <p style={{ fontSize: 13, color: "var(--fg-muted)", margin: "4px 0 0" }}>
-                                <strong>{lancamentos.filter(l => l.tipo === "NF" && l.lojaIdentificadaId).length}</strong> NFs prontas para NFE.io
-                                {" • "}
-                                <strong>{lancamentos.filter(l => l.tipo === "NC" && l.lojaIdentificadaId).length}</strong> NCs prontas para GCP
-                            </p>
+                    <div className="card" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                        {/* input hidden para o seletor de ZIP com XMLs */}
+                        <input
+                            ref={nfseInputRef}
+                            type="file"
+                            accept=".zip"
+                            style={{ display: "none" }}
+                            onChange={e => {
+                                const f = e.target.files?.[0];
+                                if (f) importarNFSeFromZip(f);
+                            }}
+                        />
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+                            <div>
+                                <p style={{ fontWeight: 600, color: "#fff", margin: 0 }}>Ações de Exportação</p>
+                                <p style={{ fontSize: 13, color: "var(--fg-muted)", margin: "4px 0 0" }}>
+                                    <strong>{lancamentos.filter(l => l.tipo === "NF" && l.lojaIdentificadaId).length}</strong> NFs prontas para NFE.io
+                                    {" • "}
+                                    <strong>{lancamentos.filter(l => l.tipo === "NC" && l.lojaIdentificadaId).length}</strong> NCs prontas para GCP
+                                </p>
+                            </div>
+                            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                                {/* ── Botão Importar NFS-e ── */}
+                                <button
+                                    className="btn btn-ghost"
+                                    onClick={() => nfseInputRef.current?.click()}
+                                    disabled={importandoNFSe}
+                                    title="Importar ZIP com XMLs de NFS-e para preencher número e IRRF automaticamente"
+                                    style={{ padding: "12px 20px", fontSize: 13, borderColor: "rgba(99,102,241,0.4)" }}
+                                >
+                                    {importandoNFSe
+                                        ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
+                                        : <FileCode size={16} />}
+                                    Importar NFS-e
+                                </button>
+                                <button className="btn btn-ghost" onClick={handleExportarNFE} disabled={exportando}
+                                    style={{ padding: "12px 20px", fontSize: 13 }}>
+                                    {exportando ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <FileSpreadsheet size={16} />}
+                                    Exportar NFE.io (.xlsx)
+                                </button>
+                                <button className="btn btn-primary" onClick={handleEmitirNC}
+                                    style={{ padding: "12px 20px", fontSize: 13 }}>
+                                    <SendHorizonal size={16} />
+                                    Emitir NC (GCP)
+                                </button>
+                            </div>
                         </div>
-                        <div style={{ display: "flex", gap: 10 }}>
-                            <button className="btn btn-ghost" onClick={handleExportarNFE} disabled={exportando}
-                                style={{ padding: "12px 20px", fontSize: 13 }}>
-                                {exportando ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <FileSpreadsheet size={16} />}
-                                Exportar NFE.io (.xlsx)
-                            </button>
-                            <button className="btn btn-primary" onClick={handleEmitirNC}
-                                style={{ padding: "12px 20px", fontSize: 13 }}>
-                                <SendHorizonal size={16} />
-                                Emitir NC (GCP)
-                            </button>
-                        </div>
+                        {/* Log de importação NFS-e */}
+                        {nfseImportLog && (
+                            <div style={{
+                                padding: "10px 14px", borderRadius: 8, fontSize: 13,
+                                background: nfseImportLog.startsWith("✅") ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)",
+                                border: `1px solid ${nfseImportLog.startsWith("✅") ? "rgba(34,197,94,0.25)" : "rgba(239,68,68,0.25)"}`,
+                                color: nfseImportLog.startsWith("✅") ? "var(--success)" : "var(--danger)",
+                                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8
+                            }}>
+                                <span>{nfseImportLog}</span>
+                                <button onClick={() => setNfseImportLog(null)}
+                                    style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 2, opacity: 0.7 }}>
+                                    <X size={14} />
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </>
             )
