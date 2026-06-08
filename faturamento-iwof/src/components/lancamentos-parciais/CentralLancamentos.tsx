@@ -711,18 +711,20 @@ export default function CentralLancamentos() {
             const contents = await zip.loadAsync(file);
             const allNames = Object.keys(contents.files);
 
-            console.log("[LP NFSe] Arquivos no ZIP:", allNames);
+            const parser = new XMLParser({
+                ignoreAttributes: false,
+                parseTagValue: false,
+                removeNSPrefix: true,
+            });
 
-            const parser = new XMLParser({ ignoreAttributes: false, parseTagValue: false });
-
-            /* ── FASE 1: XMLs ─────────────────────────────────────── */
             const xmlMap = new Map<string, { numero: string; irrf: number }>();
             let xmlFilesFound = 0;
 
             const findTag = (obj: any, tag: string): any => {
                 if (!obj || typeof obj !== "object") return undefined;
                 for (const k in obj) {
-                    if (k.toLowerCase() === tag.toLowerCase()) return obj[k];
+                    const cleanK = k.split(':').pop() || k;
+                    if (cleanK.toLowerCase() === tag.toLowerCase()) return obj[k];
                 }
                 for (const k in obj) {
                     const res = findTag(obj[k], tag);
@@ -737,7 +739,8 @@ export default function CentralLancamentos() {
                 xmlFilesFound++;
 
                 const xmlText = await contents.files[fname].async("text");
-                const jsonObj = parser.parse(xmlText);
+                const cleanXmlText = xmlText.replace(/<([a-zA-Z0-9_]+:)/g, "<").replace(/<\/([a-zA-Z0-9_]+:)/g, "</");
+                const jsonObj = parser.parse(cleanXmlText);
 
                 const infNfse = findTag(jsonObj, "InfNfse");
                 const ctx = infNfse || jsonObj;
@@ -745,17 +748,41 @@ export default function CentralLancamentos() {
                 const tomador =
                     findTag(ctx, "TomadorServico") ||
                     findTag(ctx, "Tomador") ||
-                    findTag(ctx, "IdentificacaoTomador");
+                    findTag(ctx, "IdentificacaoTomador") ||
+                    findTag(ctx, "DadosTomador") ||
+                    findTag(ctx, "toma");
 
-                // fast-xml-parser pode retornar número quando tag tem só dígitos
+                const prestador = 
+                    findTag(ctx, "PrestadorServico") || 
+                    findTag(ctx, "Prestador") ||
+                    findTag(ctx, "prest");
+
                 const cnpjRawTomador = tomador
                     ? (findTag(tomador, "Cnpj") ?? findTag(tomador, "Cpf") ?? findTag(tomador, "CPFCNPJ"))
                     : undefined;
+                    
+                const cnpjPrestador = prestador
+                    ? normCnpj(findTag(prestador, "Cnpj") ?? findTag(prestador, "Cpf") ?? "")
+                    : "";
 
-                // Fallback: pega qualquer CNPJ no XML raiz se tomador não encontrado
-                const cnpjRaw = cnpjRawTomador ?? findTag(ctx, "CpfCnpj") ?? findTag(ctx, "Cnpj");
-                const numero = findTag(ctx, "Numero") ?? findTag(ctx, "NumeroNfse") ?? findTag(ctx, "NumNfse");
-                const valorIR = findTag(ctx, "ValorIr") ?? findTag(ctx, "ValorRetencaoIr") ?? 0;
+                // Usa CNPJ do tomador; se não encontrado, fallback raiz (mas nunca usa o do prestador)
+                const cnpjRawFallback = findTag(ctx, "CpfCnpj") ?? findTag(ctx, "Cnpj");
+                const cnpjRaw = cnpjRawTomador ?? (cnpjRawFallback && normCnpj(cnpjRawFallback) !== cnpjPrestador ? cnpjRawFallback : undefined);
+
+                // Número da NF: tenta tags do XML; se não encontrar, extrai do nome do arquivo
+                // Padrão do arquivo: {cnpj_prestador}-{ano}-{mes}-{numero}-nfse.xml
+                const filenameOnly = fname.split("/").pop() || fname;
+                const filenameNumMatch = filenameOnly.match(/^\d+-\d{4}-\d{2}-(\d+)-nfse\.xml$/i);
+                const numeroFromFilename = filenameNumMatch ? String(parseInt(filenameNumMatch[1], 10)) : undefined;
+
+                const numero =
+                    findTag(ctx, "Numero") ??
+                    findTag(ctx, "NumeroNfse") ??
+                    findTag(ctx, "NumNfse") ??
+                    findTag(ctx, "NumeroDaNfse") ??
+                    findTag(ctx, "nNFSe") ??
+                    numeroFromFilename;
+                const valorIR = findTag(ctx, "ValorIr") ?? findTag(ctx, "ValorRetencaoIr") ?? findTag(ctx, "vIRRF") ?? 0;
 
                 const cnpjNorm = normCnpj(cnpjRaw);
                 console.log(`[LP NFSe XML] ${fname.split("/").pop()} → cnpjRaw=${cnpjRaw} norm=${cnpjNorm} numero=${numero}`);
