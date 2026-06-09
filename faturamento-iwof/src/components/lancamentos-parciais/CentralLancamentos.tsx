@@ -1211,7 +1211,17 @@ export default function CentralLancamentos() {
                 }
 
                 const nomeCliente = lancMatch.nomeContaAzulMatch || lancMatch.razaoSocialMatch || lancMatch.lojaNomeSugerido || "Indefinido";
-                const dataCompetencia = lancMatch.periodo_servico?.slice(0, 7) || new Date().toISOString().slice(0, 7);
+                // periodo_servico pode ser "DD/MM/YYYY", "YYYY-MM-DD", "YYYY-MM" — normaliza para YYYY-MM
+                let dataCompetencia = new Date().toISOString().slice(0, 7); // fallback: mês atual
+                if (lancMatch.periodo_servico) {
+                    const ps = lancMatch.periodo_servico.trim();
+                    const brMatch = ps.match(/(\d{2})\/(\d{2})\/(\d{4})/); // DD/MM/YYYY
+                    if (brMatch) {
+                        dataCompetencia = `${brMatch[3]}-${brMatch[2]}`; // YYYY-MM
+                    } else if (/^\d{4}-\d{2}/.test(ps)) {
+                        dataCompetencia = ps.slice(0, 7); // já é YYYY-MM
+                    }
+                }
                 const mimeType = ext === 'xml' ? 'application/xml' : 'application/pdf';
 
                 setNfUploadLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: 'enviando', msg: `Enviando para ${nomeCliente}...` } : l));
