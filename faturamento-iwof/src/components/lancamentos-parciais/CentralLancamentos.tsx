@@ -1058,16 +1058,30 @@ export default function CentralLancamentos() {
         const normCnpj = (raw: unknown): string =>
             String(raw ?? "").replace(/\D/g, "").padStart(14, "0").slice(-14);
 
-        // Constroi mapa CNPJ -> lancamento para cruzamento
+        // Constroi mapa CNPJ -> lancamento para cruzamento (XMLs)
         const cnpjToLanc = new Map<string, LancamentoParcial>();
         for (const l of lancamentos) {
             if (l.cnpj) cnpjToLanc.set(normCnpj(l.cnpj), l);
         }
 
-        // DEBUG: mostra todos os CNPJs no mapa
+        // Constroi mapa número NF -> lancamento para cruzamento (PDFs)
+        const nfToLanc = new Map<string, LancamentoParcial>();
+        for (const l of lancamentos) {
+            if (l.numeroNFGerada) {
+                // Normaliza: remove zeros à esquerda para comparar "00001126" com "1126"
+                const nfNorm = l.numeroNFGerada.replace(/^0+/, '');
+                nfToLanc.set(nfNorm, l);
+            }
+        }
+
+        // DEBUG: mostra todos os CNPJs e NFs no mapa
         console.log(`[LP EnviarNF] ═══ MAPA DE CNPJ DOS LANÇAMENTOS (${cnpjToLanc.size} entradas) ═══`);
         cnpjToLanc.forEach((lanc, cnpj) => {
             console.log(`  ${cnpj} → ${lanc.nomeContaAzulMatch || lanc.razaoSocialMatch || lanc.lojaNomeSugerido || '?'} (raw: "${lanc.cnpj}")`);
+        });
+        console.log(`[LP EnviarNF] ═══ MAPA DE NF DOS LANÇAMENTOS (${nfToLanc.size} entradas) ═══`);
+        nfToLanc.forEach((lanc, nf) => {
+            console.log(`  NF ${nf} → ${lanc.nomeContaAzulMatch || lanc.razaoSocialMatch || lanc.lojaNomeSugerido || '?'}`);
         });
 
         try {
@@ -1088,9 +1102,10 @@ export default function CentralLancamentos() {
                     continue;
                 }
 
-                setNfUploadLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: 'enviando', msg: 'Identificando CNPJ...' } : l));
+                setNfUploadLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: 'enviando', msg: 'Identificando...' } : l));
 
                 let cnpjFile = "";
+                let lancMatch: LancamentoParcial | undefined;
 
                 if (ext === 'xml') {
                     // Parse XML para pegar CNPJ do TOMADOR (não do prestador)
@@ -1135,15 +1150,14 @@ export default function CentralLancamentos() {
 
                         if (cnpjTomador) {
                             cnpjFile = normCnpj(cnpjTomador);
-                            const match = cnpjToLanc.has(cnpjFile);
-                            console.log(`[LP EnviarNF XML] ${shortName} → CNPJ tomador: ${cnpjFile} | Match no mapa: ${match ? '✅ SIM' : '❌ NÃO'}`);
+                            lancMatch = cnpjToLanc.get(cnpjFile);
+                            console.log(`[LP EnviarNF XML] ${shortName} → CNPJ tomador: ${cnpjFile} | Match: ${lancMatch ? '✅' : '❌'}`);
                         } else {
                             // Fallback: pega todos os CNPJs, exclui o do prestador (emit/prest)
                             const prestador = findTag(jsonObj, "prest") || findTag(jsonObj, "emit") || findTag(jsonObj, "PrestadorServico");
                             const cnpjPrest = prestador ? normCnpj(findTag(prestador, "Cnpj") ?? findTag(prestador, "CNPJ") ?? "") : "";
-                            console.log(`[LP EnviarNF XML] Tomador não encontrado. Usando fallback. CNPJ prestador a excluir: ${cnpjPrest}`);
+                            console.log(`[LP EnviarNF XML] Tomador não encontrado. Fallback excluindo prestador: ${cnpjPrest}`);
 
-                            // Regex para achar todos os CNPJs no XML cru
                             const allCnpjs = cleanXml.match(/<CNPJ>(\d+)<\/CNPJ>/gi);
                             console.log(`[LP EnviarNF XML] Todos os CNPJs no XML:`, allCnpjs?.map(t => t.replace(/<\/?CNPJ>/gi, "")));
                             if (allCnpjs) {
@@ -1152,7 +1166,8 @@ export default function CentralLancamentos() {
                                     const norm = normCnpj(digits);
                                     if (norm !== cnpjPrest) {
                                         cnpjFile = norm;
-                                        console.log(`[LP EnviarNF XML] ${shortName} → CNPJ fallback (excluindo prestador): ${cnpjFile}`);
+                                        lancMatch = cnpjToLanc.get(cnpjFile);
+                                        console.log(`[LP EnviarNF XML] ${shortName} → CNPJ fallback: ${cnpjFile} | Match: ${lancMatch ? '✅' : '❌'}`);
                                         break;
                                     }
                                 }
@@ -1163,31 +1178,40 @@ export default function CentralLancamentos() {
                     }
                 }
 
-                // Fallback para PDF: tenta extrair CNPJ do nome do arquivo
-                // Mas no padrão SPED o nome do arquivo começa com o CNPJ do PRESTADOR,
-                // então só usamos se não tiver XML com tomador identificado
-                if (!cnpjFile && ext === 'pdf') {
-                    const nameMatch = shortName.match(/^(\d{14})/);
-                    if (nameMatch) {
-                        // Nome do arquivo = CNPJ do prestador, não do tomador
-                        // Não podemos usar isso para cruzar. Log de aviso.
-                        console.log(`[LP EnviarNF PDF] ${shortName} → CNPJ no nome é do prestador, não do tomador. Necessário OCR.`);
+                // PDFs: extrai número da NF do nome do arquivo e cruza com lançamentos
+                // Padrão: {CNPJ_prestador}-{ano}-{mes}-{numero_nf}-nfse.pdf
+                // Ex: 48999300000152-2026-06-00001126-nfse.pdf → NF 1126
+                if (!lancMatch && (ext === 'pdf' || !cnpjFile)) {
+                    const nfMatch = shortName.match(/\d{14}-\d{4}-\d{2}-(\d+)-nfse/i);
+                    if (nfMatch) {
+                        const numNF = nfMatch[1].replace(/^0+/, ''); // "00001126" → "1126"
+                        lancMatch = nfToLanc.get(numNF);
+                        console.log(`[LP EnviarNF PDF] ${shortName} → NF extraída: ${numNF} | Match no mapa NF: ${lancMatch ? '✅ ' + (lancMatch.nomeContaAzulMatch || lancMatch.razaoSocialMatch) : '❌ NÃO'}`);
+                    } else {
+                        console.log(`[LP EnviarNF PDF] ${shortName} → Não conseguiu extrair número NF do nome`);
                     }
                 }
 
-                // Cruza com lançamento
-                const lanc = cnpjFile ? cnpjToLanc.get(cnpjFile) : undefined;
-                console.log(`[LP EnviarNF] ${shortName} → CNPJ final: "${cnpjFile}" | Cruzamento: ${lanc ? '✅ MATCH → ' + (lanc.nomeContaAzulMatch || lanc.razaoSocialMatch) : '❌ SEM MATCH'}`);
-                if (!lanc) {
+                // Resultado final do cruzamento
+                if (!lancMatch && cnpjFile) {
+                    lancMatch = cnpjToLanc.get(cnpjFile);
+                }
+
+                console.log(`[LP EnviarNF] ${shortName} → Resultado final: ${lancMatch ? '✅ MATCH → ' + (lancMatch.nomeContaAzulMatch || lancMatch.razaoSocialMatch) : '❌ SEM MATCH (CNPJ=' + cnpjFile + ')'}`);
+
+                if (!lancMatch) {
+                    const motivo = ext === 'pdf'
+                        ? `NF não encontrada nos lançamentos (verifique se o número da NF foi preenchido)`
+                        : `CNPJ ${cnpjFile || 'não identificado'} não encontrado nos lançamentos`;
                     setNfUploadLogs(prev => prev.map((l, idx) => idx === i
-                        ? { ...l, status: 'erro', msg: `CNPJ ${cnpjFile || 'não identificado'} não encontrado nos lançamentos` }
+                        ? { ...l, status: 'erro', msg: motivo }
                         : l
                     ));
                     continue;
                 }
 
-                const nomeCliente = lanc.nomeContaAzulMatch || lanc.razaoSocialMatch || lanc.lojaNomeSugerido || "Indefinido";
-                const dataCompetencia = lanc.periodo_servico?.slice(0, 7) || new Date().toISOString().slice(0, 7);
+                const nomeCliente = lancMatch.nomeContaAzulMatch || lancMatch.razaoSocialMatch || lancMatch.lojaNomeSugerido || "Indefinido";
+                const dataCompetencia = lancMatch.periodo_servico?.slice(0, 7) || new Date().toISOString().slice(0, 7);
                 const mimeType = ext === 'xml' ? 'application/xml' : 'application/pdf';
 
                 setNfUploadLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: 'enviando', msg: `Enviando para ${nomeCliente}...` } : l));
