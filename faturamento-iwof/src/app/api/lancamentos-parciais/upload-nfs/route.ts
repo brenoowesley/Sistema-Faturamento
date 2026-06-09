@@ -12,17 +12,16 @@ const auth = new google.auth.GoogleAuth({
 
 const drive = google.drive({ version: 'v3', auth });
 
-// ID da Unidade Compartilhada (Shared Drive) — opcional
-const SHARED_DRIVE_ID = process.env.GOOGLE_DRIVE_SHARED_DRIVE_ID;
-
-// Extração do ID da Pasta Raiz (Oficial iWof)
+// Raiz dos Lançamentos Parciais (ID correto: 1JE_...)
 const getRootFolderId = () => {
-    return process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID_PARCIAIS || '1vBylgUjKl1LC8-Ttf8rrL5CdEJYpi9AT';
+    const id = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID_PARCIAIS || '1JE_1P8vP3JhtBcildWFEoKay3sMXV7YL';
+    console.log(`[LP upload-nfs] Root folder ID: ${id} (env: ${process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID_PARCIAIS ? 'SET' : 'FALLBACK'})`);
+    return id;
 };
 
 async function findOrCreateFolder(folderName: string, parentFolderId: string): Promise<string> {
     try {
-        const safeFolderName = folderName.replace(/'/g, "\\'");
+        const safeFolderName = (folderName || 'Indefinido').replace(/'/g, "\\'");
         const qExact = `name='${safeFolderName}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`;
 
         const resExact = await drive.files.list({
@@ -35,6 +34,7 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string): P
         });
 
         if (resExact.data.files && resExact.data.files.length > 0 && resExact.data.files[0].id) {
+            console.log(`[LP upload-nfs] Pasta encontrada: "${folderName}" → ${resExact.data.files[0].id}`);
             return resExact.data.files[0].id;
         }
 
@@ -49,9 +49,10 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string): P
             supportsAllDrives: true
         });
 
+        console.log(`[LP upload-nfs] Pasta criada: "${folderName}" → ${createRes.data.id}`);
         return createRes.data.id!;
     } catch (error) {
-        console.error('[Drive Error] findOrCreateFolder:', folderName, error);
+        console.error(`[LP upload-nfs] Erro findOrCreateFolder("${folderName}", "${parentFolderId}"):`, error);
         throw error;
     }
 }
@@ -59,6 +60,8 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string): P
 export async function POST(request: Request) {
     try {
         const { fileBase64, fileName, nomeCliente, dataCompetencia, nomePasta } = await request.json();
+
+        console.log(`[LP upload-nfs] Recebido: fileName=${fileName}, nomeCliente=${nomeCliente}, nomePasta=${nomePasta}, dataCompetencia=${dataCompetencia}`);
 
         if (!fileBase64 || !fileName || !nomeCliente) {
             return NextResponse.json({ success: false, error: "Missing required fields." }, { status: 400 });
@@ -71,6 +74,8 @@ export async function POST(request: Request) {
         const comp = dataCompetencia || new Date().toISOString().slice(0, 7); // YYYY-MM
         const [ano, mes] = comp.split('-');
         const pastaFinal = nomePasta || 'Lancamentos_Parciais';
+
+        console.log(`[LP upload-nfs] Caminho: ${ano}/${mes}/${nomeCliente}/${pastaFinal}/${fileName}`);
 
         const anoFolderId = await findOrCreateFolder(ano, rootFolderId);
         const mesFolderId = await findOrCreateFolder(mes, anoFolderId);
@@ -95,14 +100,18 @@ export async function POST(request: Request) {
             supportsAllDrives: true
         });
 
+        const path = `${ano}/${mes}/${nomeCliente}/${pastaFinal}/${fileName}`;
+        console.log(`[LP upload-nfs] ✅ Upload concluído: ${path} → driveId=${driveRes.data.id}`);
+
         return NextResponse.json({ 
             success: true, 
             id: driveRes.data.id,
-            link: driveRes.data.webViewLink 
+            link: driveRes.data.webViewLink,
+            path
         });
 
     } catch (error: any) {
-        console.error("Erro no API /api/lancamentos-parciais/upload-nfs:", error);
+        console.error("[LP upload-nfs] ❌ Erro:", error?.message || error);
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 }
