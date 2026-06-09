@@ -46,6 +46,17 @@ function WizardContent() {
         compAtual: string;
     } | null>(null);
 
+    // Limpa o queirozConfig automaticamente quando o período deixa de ser multi-mês
+    useEffect(() => {
+        if (!periodoInicio || !periodoFim) return;
+        const d1 = new Date(periodoInicio + "T12:00:00");
+        const d2 = new Date(periodoFim + "T12:00:00");
+        const isCrossMonth = d1.getMonth() !== d2.getMonth() || d1.getFullYear() !== d2.getFullYear();
+        if (!isCrossMonth && queirozConfig) {
+            setQueirozConfig(null);
+        }
+    }, [periodoInicio, periodoFim]);
+
     /* --- Results state --- */
     const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
     const [conciliation, setConciliation] = useState<ConciliationResult>({ naoCadastrados: [], ausentesNoLote: [] });
@@ -589,8 +600,8 @@ function WizardContent() {
             // 2. Barreira de Proteção: Identifica o Queiroz pelo NOME DA LOJA (string)
             const isLinhaQueiroz = nomeLojaAtribuida.toUpperCase().includes('QUEIROZ');
 
-            // BYPASS DE CLOSURE: Se o usuário preencheu o painel (queirozConfig existe) e a loja é Queiroz, aplicamos.
-            if (queirozConfig?.splitDate && isLinhaQueiroz && a.inicio) {
+            // Aplica o split Queiroz APENAS quando: o período é multi-mês E o queirozConfig foi preenchido E a loja é Queiroz.
+            if (isCrossMonth && queirozConfig?.splitDate && isLinhaQueiroz && a.inicio) {
 
                 // Extração Cega de Data Local (Sem fuso horário UTC)
                 const dt = new Date(a.inicio);

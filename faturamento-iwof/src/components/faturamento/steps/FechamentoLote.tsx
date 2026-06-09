@@ -924,6 +924,30 @@ export default function FechamentoLote({
                 // Captura mesFolderId do primeiro chunk para reutilizar nos seguintes
                 const resData = await res.json();
                 if (!mesFolderId && resData.mesFolderId) mesFolderId = resData.mesFolderId;
+
+                // ── CORREÇÃO CRÍTICA: persiste o numero_nf no banco após upload ──
+                // Sem isso, o campo fica null em faturamento_consolidados e o GCP
+                // emite NCs e faturas com "A Gerar" no lugar do número real da NF.
+                const nfsComNumero = chunk.filter(r => r.numeroNF);
+                if (nfsComNumero.length > 0) {
+                    await Promise.all(
+                        nfsComNumero.map(r => {
+                            const consolidadoId = dbConsolidados[r.id] || r.consolidadoId;
+                            if (!consolidadoId) return Promise.resolve();
+                            return supabase
+                                .from("faturamento_consolidados")
+                                .update({ numero_nf: String(r.numeroNF) })
+                                .eq("id", consolidadoId)
+                                .then(({ error }) => {
+                                    if (error) {
+                                        console.error(`[NF Update] Erro ao salvar numero_nf ${r.numeroNF} para consolidado ${consolidadoId}:`, error);
+                                    } else {
+                                        console.log(`[NF Update] numero_nf ${r.numeroNF} salvo com sucesso para consolidado ${consolidadoId}`);
+                                    }
+                                });
+                        })
+                    );
+                }
             }
 
             setActionState(p => ({ ...p, nfsSuccess: true }));

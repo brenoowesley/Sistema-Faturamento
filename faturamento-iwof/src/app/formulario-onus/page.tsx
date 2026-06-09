@@ -364,15 +364,25 @@ export default function FormularioOnusPage() {
       </FieldGroup>
 
       <FieldGroup label="Nome Conta Azul" required error={formErrors.nome_loja}>
-        <div style={styles.inputWrap}>
+        <div style={{
+          ...styles.inputWrap,
+          opacity: cnpjStatus === "not-found" ? 1 : 0.55,
+          cursor: cnpjStatus === "not-found" ? "text" : "not-allowed",
+        }}>
           <span style={styles.inputIcon}><Building2 size={18} /></span>
           <input
-            style={styles.input}
+            style={{ ...styles.input, cursor: cnpjStatus === "not-found" ? "text" : "not-allowed" }}
             placeholder="Preenchido automaticamente pelo CNPJ"
             value={formData.nome_loja}
+            readOnly={cnpjStatus !== "not-found"}
             onChange={(e) => updateField("nome_loja", e.target.value)}
           />
         </div>
+        {cnpjStatus !== "not-found" && (
+          <p style={{ fontSize: 11, color: "var(--fg-dim, #64748b)", margin: "4px 0 0" }}>
+            Preenchido automaticamente após consulta do CNPJ
+          </p>
+        )}
       </FieldGroup>
     </>
   );
@@ -526,33 +536,27 @@ export default function FormularioOnusPage() {
 
         <div style={styles.desktopBody}>
           <form onSubmit={handleSubmit} noValidate>
-            {/* Two-column grid */}
+            {/* Single-column layout */}
             <div style={styles.desktopGrid}>
-              {/* Left column */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-                <SectionCard icon={<Building2 size={18} />} title="Identificação da Loja" accent="#6366f1">
-                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                    {fieldLoja}
-                  </div>
-                </SectionCard>
+              <SectionCard icon={<Building2 size={18} />} title="Identificação da Loja" accent="#6366f1">
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {fieldLoja}
+                </div>
+              </SectionCard>
 
-                <SectionCard icon={<Paperclip size={18} />} title="Anexo" accent="#8b5cf6">
-                  {fieldAnexo}
-                </SectionCard>
-              </div>
+              <SectionCard icon={<User size={18} />} title="Dados do Ônus" accent="#06b6d4">
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {fieldOnus}
+                </div>
+              </SectionCard>
 
-              {/* Right column */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-                <SectionCard icon={<User size={18} />} title="Dados do Ônus" accent="#06b6d4">
-                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                    {fieldOnus}
-                  </div>
-                </SectionCard>
+              <SectionCard icon={<Paperclip size={18} />} title="Anexo" accent="#8b5cf6">
+                {fieldAnexo}
+              </SectionCard>
 
-                <SectionCard icon={<Mail size={18} />} title="Contato" accent="#10b981">
-                  {fieldContato}
-                </SectionCard>
-              </div>
+              <SectionCard icon={<Mail size={18} />} title="Contato" accent="#10b981">
+                {fieldContato}
+              </SectionCard>
             </div>
 
             {/* Submit */}
@@ -821,8 +825,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   // Desktop
-  desktopBody: { maxWidth: 1100, margin: "0 auto", padding: "40px 32px 60px" },
-  desktopGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 },
+  desktopBody: { maxWidth: 720, margin: "0 auto", padding: "40px 32px 60px" },
+  desktopGrid: { display: "flex", flexDirection: "column", gap: 24 },
   sectionCard: {
     background: "var(--bg-card, #1e293b)",
     border: "1px solid var(--border, #334155)",
