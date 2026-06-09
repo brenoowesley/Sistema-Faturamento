@@ -1084,24 +1084,72 @@ export default function CentralLancamentos() {
 
                 setNfUploadLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: 'enviando', msg: 'Identificando CNPJ...' } : l));
 
-                // Tenta extrair CNPJ do nome do arquivo: {cnpj}-...
                 let cnpjFile = "";
-                const nameMatch = shortName.match(/^(\d{14})/);  // 48999300000152-...
-                if (nameMatch) cnpjFile = normCnpj(nameMatch[1]);
 
-                // Fallback: parse XML para pegar CNPJ do tomador
-                if (!cnpjFile && ext === 'xml') {
+                if (ext === 'xml') {
+                    // Parse XML para pegar CNPJ do TOMADOR (não do prestador)
                     try {
                         const xmlText = await contents.files[fname].async("text");
-                        const cnpjMatch = xmlText.match(/<(?:[a-zA-Z0-9_]+:)?CNPJ>(\d+)<\/(?:[a-zA-Z0-9_]+:)?CNPJ>/g);
-                        // Pega o segundo CNPJ (geralmente o tomador, o primeiro é o prestador)
-                        if (cnpjMatch && cnpjMatch.length >= 2) {
-                            const digits = cnpjMatch[1].replace(/<[^>]+>/g, "");
-                            cnpjFile = normCnpj(digits);
-                        } else if (cnpjMatch && cnpjMatch.length === 1) {
-                            cnpjFile = normCnpj(cnpjMatch[0].replace(/<[^>]+>/g, ""));
+                        // Remove prefixos de namespace para simplificar busca
+                        const cleanXml = xmlText.replace(/<([a-zA-Z0-9_]+:)/g, "<").replace(/<\/([a-zA-Z0-9_]+:)/g, "</");
+                        const xmlParser = new XMLParser({ ignoreAttributes: false, parseTagValue: false, removeNSPrefix: true });
+                        const jsonObj = xmlParser.parse(cleanXml);
+
+                        // Busca recursiva por tag
+                        const findTag = (obj: any, tag: string): any => {
+                            if (!obj || typeof obj !== "object") return undefined;
+                            for (const k in obj) {
+                                const cleanK = (k.split(':').pop() || k).toLowerCase();
+                                if (cleanK === tag.toLowerCase()) return obj[k];
+                            }
+                            for (const k in obj) {
+                                const res = findTag(obj[k], tag);
+                                if (res !== undefined) return res;
+                            }
+                            return undefined;
+                        };
+
+                        // Busca o bloco do tomador (toma / TomadorServico / Tomador)
+                        const tomador = findTag(jsonObj, "toma") || findTag(jsonObj, "TomadorServico") || findTag(jsonObj, "Tomador");
+                        const cnpjTomador = tomador ? (findTag(tomador, "Cnpj") ?? findTag(tomador, "CNPJ") ?? findTag(tomador, "Cpf")) : undefined;
+
+                        if (cnpjTomador) {
+                            cnpjFile = normCnpj(cnpjTomador);
+                            console.log(`[LP EnviarNF XML] ${shortName} → CNPJ tomador: ${cnpjFile}`);
+                        } else {
+                            // Fallback: pega todos os CNPJs, exclui o do prestador (emit/prest)
+                            const prestador = findTag(jsonObj, "prest") || findTag(jsonObj, "emit") || findTag(jsonObj, "PrestadorServico");
+                            const cnpjPrest = prestador ? normCnpj(findTag(prestador, "Cnpj") ?? findTag(prestador, "CNPJ") ?? "") : "";
+
+                            // Regex para achar todos os CNPJs no XML cru
+                            const allCnpjs = cleanXml.match(/<CNPJ>(\d+)<\/CNPJ>/gi);
+                            if (allCnpjs) {
+                                for (const tag of allCnpjs) {
+                                    const digits = tag.replace(/<\/?CNPJ>/gi, "");
+                                    const norm = normCnpj(digits);
+                                    if (norm !== cnpjPrest) {
+                                        cnpjFile = norm;
+                                        console.log(`[LP EnviarNF XML] ${shortName} → CNPJ fallback (excluindo prestador): ${cnpjFile}`);
+                                        break;
+                                    }
+                                }
+                            }
                         }
-                    } catch { /* ignora */ }
+                    } catch (xmlErr) {
+                        console.warn(`[LP EnviarNF] Erro parsing XML ${shortName}:`, xmlErr);
+                    }
+                }
+
+                // Fallback para PDF: tenta extrair CNPJ do nome do arquivo
+                // Mas no padrão SPED o nome do arquivo começa com o CNPJ do PRESTADOR,
+                // então só usamos se não tiver XML com tomador identificado
+                if (!cnpjFile && ext === 'pdf') {
+                    const nameMatch = shortName.match(/^(\d{14})/);
+                    if (nameMatch) {
+                        // Nome do arquivo = CNPJ do prestador, não do tomador
+                        // Não podemos usar isso para cruzar. Log de aviso.
+                        console.log(`[LP EnviarNF PDF] ${shortName} → CNPJ no nome é do prestador, não do tomador. Necessário OCR.`);
+                    }
                 }
 
                 // Cruza com lançamento
