@@ -1064,6 +1064,12 @@ export default function CentralLancamentos() {
             if (l.cnpj) cnpjToLanc.set(normCnpj(l.cnpj), l);
         }
 
+        // DEBUG: mostra todos os CNPJs no mapa
+        console.log(`[LP EnviarNF] ═══ MAPA DE CNPJ DOS LANÇAMENTOS (${cnpjToLanc.size} entradas) ═══`);
+        cnpjToLanc.forEach((lanc, cnpj) => {
+            console.log(`  ${cnpj} → ${lanc.nomeContaAzulMatch || lanc.razaoSocialMatch || lanc.lojaNomeSugerido || '?'} (raw: "${lanc.cnpj}")`);
+        });
+
         try {
             const zip = new JSZip();
             const contents = await zip.loadAsync(file);
@@ -1109,20 +1115,37 @@ export default function CentralLancamentos() {
                             return undefined;
                         };
 
+                        // DEBUG: mostra as top-level keys do JSON parseado
+                        console.log(`[LP EnviarNF XML] ─── ${shortName} ───`);
+                        console.log(`[LP EnviarNF XML] Top-level keys:`, Object.keys(jsonObj));
+
                         // Busca o bloco do tomador (toma / TomadorServico / Tomador)
                         const tomador = findTag(jsonObj, "toma") || findTag(jsonObj, "TomadorServico") || findTag(jsonObj, "Tomador");
+                        console.log(`[LP EnviarNF XML] Bloco tomador encontrado:`, tomador ? JSON.stringify(tomador).slice(0, 300) : 'NÃO ENCONTRADO');
+
+                        // DEBUG: mostra também emit/prest
+                        const prestDebug = findTag(jsonObj, "prest") || findTag(jsonObj, "emit");
+                        if (prestDebug) {
+                            const cnpjPrestDebug = findTag(prestDebug, "Cnpj") ?? findTag(prestDebug, "CNPJ");
+                            console.log(`[LP EnviarNF XML] CNPJ prestador (prest/emit): ${cnpjPrestDebug}`);
+                        }
+
                         const cnpjTomador = tomador ? (findTag(tomador, "Cnpj") ?? findTag(tomador, "CNPJ") ?? findTag(tomador, "Cpf")) : undefined;
+                        console.log(`[LP EnviarNF XML] CNPJ tomador raw: "${cnpjTomador}" → normalizado: "${cnpjTomador ? normCnpj(cnpjTomador) : 'N/A'}"`);
 
                         if (cnpjTomador) {
                             cnpjFile = normCnpj(cnpjTomador);
-                            console.log(`[LP EnviarNF XML] ${shortName} → CNPJ tomador: ${cnpjFile}`);
+                            const match = cnpjToLanc.has(cnpjFile);
+                            console.log(`[LP EnviarNF XML] ${shortName} → CNPJ tomador: ${cnpjFile} | Match no mapa: ${match ? '✅ SIM' : '❌ NÃO'}`);
                         } else {
                             // Fallback: pega todos os CNPJs, exclui o do prestador (emit/prest)
                             const prestador = findTag(jsonObj, "prest") || findTag(jsonObj, "emit") || findTag(jsonObj, "PrestadorServico");
                             const cnpjPrest = prestador ? normCnpj(findTag(prestador, "Cnpj") ?? findTag(prestador, "CNPJ") ?? "") : "";
+                            console.log(`[LP EnviarNF XML] Tomador não encontrado. Usando fallback. CNPJ prestador a excluir: ${cnpjPrest}`);
 
                             // Regex para achar todos os CNPJs no XML cru
                             const allCnpjs = cleanXml.match(/<CNPJ>(\d+)<\/CNPJ>/gi);
+                            console.log(`[LP EnviarNF XML] Todos os CNPJs no XML:`, allCnpjs?.map(t => t.replace(/<\/?CNPJ>/gi, "")));
                             if (allCnpjs) {
                                 for (const tag of allCnpjs) {
                                     const digits = tag.replace(/<\/?CNPJ>/gi, "");
@@ -1154,6 +1177,7 @@ export default function CentralLancamentos() {
 
                 // Cruza com lançamento
                 const lanc = cnpjFile ? cnpjToLanc.get(cnpjFile) : undefined;
+                console.log(`[LP EnviarNF] ${shortName} → CNPJ final: "${cnpjFile}" | Cruzamento: ${lanc ? '✅ MATCH → ' + (lanc.nomeContaAzulMatch || lanc.razaoSocialMatch) : '❌ SEM MATCH'}`);
                 if (!lanc) {
                     setNfUploadLogs(prev => prev.map((l, idx) => idx === i
                         ? { ...l, status: 'erro', msg: `CNPJ ${cnpjFile || 'não identificado'} não encontrado nos lançamentos` }
