@@ -70,7 +70,7 @@ export async function POST(request: Request) {
         // Root / Ano / Mês / Empresa / nome_pasta_ciclo / arquivo
         const comp = dataCompetencia || new Date().toISOString().slice(0, 7); // YYYY-MM
         const [ano, mes] = comp.split('-');
-        const pastaFinal = nomePasta || 'Lançamentos_Parciais';
+        const pastaFinal = nomePasta || 'Lancamentos_Parciais';
 
         const anoFolderId = await findOrCreateFolder(ano, rootFolderId);
         const mesFolderId = await findOrCreateFolder(mes, anoFolderId);

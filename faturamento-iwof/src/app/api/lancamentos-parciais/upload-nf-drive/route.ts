@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
-import { Readable } from 'stream';
 
 /* ================================================================
    /api/lancamentos-parciais/upload-nf-drive
@@ -10,12 +9,12 @@ import { Readable } from 'stream';
      [Root] → [Ano] → [Mês] → [NomeCliente] → [nomePasta] → arquivo
 
    Body (JSON):
-     fileBase64    — conteúdo em base64
-     fileName      — nome do arquivo (ex: "NF_1234.pdf")
-     nomeCliente   — nome da pasta do cliente
+     fileBase64      — conteúdo em base64
+     fileName        — nome do arquivo (ex: "NF_1234.pdf")
+     nomeCliente     — nome da pasta do cliente
      dataCompetencia — "YYYY-MM" (opcional, usa data atual se omitido)
-     mimeType      — tipo MIME (default: application/pdf)
-     nomePasta     — nome da subpasta ciclo (ex: "Notas_Credito", default: "Lançamentos_Parciais")
+     mimeType        — tipo MIME (default: application/pdf)
+     nomePasta       — nome da subpasta ciclo (ex: "Notas_Credito", default: "Lancamentos_Parciais")
    ================================================================ */
 
 const auth = new google.auth.GoogleAuth({
@@ -32,38 +31,48 @@ const getRootFolderId = () =>
     process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID_PARCIAIS || '1JE_1P8vP3JhtBcildWFEoKay3sMXV7YL';
 
 async function findOrCreateFolder(folderName: string, parentFolderId: string): Promise<string> {
-    const safeName = folderName.replace(/'/g, "\\'");
-    const q = `name='${safeName}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`;
+    try {
+        const safeFolderName = (folderName || 'Indefinido').replace(/'/g, "\\'");
+        const q = `name='${safeFolderName}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`;
 
-    const res = await drive.files.list({
-        q,
-        fields: 'files(id)',
-        spaces: 'drive',
-        pageSize: 1,
-        supportsAllDrives: true,
-        includeItemsFromAllDrives: true,
-    });
+        const res = await drive.files.list({
+            q,
+            fields: 'files(id)',
+            spaces: 'drive',
+            pageSize: 1,
+            supportsAllDrives: true,
+            includeItemsFromAllDrives: true,
+        });
 
-    if (res.data.files && res.data.files.length > 0 && res.data.files[0].id) {
-        return res.data.files[0].id;
+        if (res.data.files && res.data.files.length > 0 && res.data.files[0].id) {
+            console.log(`[LP upload-nf-drive] Pasta encontrada: "${folderName}" → ${res.data.files[0].id}`);
+            return res.data.files[0].id;
+        }
+
+        const created = await drive.files.create({
+            requestBody: {
+                name: folderName,
+                mimeType: 'application/vnd.google-apps.folder',
+                parents: [parentFolderId],
+            },
+            fields: 'id',
+            supportsAllDrives: true,
+        });
+
+        console.log(`[LP upload-nf-drive] Pasta criada: "${folderName}" → ${created.data.id}`);
+        return created.data.id!;
+    } catch (error) {
+        console.error(`[LP upload-nf-drive] Erro findOrCreateFolder("${folderName}", "${parentFolderId}"):`, error);
+        throw error;
     }
-
-    const created = await drive.files.create({
-        requestBody: {
-            name: folderName,
-            mimeType: 'application/vnd.google-apps.folder',
-            parents: [parentFolderId],
-        },
-        fields: 'id',
-        supportsAllDrives: true,
-    });
-
-    return created.data.id!;
 }
 
 export async function POST(request: Request) {
     try {
-        const { fileBase64, fileName, nomeCliente, dataCompetencia, mimeType, nomePasta } = await request.json();
+        const body = await request.json();
+        const { fileBase64, fileName, nomeCliente, dataCompetencia, mimeType, nomePasta } = body;
+
+        console.log(`[LP upload-nf-drive] Recebido: fileName=${fileName}, nomeCliente=${nomeCliente}, nomePasta=${nomePasta}, dataCompetencia=${dataCompetencia}`);
 
         if (!fileBase64 || !fileName || !nomeCliente) {
             return NextResponse.json(
@@ -73,9 +82,11 @@ export async function POST(request: Request) {
         }
 
         const rootFolderId = getRootFolderId();
+        console.log(`[LP upload-nf-drive] Root folder: ${rootFolderId}`);
+
         const comp = dataCompetencia || new Date().toISOString().slice(0, 7); // YYYY-MM
         const [ano, mes] = comp.split('-');
-        const pastaFinal = nomePasta || 'Lançamentos_Parciais';
+        const pastaFinal = nomePasta || 'Lancamentos_Parciais';
 
         // Hierarquia idêntica ao faturamento principal:
         // Root / Ano / Mês / Empresa / nome_pasta_ciclo / arquivo
@@ -87,6 +98,7 @@ export async function POST(request: Request) {
         const buffer = Buffer.from(fileBase64, 'base64');
         const fileMimeType = mimeType || 'application/pdf';
 
+        const { Readable } = require('stream');
         const driveRes = await drive.files.create({
             requestBody: {
                 name: fileName,
@@ -100,15 +112,21 @@ export async function POST(request: Request) {
             supportsAllDrives: true,
         });
 
+        const path = `${ano}/${mes}/${nomeCliente}/${pastaFinal}/${fileName}`;
+        console.log(`[LP upload-nf-drive] ✅ Upload concluído: ${path} → driveId=${driveRes.data.id}`);
+
         return NextResponse.json({
             success: true,
             id: driveRes.data.id,
             link: driveRes.data.webViewLink,
-            path: `${ano}/${mes}/${nomeCliente}/${pastaFinal}/${fileName}`,
+            path,
         });
 
     } catch (error: any) {
-        console.error('[LP] Erro no upload-nf-drive:', error);
-        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+        console.error('[LP upload-nf-drive] ❌ Erro:', error?.message || error);
+        return NextResponse.json(
+            { success: false, error: error?.message || 'Erro interno no upload ao Drive' },
+            { status: 500 }
+        );
     }
 }

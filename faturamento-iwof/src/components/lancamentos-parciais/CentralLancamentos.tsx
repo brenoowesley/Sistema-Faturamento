@@ -1199,7 +1199,7 @@ export default function CentralLancamentos() {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             fileBase64, fileName: shortName, nomeCliente, dataCompetencia, mimeType,
-                            nomePasta: nomePastaGCP || 'Lançamentos_Parciais',
+                            nomePasta: nomePastaGCP || 'Lancamentos_Parciais',
                         }),
                     });
                     const json = await res.json();
@@ -1240,7 +1240,7 @@ export default function CentralLancamentos() {
                     fileBase64,
                     fileName,
                     nomeCliente: clienteNome,
-                    nomePasta: nomePastaGCP || 'Lançamentos_Parciais',
+                    nomePasta: nomePastaGCP || 'Lancamentos_Parciais',
                 })
             });
             return await res.json();
