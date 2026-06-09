@@ -6,8 +6,8 @@ import { Readable } from 'stream';
    /api/lancamentos-parciais/upload-nf-drive
    ================================================================
    Salva um arquivo (PDF ou XML) no Google Drive dentro da mesma
-   hierarquia dos lançamentos parciais:
-     [Root] → [Ano] → [Mês] → [NomeCliente] → arquivo
+   hierarquia do faturamento principal:
+     [Root] → [Ano] → [Mês] → [NomeCliente] → [nomePasta] → arquivo
 
    Body (JSON):
      fileBase64    — conteúdo em base64
@@ -15,6 +15,7 @@ import { Readable } from 'stream';
      nomeCliente   — nome da pasta do cliente
      dataCompetencia — "YYYY-MM" (opcional, usa data atual se omitido)
      mimeType      — tipo MIME (default: application/pdf)
+     nomePasta     — nome da subpasta ciclo (ex: "Notas_Credito", default: "Lançamentos_Parciais")
    ================================================================ */
 
 const auth = new google.auth.GoogleAuth({
@@ -62,7 +63,7 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string): P
 
 export async function POST(request: Request) {
     try {
-        const { fileBase64, fileName, nomeCliente, dataCompetencia, mimeType } = await request.json();
+        const { fileBase64, fileName, nomeCliente, dataCompetencia, mimeType, nomePasta } = await request.json();
 
         if (!fileBase64 || !fileName || !nomeCliente) {
             return NextResponse.json(
@@ -74,10 +75,14 @@ export async function POST(request: Request) {
         const rootFolderId = getRootFolderId();
         const comp = dataCompetencia || new Date().toISOString().slice(0, 7); // YYYY-MM
         const [ano, mes] = comp.split('-');
+        const pastaFinal = nomePasta || 'Lançamentos_Parciais';
 
+        // Hierarquia idêntica ao faturamento principal:
+        // Root / Ano / Mês / Empresa / nome_pasta_ciclo / arquivo
         const anoFolderId = await findOrCreateFolder(ano, rootFolderId);
         const mesFolderId = await findOrCreateFolder(mes, anoFolderId);
         const clienteFolderId = await findOrCreateFolder(nomeCliente, mesFolderId);
+        const cicloFolderId = await findOrCreateFolder(pastaFinal, clienteFolderId);
 
         const buffer = Buffer.from(fileBase64, 'base64');
         const fileMimeType = mimeType || 'application/pdf';
@@ -85,7 +90,7 @@ export async function POST(request: Request) {
         const driveRes = await drive.files.create({
             requestBody: {
                 name: fileName,
-                parents: [clienteFolderId],
+                parents: [cicloFolderId],
             },
             media: {
                 mimeType: fileMimeType,
@@ -99,7 +104,7 @@ export async function POST(request: Request) {
             success: true,
             id: driveRes.data.id,
             link: driveRes.data.webViewLink,
-            path: `${ano}/${mes}/${nomeCliente}/${fileName}`,
+            path: `${ano}/${mes}/${nomeCliente}/${pastaFinal}/${fileName}`,
         });
 
     } catch (error: any) {

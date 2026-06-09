@@ -58,7 +58,7 @@ async function findOrCreateFolder(folderName: string, parentFolderId: string): P
 
 export async function POST(request: Request) {
     try {
-        const { fileBase64, fileName, nomeCliente, dataCompetencia } = await request.json();
+        const { fileBase64, fileName, nomeCliente, dataCompetencia, nomePasta } = await request.json();
 
         if (!fileBase64 || !fileName || !nomeCliente) {
             return NextResponse.json({ success: false, error: "Missing required fields." }, { status: 400 });
@@ -66,21 +66,22 @@ export async function POST(request: Request) {
 
         const rootFolderId = getRootFolderId();
 
-        // Hierarquia: [Raiz] -> [Ano/Mês] -> [Cliente]
-        // Se dataCompetencia não vier, usa data atual
+        // Hierarquia idêntica ao faturamento principal:
+        // Root / Ano / Mês / Empresa / nome_pasta_ciclo / arquivo
         const comp = dataCompetencia || new Date().toISOString().slice(0, 7); // YYYY-MM
         const [ano, mes] = comp.split('-');
-        const periodLabel = `${ano}/${mes}`;
+        const pastaFinal = nomePasta || 'Lançamentos_Parciais';
 
         const anoFolderId = await findOrCreateFolder(ano, rootFolderId);
         const mesFolderId = await findOrCreateFolder(mes, anoFolderId);
         const clienteFolderId = await findOrCreateFolder(nomeCliente, mesFolderId);
+        const cicloFolderId = await findOrCreateFolder(pastaFinal, clienteFolderId);
 
         // Upload do arquivo
         const buffer = Buffer.from(fileBase64, 'base64');
         const fileMetadata = {
             name: fileName,
-            parents: [clienteFolderId]
+            parents: [cicloFolderId]
         };
         const media = {
             mimeType: 'application/pdf',

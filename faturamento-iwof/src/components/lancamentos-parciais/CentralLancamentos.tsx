@@ -1125,7 +1125,10 @@ export default function CentralLancamentos() {
                     const res = await fetch('/api/lancamentos-parciais/upload-nf-drive', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ fileBase64, fileName: shortName, nomeCliente, dataCompetencia, mimeType }),
+                        body: JSON.stringify({
+                            fileBase64, fileName: shortName, nomeCliente, dataCompetencia, mimeType,
+                            nomePasta: nomePastaGCP || 'Lançamentos_Parciais',
+                        }),
                     });
                     const json = await res.json();
                     if (json.success) {
@@ -1165,6 +1168,7 @@ export default function CentralLancamentos() {
                     fileBase64,
                     fileName,
                     nomeCliente: clienteNome,
+                    nomePasta: nomePastaGCP || 'Lançamentos_Parciais',
                 })
             });
             return await res.json();
