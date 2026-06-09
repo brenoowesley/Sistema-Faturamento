@@ -346,6 +346,11 @@ export default function CentralLancamentos() {
     const [nfseImportLog, setNfseImportLog] = useState<string | null>(null);
     const nfseInputRef = useRef<HTMLInputElement>(null);
 
+    // Área "Enviar NFs" — upload de NF ao Drive
+    const [enviandoNFs, setEnviandoNFs] = useState(false);
+    const [nfUploadLogs, setNfUploadLogs] = useState<{ nome: string; status: 'aguardando' | 'enviando' | 'ok' | 'erro'; msg: string }[]>([]);
+    const nfInputRef = useRef<HTMLInputElement>(null);
+
     const uniqueRazaoSociais = useMemo(() => {
         const names = availableClients.map(c => c.razao_social).filter(Boolean);
         return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
@@ -989,8 +994,6 @@ export default function CentralLancamentos() {
         }
 
         const items = Array.from(agrupado.values()).map(g => {
-            // Regra de Concatenação: {numeroNFGerada} - Nº do pedido: {pedido}
-            // Como pode haver vários pedidos por loja, vamos gerar uma descrição composta ou individual
             const descricoes = g.listaItens.map(item => {
                 const nf = item.numeroNFGerada || "A Gerar";
                 const ped = item.pedido || "S/N";
@@ -1012,7 +1015,14 @@ export default function CentralLancamentos() {
             const res = await fetch("/api/notas-credito/emitir", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ items, nomePasta: nomePastaGCP || "Notas_Credito" }),
+                body: JSON.stringify({
+                    items,
+                    nomePasta: nomePastaGCP || "Notas_Credito",
+                    // Passa o ID da pasta-raiz dos lançamentos parciais para o GCP
+                    // salvar as NCs na mesma estrutura Ano/Mês/Cliente que as NFS-e
+                    driveFolderId: process.env.NEXT_PUBLIC_DRIVE_ROOT_PARCIAIS
+                        || "1JE_1P8vP3JhtBcildWFEoKay3sMXV7YL",
+                }),
             });
             const json = await res.json();
             if (!res.ok) throw new Error(json.error);
@@ -1031,7 +1041,119 @@ export default function CentralLancamentos() {
         setXmlLoaded(false);
         setUploadLogs([]);
         setSearchTerm("");
+        setNfUploadLogs([]);
     };
+
+    /* ================================================================
+       STEP 5: ENVIAR NFs AO DRIVE
+       ================================================================
+       Processa ZIP contendo PDFs ou XMLs de NF.
+       Cruza pelo CNPJ extraido do nome do arquivo ou OCR/XML.
+       Salva em Drive: [Root] / [Ano] / [Mês] / [NomeCliente] / arquivo
+    ================================================================ */
+    const handleEnviarNFs = useCallback(async (file: File) => {
+        setEnviandoNFs(true);
+        setNfUploadLogs([]);
+
+        const normCnpj = (raw: unknown): string =>
+            String(raw ?? "").replace(/\D/g, "").padStart(14, "0").slice(-14);
+
+        // Constroi mapa CNPJ -> lancamento para cruzamento
+        const cnpjToLanc = new Map<string, LancamentoParcial>();
+        for (const l of lancamentos) {
+            if (l.cnpj) cnpjToLanc.set(normCnpj(l.cnpj), l);
+        }
+
+        try {
+            const zip = new JSZip();
+            const contents = await zip.loadAsync(file);
+            const allNames = Object.keys(contents.files).filter(n => !contents.files[n].dir);
+
+            // Inicializa logs
+            setNfUploadLogs(allNames.map(n => ({ nome: n.split("/").pop() || n, status: 'aguardando', msg: 'Na fila...' })));
+
+            for (let i = 0; i < allNames.length; i++) {
+                const fname = allNames[i];
+                const shortName = fname.split("/").pop() || fname;
+                const ext = shortName.toLowerCase().split('.').pop() || '';
+
+                if (!['pdf', 'xml'].includes(ext)) {
+                    setNfUploadLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: 'erro', msg: 'Tipo não suportado' } : l));
+                    continue;
+                }
+
+                setNfUploadLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: 'enviando', msg: 'Identificando CNPJ...' } : l));
+
+                // Tenta extrair CNPJ do nome do arquivo: {cnpj}-...
+                let cnpjFile = "";
+                const nameMatch = shortName.match(/^(\d{14})/);  // 48999300000152-...
+                if (nameMatch) cnpjFile = normCnpj(nameMatch[1]);
+
+                // Fallback: parse XML para pegar CNPJ do tomador
+                if (!cnpjFile && ext === 'xml') {
+                    try {
+                        const xmlText = await contents.files[fname].async("text");
+                        const cnpjMatch = xmlText.match(/<(?:[a-zA-Z0-9_]+:)?CNPJ>(\d+)<\/(?:[a-zA-Z0-9_]+:)?CNPJ>/g);
+                        // Pega o segundo CNPJ (geralmente o tomador, o primeiro é o prestador)
+                        if (cnpjMatch && cnpjMatch.length >= 2) {
+                            const digits = cnpjMatch[1].replace(/<[^>]+>/g, "");
+                            cnpjFile = normCnpj(digits);
+                        } else if (cnpjMatch && cnpjMatch.length === 1) {
+                            cnpjFile = normCnpj(cnpjMatch[0].replace(/<[^>]+>/g, ""));
+                        }
+                    } catch { /* ignora */ }
+                }
+
+                // Cruza com lançamento
+                const lanc = cnpjFile ? cnpjToLanc.get(cnpjFile) : undefined;
+                if (!lanc) {
+                    setNfUploadLogs(prev => prev.map((l, idx) => idx === i
+                        ? { ...l, status: 'erro', msg: `CNPJ ${cnpjFile || 'não identificado'} não encontrado nos lançamentos` }
+                        : l
+                    ));
+                    continue;
+                }
+
+                const nomeCliente = lanc.nomeContaAzulMatch || lanc.razaoSocialMatch || lanc.lojaNomeSugerido || "Indefinido";
+                const dataCompetencia = lanc.periodo_servico?.slice(0, 7) || new Date().toISOString().slice(0, 7);
+                const mimeType = ext === 'xml' ? 'application/xml' : 'application/pdf';
+
+                setNfUploadLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: 'enviando', msg: `Enviando para ${nomeCliente}...` } : l));
+
+                try {
+                    const fileBase64 = await contents.files[fname].async("base64");
+                    const res = await fetch('/api/lancamentos-parciais/upload-nf-drive', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ fileBase64, fileName: shortName, nomeCliente, dataCompetencia, mimeType }),
+                    });
+                    const json = await res.json();
+                    if (json.success) {
+                        setNfUploadLogs(prev => prev.map((l, idx) => idx === i
+                            ? { ...l, status: 'ok', msg: `✅ Salvo em ${json.path}` }
+                            : l
+                        ));
+                    } else {
+                        setNfUploadLogs(prev => prev.map((l, idx) => idx === i
+                            ? { ...l, status: 'erro', msg: `❌ ${json.error}` }
+                            : l
+                        ));
+                    }
+                } catch (uploadErr: any) {
+                    setNfUploadLogs(prev => prev.map((l, idx) => idx === i
+                        ? { ...l, status: 'erro', msg: `❌ Erro de rede: ${uploadErr.message}` }
+                        : l
+                    ));
+                }
+            }
+        } catch (err: any) {
+            console.error('[LP] Erro ao processar ZIP de NFs:', err);
+            alert(`Erro ao processar ZIP: ${err.message}`);
+        } finally {
+            setEnviandoNFs(false);
+            if (nfInputRef.current) nfInputRef.current.value = "";
+        }
+    }, [lancamentos]);
 
     const uploadToDrive = async (fileBase64: string, fileName: string, lanc: LancamentoParcial) => {
         try {
@@ -1781,6 +1903,100 @@ export default function CentralLancamentos() {
                 </>
             )
             }
+
+            {/* ── CARD: ENVIAR NFs AO DRIVE (step preview) ── */}
+            {step === "preview" && lancamentos.length > 0 && (
+                <div className="card" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    {/* Input oculto para ZIP de NFs */}
+                    <input
+                        ref={nfInputRef}
+                        type="file"
+                        accept=".zip,.pdf,.xml"
+                        style={{ display: "none" }}
+                        onChange={e => {
+                            const f = e.target.files?.[0];
+                            if (f) handleEnviarNFs(f);
+                        }}
+                    />
+
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+                        <div>
+                            <p style={{ fontWeight: 600, color: "#fff", margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                <FileText size={16} style={{ color: "var(--warning)" }} />
+                                Enviar NFs ao Drive
+                            </p>
+                            <p style={{ fontSize: 12, color: "var(--fg-muted)", margin: "4px 0 0" }}>
+                                Envie um ZIP com PDFs/XMLs de NF. Cada arquivo será alocado na pasta do cliente correspondente (por CNPJ).
+                            </p>
+                        </div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            {nfUploadLogs.length > 0 && (
+                                <button
+                                    className="btn btn-ghost"
+                                    onClick={() => setNfUploadLogs([])}
+                                    style={{ padding: "10px 16px", fontSize: 12 }}
+                                >
+                                    <X size={14} /> Limpar
+                                </button>
+                            )}
+                            <button
+                                className="btn btn-ghost"
+                                onClick={() => nfInputRef.current?.click()}
+                                disabled={enviandoNFs}
+                                style={{ padding: "12px 20px", fontSize: 13, borderColor: "rgba(245,158,11,0.4)" }}
+                            >
+                                {enviandoNFs
+                                    ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
+                                    : <Upload size={16} />}
+                                {enviandoNFs ? "Enviando..." : "Selecionar ZIP de NFs"}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Log de envio por arquivo */}
+                    {nfUploadLogs.length > 0 && (
+                        <div style={{
+                            borderRadius: 8, border: "1px solid var(--border)",
+                            background: "rgba(0,0,0,0.2)", overflow: "hidden",
+                        }}>
+                            <div style={{ maxHeight: 260, overflowY: "auto" }}>
+                                {nfUploadLogs.map((log, i) => (
+                                    <div key={i} style={{
+                                        display: "flex", alignItems: "center", gap: 10,
+                                        padding: "8px 14px",
+                                        borderBottom: i < nfUploadLogs.length - 1 ? "1px solid var(--border)" : "none",
+                                        background: log.status === 'ok' ? "rgba(34,197,94,0.04)"
+                                            : log.status === 'erro' ? "rgba(239,68,68,0.04)"
+                                            : log.status === 'enviando' ? "rgba(129,140,248,0.04)"
+                                            : "transparent",
+                                    }}>
+                                        {log.status === 'ok' && <CheckCircle2 size={13} style={{ color: "var(--success)", flexShrink: 0 }} />}
+                                        {log.status === 'erro' && <XCircle size={13} style={{ color: "var(--danger)", flexShrink: 0 }} />}
+                                        {log.status === 'enviando' && <Loader2 size={13} style={{ color: "var(--accent)", flexShrink: 0, animation: "spin 1s linear infinite" }} />}
+                                        {log.status === 'aguardando' && <AlertTriangle size={13} style={{ color: "var(--fg-dim)", flexShrink: 0 }} />}
+                                        <span style={{ fontSize: 11, fontFamily: "monospace", color: "var(--fg-dim)", flexShrink: 0, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={log.nome}>
+                                            {log.nome}
+                                        </span>
+                                        <span style={{
+                                            fontSize: 11, marginLeft: "auto",
+                                            color: log.status === 'ok' ? "var(--success)" : log.status === 'erro' ? "var(--danger)" : "var(--fg-muted)",
+                                        }}>
+                                            {log.msg}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                            {/* Resumo */}
+                            <div style={{ padding: "8px 14px", borderTop: "1px solid var(--border)", display: "flex", gap: 16, fontSize: 11, color: "var(--fg-dim)" }}>
+                                <span style={{ color: "var(--success)" }}>✅ {nfUploadLogs.filter(l => l.status === 'ok').length} enviados</span>
+                                <span style={{ color: "var(--danger)" }}>❌ {nfUploadLogs.filter(l => l.status === 'erro').length} erros</span>
+                                <span>{nfUploadLogs.filter(l => l.status === 'aguardando').length} na fila</span>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
 
             <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
         </div >

@@ -22,6 +22,9 @@ interface NotaCreditoPlanilhaPayload {
     descricaoServico: string;
 }
 
+/** ID da pasta-raiz no Drive para NCs de lançamentos parciais */
+const DRIVE_ROOT_PARCIAIS = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID_PARCIAIS || '1JE_1P8vP3JhtBcildWFEoKay3sMXV7YL';
+
 /** Formata número para string monetária brasileira: "1.572,30" */
 function formatarParaGCP_NC(valor: number): string {
     return Number(valor).toLocaleString("pt-BR", {
@@ -36,7 +39,12 @@ export async function POST(req: NextRequest) {
         const { items, nomePasta } = body as {
             items: NotaCreditoPlanilhaPayload[];
             nomePasta: string;
+            driveFolderId?: string;
         };
+
+        // ID da pasta Drive onde o GCP salva os PDFs das NCs
+        // Usa o mesmo root dos lançamentos parciais para manter hierarquia unificada
+        const driveFolderIdParaGCP = body.driveFolderId || DRIVE_ROOT_PARCIAIS;
 
         if (!items || !Array.isArray(items) || items.length === 0) {
             return NextResponse.json(
@@ -111,6 +119,8 @@ export async function POST(req: NextRequest) {
             nome_pasta_ciclo: nomePasta || "Notas_Credito",
             ciclo_mensal: cyclePeriod,
             data_faturamento: new Date().toLocaleDateString("pt-BR"),
+            // Passa o driveFolderId para o GCP salvar na estrutura Ano/Mês/Cliente correta
+            driveFolderId: driveFolderIdParaGCP,
             lojas: payloadsNC,
         };
 
