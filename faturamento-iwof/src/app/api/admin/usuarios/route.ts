@@ -124,6 +124,39 @@ export async function PATCH(req: NextRequest) {
             return NextResponse.json({ success: true });
         }
 
+        if (type === "update_user") {
+            const { nome, cargo, email: newEmail, password } = body;
+
+            // 1. Atualiza auth (email e/ou password) via Supabase Admin
+            const authUpdates: Record<string, any> = {};
+            if (newEmail) authUpdates.email = newEmail;
+            if (password) authUpdates.password = password;
+
+            if (Object.keys(authUpdates).length > 0) {
+                const { error: authUpdateError } = await adminClient.auth.admin.updateUserById(
+                    id,
+                    authUpdates
+                );
+                if (authUpdateError) throw authUpdateError;
+            }
+
+            // 2. Atualiza perfil (nome e/ou cargo) na tabela usuarios_perfis
+            const perfilUpdates: Record<string, any> = {};
+            if (nome !== undefined) perfilUpdates.nome = nome;
+            if (cargo) perfilUpdates.cargo = cargo;
+            if (newEmail) perfilUpdates.email = newEmail;
+
+            if (Object.keys(perfilUpdates).length > 0) {
+                const { error: perfilUpdateError } = await adminClient
+                    .from("usuarios_perfis")
+                    .update(perfilUpdates)
+                    .eq("id", id);
+                if (perfilUpdateError) throw perfilUpdateError;
+            }
+
+            return NextResponse.json({ success: true, message: "Usuário atualizado com sucesso" });
+        }
+
         return NextResponse.json({ error: "Ação inválida" }, { status: 400 });
     } catch (err: any) {
         console.error("Erro na Admin API (PATCH):", err);

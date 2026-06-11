@@ -10,11 +10,13 @@ import {
     Mail,
     Trash2,
     Key,
-    MoreVertical,
+    Pencil,
     CheckCircle2,
     XCircle,
     Loader2,
-    Search
+    Search,
+    Eye,
+    EyeOff
 } from "lucide-react";
 import Modal from "@/components/Modal";
 
@@ -37,13 +39,21 @@ export default function UsuariosPage() {
     const [showAddModal, setShowAddModal] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [showRoleModal, setShowRoleModal] = useState(false);
+    const [showEditModal, setShowEditModal] = useState(false);
     const [selectedUser, setSelectedUser] = useState<UsuarioPerfil | null>(null);
 
-    // Form states
+    // Form states — Novo Usuário
     const [newUserName, setNewUserName] = useState("");
     const [newUserEmail, setNewUserEmail] = useState("");
     const [newUserPassword, setNewUserPassword] = useState("");
     const [newUserRole, setNewUserRole] = useState<"ADMIN" | "APROVADOR" | "USER" | "CX">("USER");
+
+    // Form states — Edição
+    const [editName, setEditName] = useState("");
+    const [editEmail, setEditEmail] = useState("");
+    const [editPassword, setEditPassword] = useState("");
+    const [editRole, setEditRole] = useState<"ADMIN" | "APROVADOR" | "USER" | "CX">("USER");
+    const [showEditPassword, setShowEditPassword] = useState(false);
 
     const fetchUsuarios = useCallback(async () => {
         setLoading(true);
@@ -144,6 +154,52 @@ export default function UsuariosPage() {
     const handleToggleRole = async (user: UsuarioPerfil) => {
         setSelectedUser(user);
         setShowRoleModal(true);
+    };
+
+    const openEditModal = (user: UsuarioPerfil) => {
+        setSelectedUser(user);
+        setEditName(user.nome || "");
+        setEditEmail(user.email);
+        setEditPassword("");
+        setEditRole(user.cargo);
+        setShowEditPassword(false);
+        setShowEditModal(true);
+    };
+
+    const handleEditUser = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!selectedUser) return;
+        setIsSaving(true);
+        try {
+            const payload: Record<string, any> = {
+                id: selectedUser.id,
+                type: "update_user",
+                nome: editName,
+                cargo: editRole,
+            };
+            // Só envia email se mudou
+            if (editEmail !== selectedUser.email) payload.email = editEmail;
+            // Só envia senha se preencheu
+            if (editPassword.trim()) payload.password = editPassword;
+
+            const res = await fetch("/api/admin/usuarios", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Erro ao atualizar usuário");
+
+            alert("Usuário atualizado com sucesso!");
+            setShowEditModal(false);
+            setSelectedUser(null);
+            fetchUsuarios();
+        } catch (err: any) {
+            alert(err.message);
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     const handleUpdateRole = async (newRole: string) => {
@@ -285,6 +341,13 @@ export default function UsuariosPage() {
                                         </td>
                                         <td className="p-4 text-right">
                                             <div className="flex items-center justify-end gap-2">
+                                                <button
+                                                    title="Editar usuário"
+                                                    onClick={() => openEditModal(user)}
+                                                    className="btn-icon"
+                                                >
+                                                    <Pencil className="icon-high-contrast" size={16} />
+                                                </button>
                                                 <button
                                                     title="Alterar cargo"
                                                     onClick={() => handleToggleRole(user)}
@@ -428,6 +491,103 @@ export default function UsuariosPage() {
                             </button>
                         </div>
                     </div>
+                </Modal>
+            )}
+
+            {/* Modal: Editar Usuário */}
+            {showEditModal && selectedUser && (
+                <Modal
+                    isOpen={true}
+                    title="Editar Usuário"
+                    onClose={() => { setShowEditModal(false); setSelectedUser(null); }}
+                >
+                    <form onSubmit={handleEditUser} className="space-y-4">
+                        {/* Info do usuário */}
+                        <div className="p-4 bg-white/5 rounded-xl border border-white/5 flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-500">
+                                <User size={24} />
+                            </div>
+                            <div>
+                                <p className="text-white font-bold text-sm">{selectedUser.nome || "Usuário"}</p>
+                                <p className="text-[10px] text-[var(--fg-dim)]">{selectedUser.email}</p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-[var(--fg-dim)] uppercase">Nome Completo</label>
+                            <input
+                                type="text"
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                                className="w-full bg-white/5 border border-[var(--border)] p-3 rounded-xl text-sm text-white"
+                                placeholder="Nome do usuário"
+                            />
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-[var(--fg-dim)] uppercase">E-mail</label>
+                            <input
+                                type="email"
+                                value={editEmail}
+                                onChange={(e) => setEditEmail(e.target.value)}
+                                className="w-full bg-white/5 border border-[var(--border)] p-3 rounded-xl text-sm text-white"
+                                placeholder="usuario@iwof.com.br"
+                            />
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-[var(--fg-dim)] uppercase">Nova Senha</label>
+                            <p className="text-[10px] text-[var(--fg-dim)] -mt-1">Deixe em branco para manter a senha atual.</p>
+                            <div className="relative">
+                                <input
+                                    type={showEditPassword ? "text" : "password"}
+                                    value={editPassword}
+                                    onChange={(e) => setEditPassword(e.target.value)}
+                                    className="w-full bg-white/5 border border-[var(--border)] p-3 rounded-xl text-sm text-white pr-12"
+                                    placeholder="••••••••"
+                                    minLength={6}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowEditPassword(!showEditPassword)}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--fg-dim)] hover:text-white transition-colors"
+                                >
+                                    {showEditPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-[var(--fg-dim)] uppercase">Cargo</label>
+                            <select
+                                value={editRole}
+                                onChange={(e) => setEditRole(e.target.value as any)}
+                                className="w-full bg-white/5 border border-[var(--border)] p-3 rounded-xl text-sm text-white"
+                            >
+                                <option value="USER">Usuário Comum (USER)</option>
+                                <option value="CX">Customer Experience (CX)</option>
+                                <option value="APROVADOR">Aprovador de Saques (APROVADOR)</option>
+                                <option value="ADMIN">Administrador (ADMIN)</option>
+                            </select>
+                        </div>
+
+                        <div className="pt-4 flex gap-3">
+                            <button
+                                type="button"
+                                onClick={() => { setShowEditModal(false); setSelectedUser(null); }}
+                                className="flex-1 px-4 py-3 rounded-xl bg-white/5 text-[var(--fg-dim)] font-bold text-sm"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="submit"
+                                disabled={isSaving}
+                                className="flex-1 btn-primary"
+                            >
+                                {isSaving ? <Loader2 className="animate-spin" size={18} /> : "Salvar Alterações"}
+                            </button>
+                        </div>
+                    </form>
                 </Modal>
             )}
 
