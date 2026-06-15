@@ -72,6 +72,7 @@ const ACCEPTED_EXTENSIONS = ".pdf,.png,.jpg,.jpeg";
 interface FormData {
   cnpj: string;
   nome_loja: string;
+  nome_solicitante: string;
   nome_usuario: string;
   data_agendamento: string;
   descricao: string;
@@ -82,6 +83,7 @@ interface FormData {
 interface FormErrors {
   cnpj?: string;
   nome_loja?: string;
+  nome_solicitante?: string;
   nome_usuario?: string;
   data_agendamento?: string;
   descricao?: string;
@@ -113,6 +115,7 @@ export default function FormularioOnusPage() {
   const [formData, setFormData] = useState<FormData>({
     cnpj: "",
     nome_loja: "",
+    nome_solicitante: "",
     nome_usuario: "",
     data_agendamento: "",
     descricao: "",
@@ -196,6 +199,7 @@ export default function FormularioOnusPage() {
     if (step === 0) {
       if (cnpjDigits(formData.cnpj).length < 14) errors.cnpj = "CNPJ inválido (14 dígitos).";
       if (!formData.nome_loja.trim()) errors.nome_loja = "Nome da loja é obrigatório.";
+      if (!formData.nome_solicitante.trim()) errors.nome_solicitante = "Nome do solicitante é obrigatório.";
     }
     if (step === 1) {
       if (!formData.nome_usuario.trim()) errors.nome_usuario = "Nome do usuário é obrigatório.";
@@ -215,6 +219,7 @@ export default function FormularioOnusPage() {
     const errors: FormErrors = {};
     if (cnpjDigits(formData.cnpj).length < 14) errors.cnpj = "CNPJ inválido (14 dígitos).";
     if (!formData.nome_loja.trim()) errors.nome_loja = "Nome da loja é obrigatório.";
+    if (!formData.nome_solicitante.trim()) errors.nome_solicitante = "Nome do solicitante é obrigatório.";
     if (!formData.nome_usuario.trim()) errors.nome_usuario = "Nome do usuário é obrigatório.";
     if (!formData.data_agendamento) errors.data_agendamento = "Data é obrigatória.";
     if (!formData.descricao.trim()) errors.descricao = "Descrição é obrigatória.";
@@ -240,6 +245,7 @@ export default function FormularioOnusPage() {
       const fd = new window.FormData();
       fd.append("cnpj_loja", cnpjDigits(formData.cnpj));
       fd.append("nome_loja", formData.nome_loja);
+      fd.append("nome_solicitante", formData.nome_solicitante);
       fd.append("nome_usuario", formData.nome_usuario);
       fd.append("data_agendamento", formData.data_agendamento);
       fd.append("descricao", formData.descricao);
@@ -383,6 +389,19 @@ export default function FormularioOnusPage() {
             Preenchido automaticamente após consulta do CNPJ
           </p>
         )}
+      </FieldGroup>
+
+      <FieldGroup label="Nome do Solicitante" required error={formErrors.nome_solicitante}>
+        <div style={styles.inputWrap}>
+          <span style={styles.inputIcon}><User size={18} /></span>
+          <input
+            style={styles.input}
+            placeholder="Digite o seu nome completo aqui"
+            autoComplete="name"
+            value={formData.nome_solicitante}
+            onChange={(e) => updateField("nome_solicitante", e.target.value)}
+          />
+        </div>
       </FieldGroup>
     </>
   );

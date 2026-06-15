@@ -21,6 +21,7 @@ const IWOF_LOGO_SVG = `<img src="https://i.imgur.com/ag93VEM.png" alt="iWof" sty
 const IWOF_LOGO_SVG_DARK = `<img src="https://i.imgur.com/MKGrpJX.png" alt="iWof" style="height:32px;width:auto;display:block;">`;
 
 function buildConfirmationEmail(data: {
+    nome_solicitante: string;
     nome_usuario: string;
     nome_loja: string;
     cnpj_loja: string;
@@ -72,16 +73,17 @@ function buildConfirmationEmail(data: {
       <!-- BODY -->
       <tr><td style="background:#ffffff;padding:32px;">
         <p style="color:#334155;font-size:15px;line-height:1.6;margin:0 0 20px;">
-          Olá <strong>${data.nome_usuario}</strong>, sua solicitação de ônus foi recebida com sucesso.
-          Você será notificado assim que ela for analisada.
+          Olá <strong>${data.nome_solicitante}</strong>, a solicitação de ônus foi recebida com sucesso.
+          Ela será notificada e analisada pela equipe financeira.
         </p>
 
         <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:20px;">
           <tr style="background:#f8fafc;"><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;width:40%;border-bottom:1px solid #e2e8f0;">Loja</td><td style="padding:12px 16px;font-size:14px;color:#1e293b;border-bottom:1px solid #e2e8f0;">${data.nome_loja}</td></tr>
           <tr><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">CNPJ</td><td style="padding:12px 16px;font-size:14px;color:#1e293b;font-family:monospace;border-bottom:1px solid #e2e8f0;">${data.cnpj_loja}</td></tr>
           <tr style="background:#f8fafc;"><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">Data Agendada</td><td style="padding:12px 16px;font-size:14px;color:#1e293b;border-bottom:1px solid #e2e8f0;">${data.data_agendamento}</td></tr>
-          <tr><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">Descrição</td><td style="padding:12px 16px;font-size:14px;color:#1e293b;border-bottom:1px solid #e2e8f0;">${data.descricao}</td></tr>
-          <tr style="background:#f8fafc;"><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">Valor</td><td style="padding:12px 16px;font-size:14px;color:#1e293b;font-weight:700;border-bottom:1px solid #e2e8f0;">${formatCurrency(data.valor)}</td></tr>
+          <tr><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">Usuário do Ônus</td><td style="padding:12px 16px;font-size:14px;color:#1e293b;border-bottom:1px solid #e2e8f0;">${data.nome_usuario}</td></tr>
+          <tr style="background:#f8fafc;"><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">Descrição</td><td style="padding:12px 16px;font-size:14px;color:#1e293b;border-bottom:1px solid #e2e8f0;">${data.descricao}</td></tr>
+          <tr><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;border-bottom:1px solid #e2e8f0;">Valor</td><td style="padding:12px 16px;font-size:14px;color:#1e293b;font-weight:700;border-bottom:1px solid #e2e8f0;">${formatCurrency(data.valor)}</td></tr>
           <tr><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;${data.canal_link || data.anexo_url ? "border-bottom:1px solid #e2e8f0;" : ""}">Canal</td><td style="padding:12px 16px;font-size:14px;color:#1e293b;${data.canal_link || data.anexo_url ? "border-bottom:1px solid #e2e8f0;" : ""}">${canalLabel[data.canal_recebimento] || data.canal_recebimento}</td></tr>
           ${data.canal_link ? `<tr style="background:#f8fafc;"><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;${data.anexo_url ? "border-bottom:1px solid #e2e8f0;" : ""}">Link do Canal</td><td style="padding:12px 16px;font-size:14px;${data.anexo_url ? "border-bottom:1px solid #e2e8f0;" : ""}"><a href="${data.canal_link}" style="color:#1c5d99;">${data.canal_link}</a></td></tr>` : ""}
           ${data.anexo_url ? `<tr><td style="padding:12px 16px;font-size:13px;color:#64748b;font-weight:600;">Anexo</td><td style="padding:12px 16px;font-size:14px;"><a href="${data.anexo_url}" style="color:#1c5d99;">📎 Ver anexo</a></td></tr>` : ""}
@@ -115,6 +117,7 @@ export async function POST(req: NextRequest) {
         // Extract and validate required fields
         const cnpj_loja = formData.get("cnpj_loja") as string;
         const nome_loja = formData.get("nome_loja") as string;
+        const nome_solicitante = formData.get("nome_solicitante") as string;
         const nome_usuario = formData.get("nome_usuario") as string;
         const data_agendamento = formData.get("data_agendamento") as string;
         const descricao = formData.get("descricao") as string;
@@ -128,6 +131,7 @@ export async function POST(req: NextRequest) {
         const requiredFields: Record<string, string | null> = {
             cnpj_loja,
             nome_loja,
+            nome_solicitante,
             nome_usuario,
             data_agendamento,
             descricao,
@@ -237,6 +241,7 @@ export async function POST(req: NextRequest) {
             .insert({
                 cnpj_loja: cleanCnpj,
                 nome_loja,
+                nome_solicitante,
                 nome_usuario,
                 data_agendamento,
                 descricao,
@@ -279,6 +284,7 @@ export async function POST(req: NextRequest) {
                 });
 
                 const htmlContent = buildConfirmationEmail({
+                    nome_solicitante,
                     nome_usuario,
                     nome_loja,
                     cnpj_loja,
