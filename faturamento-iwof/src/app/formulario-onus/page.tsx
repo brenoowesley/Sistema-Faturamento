@@ -520,14 +520,14 @@ export default function FormularioOnusPage() {
         <input
           type="email"
           style={styles.input}
-          placeholder="Receba confirmação por e-mail (opcional)"
+          placeholder="Insira e-mail do responsável financeiro para acompanhar a solicitação"
           autoComplete="email"
           inputMode="email"
           value={formData.email_retorno}
           onChange={(e) => updateField("email_retorno", e.target.value)}
         />
       </div>
-      <p style={styles.hintText}>Opcional — informe caso deseje receber uma confirmação.</p>
+      <p style={styles.hintText}>Opcional — o responsável receberá uma confirmação por e-mail.</p>
     </FieldGroup>
   );
 
