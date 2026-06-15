@@ -209,7 +209,8 @@ function WizardContent() {
                         porcentagemNF: cliente.produtos_faturamento?.porcentagem_nf ?? 11.5,
                         rawRow: { data_competencia: a.data_competencia },
                         data_competencia: a.data_competencia,
-                        dataCompetencia: a.data_competencia
+                        dataCompetencia: a.data_competencia,
+                        emailIniciador: a.email_iniciador || "",
                     } as Agendamento;
                 });
 

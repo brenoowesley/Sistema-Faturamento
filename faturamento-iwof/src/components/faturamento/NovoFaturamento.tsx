@@ -376,6 +376,15 @@ export default function NovoFaturamento() {
             const colMotivo = findCol(headers, "motivo");
             const colRespCanc = findCol(headers, "responsável pelo cancelamento", "responsavel_cancelamento");
             const colCnpjLoja = findCol(headers, "cnpj", "cnpj loja", "cnpj_loja", "cnpj empresa", "cnpj_empresa");
+            const colEmailIniciador = findCol(headers,
+                "email do iniciador",
+                "email_iniciador",
+                "email iniciador",
+                "e-mail do iniciador",
+                "e-mail iniciador",
+                "e-mail_iniciador",
+                "emailiniciador",
+            );
 
             /* --- Parse dates for period filter --- */
             const pStart = periodoInicio ? new Date(periodoInicio + "T00:00:00") : null;
@@ -447,6 +456,7 @@ export default function NovoFaturamento() {
                 const motivoCancelamento = colMotivo ? String(row[colMotivo] ?? "").trim() : "";
                 const responsavelCancelamento = colRespCanc ? String(row[colRespCanc] ?? "").trim() : "";
                 const cnpjDaPlanilha = colCnpjLoja ? normalizeCnpj(String(row[colCnpjLoja] ?? "").trim()) : "";
+                const emailIniciador = colEmailIniciador ? String(row[colEmailIniciador] ?? "").trim() : "";
 
                 if (!loja) {
                     console.warn("Row skipped: no loja column found", row);
@@ -612,6 +622,7 @@ export default function NovoFaturamento() {
                     dataCancelamento,
                     motivoCancelamento,
                     responsavelCancelamento,
+                    emailIniciador,
                     status,
                     clienteId: matched?.id ?? null,
                     razaoSocial: matched?.razao_social ?? null,
@@ -1097,7 +1108,8 @@ export default function NovoFaturamento() {
                 valor_iwof: Number(parseFloat(String(valorAtual)).toFixed(2)),
                 fracao_hora: a.fracaoHora,
                 status_validacao: "VALIDADO",
-                data_competencia: a.rawRow.data_competencia || null
+                data_competencia: a.rawRow.data_competencia || null,
+                email_iniciador: a.emailIniciador || null
             });
         });
 
@@ -1128,7 +1140,8 @@ export default function NovoFaturamento() {
                 valor_iwof: Number(parseFloat(String(a.manualValue ?? a.suggestedValorIwof ?? a.valorIwof)).toFixed(2)),
                 fracao_hora: a.fracaoHora,
                 status_validacao: finalStatus,
-                data_competencia: a.rawRow.data_competencia || null
+                data_competencia: a.rawRow.data_competencia || null,
+                email_iniciador: a.emailIniciador || null
             });
         });
 

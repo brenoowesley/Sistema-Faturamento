@@ -171,7 +171,7 @@ export default function ContaAzulStagingPage() {
                 const valorIRRF = Number(r.valor_ir_xml || 0);
                 
                 // Puxa exatamente o que o motor calculou e salvou no banco
-                const valorNF = Number((r.valor_nf_emitida - valorIRRF).toFixed(2));
+                const valorNF = Number((r.valor_nf_emitida || 0).toFixed(2));
                 const valorNC = Number(r.valor_nc_final || 0);
                 const valorBoletoFinal = Number(r.valor_boleto_final || 0);
 

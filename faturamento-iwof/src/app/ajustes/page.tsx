@@ -71,6 +71,7 @@ interface Ajuste {
     };
     observacao_interna?: string;
     repasse_profissional?: boolean;
+    anexo_url?: string | null;
 }
 
 interface ClienteDB {
@@ -341,6 +342,9 @@ export default function AjustesPage() {
         repasseProfissional: false,
         canal: "tasky" as "tasky" | "email" | "whatsapp",
     });
+    const [termoFile, setTermoFile] = useState<File | null>(null);
+    const [termoFileName, setTermoFileName] = useState("");
+    const [existingAnexoUrl, setExistingAnexoUrl] = useState<string | null>(null);
 
     // Filtros
     const [filterDataInicio, setFilterDataInicio] = useState("");
@@ -694,74 +698,105 @@ export default function AjustesPage() {
 
     const pendentesCount = solicitacoes.filter(s => s.status === "pendente").length;
 
+    // ─── Helper: faz upload do termo para o Storage e retorna a URL pública ────
+    const uploadAnexoTermo = async (file: File): Promise<string | null> => {
+        const ext = file.name.split(".").pop() || "pdf";
+        const path = `termos/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        const { error: upErr } = await supabase.storage
+            .from("ajustes-anexos")
+            .upload(path, file, { contentType: file.type, upsert: false });
+        if (upErr) {
+            console.error("[Termo Upload]", upErr);
+            throw new Error("Erro ao enviar o anexo: " + upErr.message);
+        }
+        const { data: urlData } = supabase.storage.from("ajustes-anexos").getPublicUrl(path);
+        return urlData?.publicUrl || null;
+    };
+
     const handleSaveDesconto = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsSaving(true);
 
-        const payload: any = {
-            cliente_id: formData.clienteId,
-            tipo: "DESCONTO",
-            valor: parseBRL(formData.valor),
-            nome_profissional: formData.profissional,
-            motivo: formData.motivo,
-            data_ocorrencia: formData.data,
-            observacao_interna: formData.observacaoInterna,
-            repasse_profissional: formData.repasseProfissional,
-            canal_recebimento: formData.canal,
-        };
+        try {
+            let anexo_url: string | null = existingAnexoUrl || null;
+            if (termoFile) {
+                anexo_url = await uploadAnexoTermo(termoFile);
+            }
 
-        if (editingId) {
-            payload.id = editingId;
-        } else {
-            payload.status_aplicacao = false;
-        }
+            const payload: any = {
+                cliente_id: formData.clienteId,
+                tipo: "DESCONTO",
+                valor: parseBRL(formData.valor),
+                nome_profissional: formData.profissional,
+                motivo: formData.motivo,
+                data_ocorrencia: formData.data,
+                observacao_interna: formData.observacaoInterna,
+                repasse_profissional: formData.repasseProfissional,
+                canal_recebimento: formData.canal,
+                ...(anexo_url !== undefined ? { anexo_url } : {}),
+            };
 
-        const { error } = await supabase.from("ajustes_faturamento").upsert(payload, {
-            onConflict: editingId ? "id" : undefined
-        });
+            if (editingId) {
+                payload.id = editingId;
+            } else {
+                payload.status_aplicacao = false;
+            }
 
-        if (error) {
-            alert("Erro ao salvar desconto: " + error.message);
-        } else {
+            const { error } = await supabase.from("ajustes_faturamento").upsert(payload, {
+                onConflict: editingId ? "id" : undefined
+            });
+
+            if (error) throw error;
             setShowModalDesconto(false);
             resetForm();
             fetchAjustes();
+        } catch (err: any) {
+            alert("Erro ao salvar desconto: " + err.message);
+        } finally {
+            setIsSaving(false);
         }
-        setIsSaving(false);
     };
 
     const handleSaveAcrescimo = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsSaving(true);
 
-        const payload: any = {
-            cliente_id: formData.clienteId,
-            tipo: "ACRESCIMO",
-            valor: parseBRL(formData.valor),
-            nome_profissional: formData.profissional,
-            motivo: formData.motivo,
-            data_ocorrencia: formData.data,
-            observacao_interna: formData.observacaoInterna,
-            repasse_profissional: formData.repasseProfissional,
-            canal_recebimento: formData.canal,
-        };
+        try {
+            let anexo_url: string | null = existingAnexoUrl || null;
+            if (termoFile) {
+                anexo_url = await uploadAnexoTermo(termoFile);
+            }
 
-        if (editingId) {
-            payload.id = editingId;
-        } else {
-            payload.status_aplicacao = false;
-        }
+            const payload: any = {
+                cliente_id: formData.clienteId,
+                tipo: "ACRESCIMO",
+                valor: parseBRL(formData.valor),
+                nome_profissional: formData.profissional,
+                motivo: formData.motivo,
+                data_ocorrencia: formData.data,
+                observacao_interna: formData.observacaoInterna,
+                repasse_profissional: formData.repasseProfissional,
+                canal_recebimento: formData.canal,
+                ...(anexo_url !== undefined ? { anexo_url } : {}),
+            };
 
-        const { error } = await supabase.from("ajustes_faturamento").upsert(payload);
+            if (editingId) {
+                payload.id = editingId;
+            } else {
+                payload.status_aplicacao = false;
+            }
 
-        if (error) {
-            alert("Erro ao salvar acréscimo: " + error.message);
-        } else {
+            const { error } = await supabase.from("ajustes_faturamento").upsert(payload);
+
+            if (error) throw error;
             setShowModalAcrescimo(false);
             resetForm();
             fetchAjustes();
+        } catch (err: any) {
+            alert("Erro ao salvar acréscimo: " + err.message);
+        } finally {
+            setIsSaving(false);
         }
-        setIsSaving(false);
     };
 
     const handleDelete = async (id: string) => {
@@ -788,6 +823,9 @@ export default function AjustesPage() {
             canal: "tasky",
         });
         setEditingId(null);
+        setTermoFile(null);
+        setTermoFileName("");
+        setExistingAnexoUrl(null);
     };
 
     const handleEdit = (ajuste: Ajuste) => {
@@ -802,6 +840,9 @@ export default function AjustesPage() {
             canal: (ajuste as any).canal_recebimento || "tasky",
         });
         setEditingId(ajuste.id);
+        setTermoFile(null);
+        setTermoFileName("");
+        setExistingAnexoUrl(ajuste.anexo_url || null);
         if (ajuste.tipo === "DESCONTO") setShowModalDesconto(true);
         else setShowModalAcrescimo(true);
     };
@@ -2326,6 +2367,58 @@ export default function AjustesPage() {
                             onChange={canal => setFormData({ ...formData, canal })}
                             isNordestao={(clientes.find(c => c.id === formData.clienteId)?.ciclo_nome || "").toLowerCase().includes("nordest")}
                         />
+
+                        {/* Anexo do Termo Assinado */}
+                        <div className="space-y-2 border-t border-[var(--border)] pt-4">
+                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest flex items-center gap-2">
+                                <FileText size={12} /> Termo Assinado (Opcional)
+                            </label>
+                            {existingAnexoUrl && !termoFile && (
+                                <div className="flex items-center gap-2 text-xs text-[var(--fg-dim)] bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-3 py-2">
+                                    <CheckCircle2 size={14} className="text-[var(--success)] shrink-0" />
+                                    <span className="truncate">Anexo existente vinculado</span>
+                                    <a href={existingAnexoUrl} target="_blank" rel="noopener noreferrer" className="ml-auto text-[var(--primary)] hover:underline shrink-0 flex items-center gap-1">
+                                        <ExternalLink size={12} /> Ver
+                                    </a>
+                                    <button type="button" onClick={() => setExistingAnexoUrl(null)} className="text-[var(--danger)] hover:opacity-80" title="Remover anexo existente">
+                                        <X size={14} />
+                                    </button>
+                                </div>
+                            )}
+                            <label className="flex items-center gap-3 cursor-pointer group w-full bg-[var(--bg-card)] border border-dashed border-[var(--border)] hover:border-amber-500/60 hover:bg-amber-500/5 rounded-xl px-4 py-3 transition-all">
+                                <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500 group-hover:bg-amber-500/20 transition-colors shrink-0">
+                                    <Upload size={16} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    {termoFile ? (
+                                        <div className="flex items-center gap-2">
+                                            <FileText size={14} className="text-amber-400 shrink-0" />
+                                            <span className="text-xs font-semibold text-white truncate">{termoFileName}</span>
+                                            <button type="button" onClick={(e) => { e.preventDefault(); setTermoFile(null); setTermoFileName(""); }} className="ml-auto text-[var(--danger)] hover:opacity-80 shrink-0">
+                                                <X size={14} />
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <p className="text-xs font-semibold text-white">Clique para anexar o termo</p>
+                                            <p className="text-[10px] text-[var(--fg-dim)] mt-0.5">PDF, JPG ou PNG · máx. 10 MB</p>
+                                        </div>
+                                    )}
+                                </div>
+                                <input
+                                    type="file"
+                                    className="hidden"
+                                    accept=".pdf,.jpg,.jpeg,.png"
+                                    onChange={(e) => {
+                                        const f = e.target.files?.[0];
+                                        if (!f) return;
+                                        if (f.size > 10 * 1024 * 1024) { alert("Arquivo muito grande. Máximo: 10 MB."); return; }
+                                        setTermoFile(f);
+                                        setTermoFileName(f.name);
+                                    }}
+                                />
+                            </label>
+                        </div>
                     </div>
 
                     <div className="flex justify-end gap-3 mt-4">
@@ -2450,6 +2543,58 @@ export default function AjustesPage() {
                             onChange={canal => setFormData({ ...formData, canal })}
                             isNordestao={(clientes.find(c => c.id === formData.clienteId)?.ciclo_nome || "").toLowerCase().includes("nordest")}
                         />
+
+                        {/* Anexo do Termo Assinado */}
+                        <div className="space-y-2 border-t border-[var(--border)] pt-4">
+                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest flex items-center gap-2">
+                                <FileText size={12} /> Termo Assinado (Opcional)
+                            </label>
+                            {existingAnexoUrl && !termoFile && (
+                                <div className="flex items-center gap-2 text-xs text-[var(--fg-dim)] bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-3 py-2">
+                                    <CheckCircle2 size={14} className="text-[var(--success)] shrink-0" />
+                                    <span className="truncate">Anexo existente vinculado</span>
+                                    <a href={existingAnexoUrl} target="_blank" rel="noopener noreferrer" className="ml-auto text-[var(--primary)] hover:underline shrink-0 flex items-center gap-1">
+                                        <ExternalLink size={12} /> Ver
+                                    </a>
+                                    <button type="button" onClick={() => setExistingAnexoUrl(null)} className="text-[var(--danger)] hover:opacity-80" title="Remover anexo existente">
+                                        <X size={14} />
+                                    </button>
+                                </div>
+                            )}
+                            <label className="flex items-center gap-3 cursor-pointer group w-full bg-[var(--bg-card)] border border-dashed border-[var(--border)] hover:border-[var(--primary)]/60 hover:bg-[var(--primary)]/5 rounded-xl px-4 py-3 transition-all">
+                                <div className="p-2 rounded-lg bg-[var(--primary)]/10 text-[var(--primary)] group-hover:bg-[var(--primary)]/20 transition-colors shrink-0">
+                                    <Upload size={16} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    {termoFile ? (
+                                        <div className="flex items-center gap-2">
+                                            <FileText size={14} className="text-[var(--primary)] shrink-0" />
+                                            <span className="text-xs font-semibold text-white truncate">{termoFileName}</span>
+                                            <button type="button" onClick={(e) => { e.preventDefault(); setTermoFile(null); setTermoFileName(""); }} className="ml-auto text-[var(--danger)] hover:opacity-80 shrink-0">
+                                                <X size={14} />
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <p className="text-xs font-semibold text-white">Clique para anexar o termo</p>
+                                            <p className="text-[10px] text-[var(--fg-dim)] mt-0.5">PDF, JPG ou PNG · máx. 10 MB</p>
+                                        </div>
+                                    )}
+                                </div>
+                                <input
+                                    type="file"
+                                    className="hidden"
+                                    accept=".pdf,.jpg,.jpeg,.png"
+                                    onChange={(e) => {
+                                        const f = e.target.files?.[0];
+                                        if (!f) return;
+                                        if (f.size > 10 * 1024 * 1024) { alert("Arquivo muito grande. Máximo: 10 MB."); return; }
+                                        setTermoFile(f);
+                                        setTermoFileName(f.name);
+                                    }}
+                                />
+                            </label>
+                        </div>
                     </div>
 
                     <div className="flex justify-end gap-3 mt-4">
@@ -2536,6 +2681,36 @@ export default function AjustesPage() {
                             <span className="text-sm font-bold text-white">
                                 {selectedAjuste.repasse_profissional ? "Impacta no Repasse do Profissional" : "Não impacta no Repasse do Profissional"}
                             </span>
+                        </div>
+
+                        {/* Termo Assinado */}
+                        <div className="space-y-1 border-t border-[var(--border)] pt-4">
+                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest flex items-center gap-2">
+                                <FileText size={12} /> Termo Assinado
+                            </label>
+                            {selectedAjuste.anexo_url ? (
+                                <a
+                                    href={selectedAjuste.anexo_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-3 bg-[var(--bg-main)] border border-[var(--border)] hover:border-[var(--primary)]/60 rounded-xl px-4 py-3 transition-all group"
+                                >
+                                    <div className="p-2 rounded-lg bg-[var(--primary)]/10 text-[var(--primary)] shrink-0">
+                                        <FileText size={16} />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-semibold text-white truncate">
+                                            {selectedAjuste.anexo_url.split("/").pop()?.split("-").slice(2).join("-") || "Termo assinado"}
+                                        </p>
+                                        <p className="text-[10px] text-[var(--fg-dim)] mt-0.5">Clique para visualizar o documento</p>
+                                    </div>
+                                    <ExternalLink size={14} className="text-[var(--primary)] shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </a>
+                            ) : (
+                                <div className="text-xs text-[var(--fg-dim)] italic bg-[var(--bg-card)] border border-dashed border-[var(--border)] rounded-xl px-4 py-3">
+                                    Nenhum termo anexado para este ajuste.
+                                </div>
+                            )}
                         </div>
 
                         <div className="flex justify-end pt-2">

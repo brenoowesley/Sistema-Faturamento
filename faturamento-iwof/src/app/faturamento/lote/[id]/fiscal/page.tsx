@@ -65,6 +65,7 @@ interface LojaConsolidada {
     porcentagemNF: number;
     active?: boolean;
     children?: any[];
+    valor_ir_xml?: number;
     // Drive Observability
     drive_id_nf?: string;
     drive_id_hc?: string;
@@ -504,6 +505,7 @@ export default function FiscalProcessingPage() {
                         valorBruto: a.valorBruto || 0,
                         acrescimos: a.acrescimos || 0,
                         descontos: a.descontos || 0,
+                        valor_ir_xml: Number(a.valor_ir_xml || 0),
                         ajustesDetalhes: [],
                         active: true,
                         ciclo: client?.ciclos_faturamento?.nome || "-",
@@ -752,12 +754,17 @@ export default function FiscalProcessingPage() {
                     const irrfCalculado = Number(((baseParaFatura * fatorNF) * 0.015).toFixed(2));
                     irrf = irrfCalculado >= 10 ? irrfCalculado : 0;
                 }
+                // Fallback: preserva o IRRF já extraído da NF (salvo no banco pelo wizard)
+                // quando o XML do ZIP não faz match por CNPJ
+                if (irrf === 0 && loja.valor_ir_xml && loja.valor_ir_xml > 0) {
+                    irrf = loja.valor_ir_xml;
+                }
 
                 // Fatura (NC): usa baseParaFatura — descontos não reduzem o documento fiscal.
                 // Boleto: usa calcBase — descontos são efetivamente aplicados no valor a receber.
                 const fatorNC = 1 - ((loja as any).porcentagemNF ? (loja as any).porcentagemNF / 100 : 0.115);
                 const boleto = calcBase - irrf;
-                const nc = baseParaFatura * fatorNC;
+                const nc = baseParaFatura * fatorNC - irrf;
 
                 return {
                     loja,

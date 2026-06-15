@@ -117,7 +117,7 @@ export function calcularTotaisFaturamento(
 
     if (!boletoUnificado) {
         valorNF = baseParaFatura * fatorNF;
-        valorNC = baseParaFatura * fatorNC;
+        valorNC = baseParaFatura * fatorNC - irrf;
     } else {
         valorNF = isNFEmitida ? baseParaFatura : 0;
         valorNC = !isNFEmitida ? baseParaFatura : 0;

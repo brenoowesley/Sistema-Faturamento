@@ -237,9 +237,9 @@ export async function POST(req: NextRequest) {
             const fatorNF = porcentagemNF / 100;
             const fatorNC = 1 - fatorNF;
 
-            const valorNC = valorBaseFatura * fatorNC;
-            const valorNF = valorBaseFatura * fatorNF;
             const valorIRRF = Number(cons.valor_ir_xml || 0);
+            const valorNC = valorBaseFatura * fatorNC - valorIRRF;
+            const valorNF = valorBaseFatura * fatorNF;
             const valorLiquido = valorBaseNormal - valorIRRF;
 
             const boletoUnificado = cliente.boleto_unificado ?? true;
@@ -251,9 +251,7 @@ export async function POST(req: NextRequest) {
             const valorNFParaBoleto = isNordestao
                 ? (valorBaseNormal * fatorNF)
                 : valorNF;
-            const finalLiquidoBoletoGCP = boletoUnificado === false
-                ? (valorNFParaBoleto - valorIRRF)
-                : valorLiquido;
+            const finalLiquidoBoletoGCP = valorLiquido;
 
             // ==========================================
             // CÁLCULO DE PERÍODO ESPECÍFICO (QUEIROZ SPLIT)
