@@ -65,6 +65,32 @@ function cnpjDigits(value: string): string {
   return value.replace(/\D/g, "");
 }
 
+function isPrazoExpirado(dataAgendamento: string): boolean {
+  if (!dataAgendamento) return false;
+  const [year, month, day] = dataAgendamento.split("-").map(Number);
+  const selectedDate = new Date(year, month - 1, day);
+  selectedDate.setHours(0, 0, 0, 0);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  if (selectedDate >= today) return false;
+
+  let businessDaysCount = 0;
+  let currentDate = new Date(selectedDate);
+  currentDate.setDate(currentDate.getDate() + 1);
+
+  while (currentDate < today) {
+    const dayOfWeek = currentDate.getDay();
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      businessDaysCount++;
+    }
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+
+  return businessDaysCount >= 2;
+}
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const ACCEPTED_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/jpg"];
 const ACCEPTED_EXTENSIONS = ".pdf,.png,.jpg,.jpeg";
@@ -422,7 +448,7 @@ export default function FormularioOnusPage() {
       </FieldGroup>
 
       <FieldGroup label="Data do Agendamento" required error={formErrors.data_agendamento}>
-        <div style={styles.inputWrap}>
+        <div style={{ ...styles.inputWrap, borderColor: isPrazoExpirado(formData.data_agendamento) ? "#f59e0b" : undefined }}>
           <span style={styles.inputIcon}><Calendar size={18} /></span>
           <input
             type="date"
@@ -431,6 +457,11 @@ export default function FormularioOnusPage() {
             onChange={(e) => updateField("data_agendamento", e.target.value)}
           />
         </div>
+        {isPrazoExpirado(formData.data_agendamento) && (
+          <p style={{ fontSize: 11, color: "#f59e0b", margin: "4px 0 0", display: "flex", alignItems: "center", gap: 4 }}>
+            <AlertTriangle size={12} /> Prazo de 48h de envio excedido. O pedido irá para análise, mas pode ser negado.
+          </p>
+        )}
       </FieldGroup>
 
       <FieldGroup label="Descrição" required error={formErrors.descricao}>
