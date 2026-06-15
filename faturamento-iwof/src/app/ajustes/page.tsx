@@ -352,6 +352,7 @@ export default function AjustesPage() {
     const [filterClienteId, setFilterClienteId] = useState("");
     const [filterSearchText, setFilterSearchText] = useState("");
     const [filterDateType, setFilterDateType] = useState<"ocorrencia" | "aplicacao">("aplicacao");
+    const [filterRepasse, setFilterRepasse] = useState<"todos" | "sim" | "nao">("todos");
 
     // Aprovações State
     const [solicitacoes, setSolicitacoes] = useState<OnusSolicitacao[]>([]);
@@ -402,9 +403,13 @@ export default function AjustesPage() {
                 if (filterDataFim && dateOnly > filterDataFim) return false;
             }
 
+            // Filtro por Aplicado ao usuário (Repasse)
+            if (filterRepasse === "sim" && !item.repasse_profissional) return false;
+            if (filterRepasse === "nao" && item.repasse_profissional) return false;
+
             return true;
         });
-    }, [filterClienteId, filterDataInicio, filterDataFim, filterSearchText, filterDateType]);
+    }, [filterClienteId, filterDataInicio, filterDataFim, filterSearchText, filterDateType, filterRepasse]);
 
     const handleExportXLSX = () => {
         const targetLista = activeTab === "descontos" ? descontosPendentes 
@@ -1230,10 +1235,10 @@ export default function AjustesPage() {
 
                 {/* Filtros Container */}
                 <div className="bg-[var(--bg-card)] p-5 rounded-2xl border border-[var(--border)] shadow-xl flex flex-col gap-6 relative z-10">
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                    <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4 items-end">
                         
                         {/* Busca Texto */}
-                        <div className="md:col-span-3">
+                        <div className="col-span-1">
                             <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block flex items-center gap-2">
                                 <Search size={12} /> Busca Rápida
                             </label>
@@ -1250,7 +1255,7 @@ export default function AjustesPage() {
                         </div>
 
                         {/* Dropdown de Clientes */}
-                        <div className="md:col-span-3">
+                        <div className="col-span-1">
                             <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Filtrar por Loja</label>
                             <SearchableSelect
                                 options={clientes}
@@ -1260,8 +1265,22 @@ export default function AjustesPage() {
                             />
                         </div>
 
+                        {/* Filtro Aplicado ao Usuário */}
+                        <div className="col-span-1">
+                            <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Aplicado ao Usuário?</label>
+                            <select
+                                className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white p-2.5 rounded-xl text-sm focus:border-[var(--primary)] outline-none appearance-none cursor-pointer"
+                                value={filterRepasse}
+                                onChange={e => setFilterRepasse(e.target.value as any)}
+                            >
+                                <option value="todos">Todos</option>
+                                <option value="sim">Sim (Aplicado)</option>
+                                <option value="nao">Não</option>
+                            </select>
+                        </div>
+
                         {/* Tipo de Filtro de Data */}
-                        <div className="md:col-span-2">
+                        <div className="col-span-1">
                             <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Filtrar por</label>
                             <select
                                 className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white p-2.5 rounded-xl text-sm focus:border-[var(--primary)] outline-none appearance-none cursor-pointer"
@@ -1274,7 +1293,7 @@ export default function AjustesPage() {
                         </div>
 
                         {/* Data Inicial */}
-                        <div className="md:col-span-2">
+                        <div className="col-span-1">
                             <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Início</label>
                             <input
                                 type="date"
@@ -1286,7 +1305,7 @@ export default function AjustesPage() {
                         </div>
 
                         {/* Data Final */}
-                        <div className="md:col-span-2">
+                        <div className="col-span-1">
                             <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Fim</label>
                             <input
                                 type="date"
@@ -1311,7 +1330,7 @@ export default function AjustesPage() {
                         </div>
                         <div className="flex gap-3">
                             <button
-                                onClick={() => { setFilterClienteId(""); setFilterDataInicio(""); setFilterDataFim(""); setFilterSearchText(""); setFilterDateType("aplicacao"); setSelectedIds(new Set()); }}
+                                onClick={() => { setFilterClienteId(""); setFilterDataInicio(""); setFilterDataFim(""); setFilterSearchText(""); setFilterDateType("aplicacao"); setFilterRepasse("todos"); setSelectedIds(new Set()); }}
                                 className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-[var(--fg-dim)] hover:text-white transition-colors"
                             >
                                 <X size={16} /> Limpar Filtros
