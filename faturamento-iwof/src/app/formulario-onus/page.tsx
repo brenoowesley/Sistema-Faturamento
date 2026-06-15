@@ -268,7 +268,7 @@ export default function FormularioOnusPage() {
 
   const resetForm = () => {
     setSubmitSuccess(false);
-    setFormData({ cnpj: "", nome_loja: "", nome_usuario: "", data_agendamento: "", descricao: "", valor: "", email_retorno: "" });
+    setFormData({ cnpj: "", nome_loja: "", nome_solicitante: "", nome_usuario: "", data_agendamento: "", descricao: "", valor: "", email_retorno: "" });
     setAnexo(null);
     setCnpjStatus("idle");
     setMobileStep(0);
