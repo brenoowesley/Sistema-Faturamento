@@ -233,6 +233,9 @@ export default function FormularioOnusPage() {
       if (!formData.descricao.trim()) errors.descricao = "Descrição é obrigatória.";
       if (!formData.valor || parseBRL(formData.valor) <= 0) errors.valor = "Valor deve ser maior que zero.";
     }
+    if (step === 2) {
+      if (!anexo) errors.anexo = "O anexo do termo assinado é obrigatório.";
+    }
     if (step === 3) {
       if (formData.email_retorno && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email_retorno))
         errors.email_retorno = "E-mail inválido.";
@@ -250,6 +253,7 @@ export default function FormularioOnusPage() {
     if (!formData.data_agendamento) errors.data_agendamento = "Data é obrigatória.";
     if (!formData.descricao.trim()) errors.descricao = "Descrição é obrigatória.";
     if (!formData.valor || parseBRL(formData.valor) <= 0) errors.valor = "Valor deve ser maior que zero.";
+    if (!anexo) errors.anexo = "O anexo do termo assinado é obrigatório.";
     if (formData.email_retorno && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email_retorno))
       errors.email_retorno = "E-mail inválido.";
     setFormErrors(errors);
@@ -493,7 +497,7 @@ export default function FormularioOnusPage() {
   );
 
   const fieldAnexo = (
-    <FieldGroup label="Anexo (Termo Assinado)" error={formErrors.anexo}>
+    <FieldGroup label="Anexo (Termo Assinado)" required error={formErrors.anexo}>
       <div
         style={{
           ...styles.dropzone,
