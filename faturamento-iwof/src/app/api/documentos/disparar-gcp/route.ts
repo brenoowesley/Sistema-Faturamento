@@ -178,8 +178,8 @@ export async function POST(req: NextRequest) {
         // ═══ AUDITORIA GCP: Rastreio de agendamentos por loja ═══
         console.log(`[GCP AUDIT] lojaAgendamentosMap: ${lojaAgendamentosMap.size} lojas`);
         lojaAgendamentosMap.forEach((ags, lojaId) => {
-            const nomesProfissionais = ags.map((a: any) => `${a.profissional} (${a.inicio?.slice(0,16) || 'null'})`);
-            console.log(`[GCP AUDIT] Loja ${lojaId}: ${ags.length} agendamentos → ${nomesProfissionais.join(" | ")}`);
+            const detalhes = ags.map((a: any) => `${a.profissional} (${a.inicio?.slice(0,16) || 'null'}) [email: ${a.email_iniciador || 'VAZIO'}]`);
+            console.log(`[GCP AUDIT] Loja ${lojaId}: ${ags.length} agendamentos → ${detalhes.join(" | ")}`);
         });
         // ═══ FIM AUDITORIA GCP ═══
 
@@ -211,7 +211,7 @@ export async function POST(req: NextRequest) {
                     formatDateStr(ag.termino),
                     `R$ ${formatarParaGCP(ag.valor)}`,
                     formatarParaGCP(ag.fracao_hora),
-                    ag.email_iniciador || "-"
+                    ag.email_iniciador || ""
                 ]);
         };
 

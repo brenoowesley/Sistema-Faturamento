@@ -723,12 +723,13 @@ function WizardContent() {
         finalParsed.forEach(a => {
             if (!porLojaAudit.has(a.loja)) porLojaAudit.set(a.loja, []);
             const flag = a.isRemoved ? "❌REM" : (a.clienteId ? "✅" : "⚠️SEM_LOJA");
-            porLojaAudit.get(a.loja)!.push(`${flag} ${a.nome} ${a.inicio?.toISOString()?.slice(0,16) || 'null'}`);
+            porLojaAudit.get(a.loja)!.push(`${flag} ${a.nome} ${a.inicio?.toISOString()?.slice(0,16) || 'null'} [email: ${a.emailIniciador || 'VAZIO'}]`);
         });
         porLojaAudit.forEach((profissionais, loja) => {
             console.log(`📋 ${loja} (${profissionais.length} registros):`);
             profissionais.forEach(p => console.log(`  ${p}`));
         });
+        console.log(`📧 colEmailIniciador mapeado para: "${colEmailIniciador || 'NULL - NÃO ENCONTRADO'}"`);
         console.groupEnd();
         // ═══ FIM AUDITORIA processFile ═══
 

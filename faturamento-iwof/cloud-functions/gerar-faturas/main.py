@@ -285,7 +285,7 @@ def processar_fatura_individual(event, context):
                     "termino":      safe_col(item, termino_idx),
                     "valor":        fmt(parse_brazilian_float(safe_col(item, valor_iwof_idx, "0"))),
                     "fracao_hora":  safe_col(item, fracao_hora_idx),
-                    "iniciador":    safe_col(item, iniciador_idx),
+                    "email_iniciador": safe_col(item, iniciador_idx).strip() or "Início automático",
                 }
                 for item in itens_faturados_rows
             ],
