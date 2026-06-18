@@ -135,6 +135,8 @@ function WizardContent() {
                         .from("agendamentos_brutos")
                         .select("*, clientes(*, ciclos_faturamento(nome), produtos_faturamento(porcentagem_nf))")
                         .eq("lote_id", loteIdParam)
+                        .order("data_inicio", { ascending: true })
+                        .order("id", { ascending: true })
                         .range(from, from + stepAmount - 1);
 
                     if (agdsError) {
@@ -654,17 +656,17 @@ function WizardContent() {
             if (group.length > 1) {
                 identicalGroupsResult.push(group);
                 group.forEach(a => {
-                    const idx = parsed.indexOf(a);
+                    const idx = finalParsed.indexOf(a);
                     if (idx !== -1) seenIndicesSet.add(idx);
                 });
             }
         }
 
-        for (let i = 0; i < parsed.length; i++) {
-            const a = parsed[i];
+        for (let i = 0; i < finalParsed.length; i++) {
+            const a = finalParsed[i];
             if (seenIndicesSet.has(i)) continue;
 
-            const suspicious = parsed.filter((b, idx) => {
+            const suspicious = finalParsed.filter((b, idx) => {
                 if (idx === i || seenIndicesSet.has(idx)) return false;
                 const sameInicio = a.inicio?.getTime() === b.inicio?.getTime();
                 const sameTermino = a.termino?.getTime() === b.termino?.getTime();
@@ -676,7 +678,7 @@ function WizardContent() {
             if (suspicious.length > 0) {
                 const group = [a, ...suspicious];
                 seenIndicesSet.add(i);
-                parsed.forEach((x, idx) => {
+                finalParsed.forEach((x, idx) => {
                     if (suspicious.includes(x)) seenIndicesSet.add(idx);
                 });
                 suspiciousListResult.push(group);
@@ -697,6 +699,38 @@ function WizardContent() {
                 if (autoRemovedIds.has(a.id)) a.isRemoved = true;
             });
         }
+
+        // ═══ AUDITORIA processFile: Rastreio completo do pipeline ═══
+        console.group("🔍 AUDITORIA processFile");
+        console.log(`Linhas da planilha: ${rawRows.length}`);
+        console.log(`parsed[] (após parse): ${parsed.length}`);
+        console.log(`finalParsed[] (após Queiroz split): ${finalParsed.length}`);
+        console.log(`Grupos idênticos: ${identicalGroupsResult.length}`);
+        console.log(`Grupos suspeitos: ${suspiciousListResult.length}`);
+        console.log(`Auto-removidos (dedup): ${autoRemovedIds.size}`);
+        
+        // Contagem por status
+        const statusCount = new Map<string, number>();
+        finalParsed.forEach(a => {
+            const key = a.isRemoved ? `REMOVIDO(${a.status})` : a.status;
+            statusCount.set(key, (statusCount.get(key) || 0) + 1);
+        });
+        console.log("📊 Por status:");
+        statusCount.forEach((count, status) => console.log(`  ${status}: ${count}`));
+        
+        // Detalhe por loja — mostra cada profissional
+        const porLojaAudit = new Map<string, string[]>();
+        finalParsed.forEach(a => {
+            if (!porLojaAudit.has(a.loja)) porLojaAudit.set(a.loja, []);
+            const flag = a.isRemoved ? "❌REM" : (a.clienteId ? "✅" : "⚠️SEM_LOJA");
+            porLojaAudit.get(a.loja)!.push(`${flag} ${a.nome} ${a.inicio?.toISOString()?.slice(0,16) || 'null'}`);
+        });
+        porLojaAudit.forEach((profissionais, loja) => {
+            console.log(`📋 ${loja} (${profissionais.length} registros):`);
+            profissionais.forEach(p => console.log(`  ${p}`));
+        });
+        console.groupEnd();
+        // ═══ FIM AUDITORIA processFile ═══
 
         setAgendamentos(finalParsed);
 

@@ -120,6 +120,7 @@ export async function POST(req: NextRequest) {
                 .eq("lote_id", loteId)
                 .in("status_validacao", ["VALIDADO"])
                 .order("data_inicio", { ascending: true })
+                .order("id", { ascending: true })
                 .range(agFrom, agFrom + agStep - 1);
 
             if (agErr) throw agErr;
@@ -173,6 +174,14 @@ export async function POST(req: NextRequest) {
                 email_iniciador: ag.email_iniciador || ""
             });
         });
+
+        // ═══ AUDITORIA GCP: Rastreio de agendamentos por loja ═══
+        console.log(`[GCP AUDIT] lojaAgendamentosMap: ${lojaAgendamentosMap.size} lojas`);
+        lojaAgendamentosMap.forEach((ags, lojaId) => {
+            const nomesProfissionais = ags.map((a: any) => `${a.profissional} (${a.inicio?.slice(0,16) || 'null'})`);
+            console.log(`[GCP AUDIT] Loja ${lojaId}: ${ags.length} agendamentos → ${nomesProfissionais.join(" | ")}`);
+        });
+        // ═══ FIM AUDITORIA GCP ═══
 
         const formatarParaGCP = (valor: number) => {
             return Number(valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });

@@ -542,6 +542,30 @@ export default function FechamentoLote({
             const validos = agendamentos.filter(a => !a.isRemoved && (a.status === "OK" || a.status === "CORREÇÃO") && a.clienteId);
             let valTotal = 0;
 
+            // ═══ AUDITORIA: Rastreio de registros perdidos ═══
+            console.group("🔍 AUDITORIA CONSOLIDAÇÃO");
+            console.log(`Total agendamentos no state: ${agendamentos.length}`);
+            console.log(`Total válidos (após filtro): ${validos.length}`);
+            const rejeitados = agendamentos.filter(a => a.isRemoved || (a.status !== "OK" && a.status !== "CORREÇÃO") || !a.clienteId);
+            if (rejeitados.length > 0) {
+                console.group(`⚠️ ${rejeitados.length} registros REJEITADOS:`);
+                rejeitados.forEach(a => {
+                    const motivos = [];
+                    if (a.isRemoved) motivos.push("isRemoved=true");
+                    if (a.status !== "OK" && a.status !== "CORREÇÃO") motivos.push(`status=${a.status}`);
+                    if (!a.clienteId) motivos.push("clienteId=null");
+                    console.log(`  ❌ ${a.nome} | ${a.loja} | ${a.inicio?.toISOString()?.slice(0,16) || 'null'} | Motivos: ${motivos.join(", ")}`);
+                });
+                console.groupEnd();
+            }
+            // Agrupamento por loja para verificar contagens
+            const porLoja = new Map<string, number>();
+            validos.forEach(a => porLoja.set(a.loja, (porLoja.get(a.loja) || 0) + 1));
+            console.log("📊 Válidos por loja:");
+            porLoja.forEach((count, loja) => console.log(`  ${loja}: ${count} agendamentos`));
+            console.groupEnd();
+            // ═══ FIM AUDITORIA ═══
+
             const validStoreIds = Array.from(new Set(validos.map(a => a.clienteId).filter(Boolean))) as string[];
 
             const { data: ajustes, error: ajErr } = await supabase
