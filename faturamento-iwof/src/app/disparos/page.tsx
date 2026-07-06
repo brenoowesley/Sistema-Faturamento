@@ -29,6 +29,7 @@ import {
   Hash,
   SkipForward,
   Mail,
+  ArrowRight,
 } from "lucide-react";
 import * as xlsx from "xlsx";
 import {
@@ -263,6 +264,7 @@ export default function CentralDisparosPage() {
               k.toLowerCase().includes("celular")
           );
 
+          return {
             cnpj: cnpjKey ? String(row[cnpjKey]).trim() : "",
             telefone: telKey ? String(row[telKey]).trim() : "",
             email: Object.keys(row).find((k) => k.toLowerCase().includes("email") || k.toLowerCase().includes("e-mail")) 
