@@ -126,6 +126,7 @@ export default function CentralDisparosPage() {
   const [advancedResults, setAdvancedResults] = useState<{ cnpj: string; telefone: string; email: string; nome: string }[]>([]);
   const [advancedSelected, setAdvancedSelected] = useState<Set<string>>(new Set());
   const [isFiltering, setIsFiltering] = useState(false);
+  const [emailsAvulsos, setEmailsAvulsos] = useState("");
 
   // ── SEÇÃO 2: Estúdio de Mensagem ──
   const [mensagem, setMensagem] = useState("");
@@ -338,6 +339,21 @@ export default function CentralDisparosPage() {
     setFilterCiclo("");
     setFilterEstado("");
     setFilterStatus("todos");
+  };
+
+  const handleAdicionarEmailsAvulsos = () => {
+    if (!emailsAvulsos.trim()) return;
+    const list = emailsAvulsos.split(",").map(e => e.trim()).filter(e => e);
+    
+    setContatosSelecionados(prev => {
+      const novafila = [...prev];
+      list.forEach(email => {
+        const fakeCnpj = "99999999999" + Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+        novafila.push({ cnpj: fakeCnpj, telefone: "", email });
+      });
+      return novafila;
+    });
+    setEmailsAvulsos("");
   };
 
   const handleAdicionarContato = (contato: ContatoInput) => {
@@ -660,7 +676,7 @@ export default function CentralDisparosPage() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
                       <label className="text-xs text-[var(--fg-dim)] mb-1 block">Ciclo</label>
-                      <select className="input w-full text-sm py-1 px-2 h-8" value={filterCiclo} onChange={e => setFilterCiclo(e.target.value)}>
+                      <select className="input w-full text-sm py-1 px-2 h-8 text-[var(--fg-base)] bg-[var(--bg-input)]" value={filterCiclo} onChange={e => setFilterCiclo(e.target.value)}>
                         <option value="">Todos</option>
                         {ciclosList.map(c => (
                           <option key={c.id} value={c.id}>{c.nome}</option>
@@ -669,7 +685,7 @@ export default function CentralDisparosPage() {
                     </div>
                     <div>
                       <label className="text-xs text-[var(--fg-dim)] mb-1 block">Status</label>
-                      <select className="input w-full text-sm py-1 px-2 h-8" value={filterStatus} onChange={e => setFilterStatus(e.target.value as any)}>
+                      <select className="input w-full text-sm py-1 px-2 h-8 text-[var(--fg-base)] bg-[var(--bg-input)]" value={filterStatus} onChange={e => setFilterStatus(e.target.value as any)}>
                         <option value="todos">Todos</option>
                         <option value="ativo">Ativos</option>
                         <option value="inativo">Inativos</option>
@@ -677,7 +693,7 @@ export default function CentralDisparosPage() {
                     </div>
                     <div>
                       <label className="text-xs text-[var(--fg-dim)] mb-1 block">Estado</label>
-                      <select className="input w-full text-sm py-1 px-2 h-8" value={filterEstado} onChange={e => setFilterEstado(e.target.value)}>
+                      <select className="input w-full text-sm py-1 px-2 h-8 text-[var(--fg-base)] bg-[var(--bg-input)]" value={filterEstado} onChange={e => setFilterEstado(e.target.value)}>
                         <option value="">Todos</option>
                         {estadosList.map(est => (
                           <option key={est} value={est}>{est}</option>
@@ -685,14 +701,27 @@ export default function CentralDisparosPage() {
                       </select>
                     </div>
                   </div>
-                  <button 
-                    className="btn btn-primary w-full h-8 flex justify-center items-center text-sm mt-1" 
-                    onClick={handleFiltrarBaseAvancado}
-                    disabled={isFiltering}
-                  >
-                    {isFiltering ? <RefreshCw size={14} className="animate-spin mr-2" /> : <Search size={14} className="mr-2" />}
-                    Pesquisar Base
-                  </button>
+                  <div className="flex gap-2 mt-1">
+                    <button 
+                      className="btn btn-primary flex-1 h-8 flex justify-center items-center text-sm" 
+                      onClick={handleFiltrarBaseAvancado}
+                      disabled={isFiltering}
+                    >
+                      {isFiltering ? <RefreshCw size={14} className="animate-spin mr-2" /> : <Search size={14} className="mr-2" />}
+                      Pesquisar Base
+                    </button>
+                    <button 
+                      className="btn btn-ghost h-8 flex justify-center items-center text-sm px-4" 
+                      onClick={() => {
+                        setFilterCiclo("");
+                        setFilterStatus("todos");
+                        setFilterEstado("");
+                        setAdvancedResults([]);
+                      }}
+                    >
+                      Limpar
+                    </button>
+                  </div>
 
                   {advancedResults.length > 0 && (
                     <div className="mt-3 border-t border-[var(--border-color)] pt-3">
@@ -738,6 +767,33 @@ export default function CentralDisparosPage() {
                 </div>
               )}
             </div>
+
+            {/* E-mails Avulsos */}
+            {canalDisparo === "email" && (
+              <div className="disparo-field">
+                <label className="disparo-label">
+                  <Mail size={14} />
+                  Digitar E-mails Manualmente
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    className="input pl-4 w-full"
+                    placeholder="Separe por vírgulas (ex: a@a.com, b@b.com)"
+                    value={emailsAvulsos}
+                    onChange={(e) => setEmailsAvulsos(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleAdicionarEmailsAvulsos()}
+                  />
+                  <button
+                    className="btn btn-primary px-4"
+                    onClick={handleAdicionarEmailsAvulsos}
+                    disabled={!emailsAvulsos.trim()}
+                  >
+                    Adicionar
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Busca na Base */}
             <div className="disparo-field">
@@ -1030,9 +1086,9 @@ export default function CentralDisparosPage() {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Empresa</th>
-                      <th>CNPJ</th>
-                      <th>Telefone</th>
+                      <th>Empresa / Unidade</th>
+                      <th>CNPJ / ID</th>
+                      <th>{canalDisparo === 'whatsapp' ? 'Telefone' : 'E-mail'}</th>
                       <th>Valor</th>
                       <th className="text-center">Status</th>
                     </tr>
@@ -1042,18 +1098,18 @@ export default function CentralDisparosPage() {
                       <tr key={`${d.cnpj}-${i}`}>
                         <td>
                           <span className="table-primary text-sm">
-                            {d.nomeFantasia || d.razaoSocial || "—"}
+                            {d.nomeFantasia || d.razaoSocial || (d.emailPrincipal ? "Contato Avulso" : "—")}
                           </span>
                           <span className="table-secondary">
                             {d.primeiroNome}
                           </span>
                         </td>
                         <td className="table-mono text-xs">
-                          {fmtCNPJ(d.cnpj)}
+                          {d.cnpj.startsWith("999999") ? "—" : fmtCNPJ(d.cnpj)}
                         </td>
                         <td>
                           <div className="flex items-center gap-1">
-                            {d.divergentPhone && (
+                            {d.divergentPhone && canalDisparo === 'whatsapp' && (
                               <span title="Telefone do XLSX difere do banco">
                                 <AlertTriangle
                                   size={14}
@@ -1061,8 +1117,8 @@ export default function CentralDisparosPage() {
                                 />
                               </span>
                             )}
-                            <span className="table-mono text-xs">
-                              {d.telefone}
+                            <span className="table-mono text-xs font-medium text-[var(--fg-base)]">
+                              {canalDisparo === 'whatsapp' ? d.telefone : d.emailPrincipal}
                             </span>
                           </div>
                         </td>
