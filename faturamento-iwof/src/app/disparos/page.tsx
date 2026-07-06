@@ -35,6 +35,9 @@ import {
   processarContatos,
   buscarContatosDoBanco,
   buscarLotes,
+  buscarCiclosParaFiltro,
+  buscarEstadosUnicos,
+  buscarContatosPorFiltro,
   type ContatoInput,
   type ContatoProcessado,
 } from "./actions";
@@ -112,6 +115,17 @@ export default function CentralDisparosPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [canalDisparo, setCanalDisparo] = useState<"whatsapp" | "email">("whatsapp");
 
+  // ── SEÇÃO 1.5: Filtros Avançados ──
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [filterCiclo, setFilterCiclo] = useState("");
+  const [filterStatus, setFilterStatus] = useState<"todos" | "ativo" | "inativo">("todos");
+  const [filterEstado, setFilterEstado] = useState("");
+  const [ciclosList, setCiclosList] = useState<{ id: string; nome: string }[]>([]);
+  const [estadosList, setEstadosList] = useState<string[]>([]);
+  const [advancedResults, setAdvancedResults] = useState<{ cnpj: string; telefone: string; email: string; nome: string }[]>([]);
+  const [advancedSelected, setAdvancedSelected] = useState<Set<string>>(new Set());
+  const [isFiltering, setIsFiltering] = useState(false);
+
   // ── SEÇÃO 2: Estúdio de Mensagem ──
   const [mensagem, setMensagem] = useState("");
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -150,21 +164,20 @@ export default function CentralDisparosPage() {
         setCargo(data?.cargo || "USER");
       }
 
-      // Carregar lotes
+      // Buscar lotes, templates e filtros
       try {
-        const lotesData = await buscarLotes();
+        const [lotesData, templatesData, ciclosData, estadosData] = await Promise.all([
+          buscarLotes(),
+          supabase.from("whatsapp_templates").select("*").order("nome"),
+          buscarCiclosParaFiltro(),
+          buscarEstadosUnicos()
+        ]);
         setLotes(lotesData as Lote[]);
-      } catch (err) {
-        console.error("Erro ao carregar lotes:", err);
-      }
-
-      // Carregar templates
-      try {
-        const res = await fetch("/api/whatsapp/templates");
-        const json = await res.json();
-        setTemplates(json.templates || []);
-      } catch (err) {
-        console.error("Erro ao carregar templates:", err);
+        setTemplates(templatesData.data || []);
+        setCiclosList(ciclosData);
+        setEstadosList(estadosData);
+      } catch (e) {
+        console.error("Erro ao carregar dados iniciais:", e);
       }
 
       setLoading(false);
@@ -272,9 +285,57 @@ export default function CentralDisparosPage() {
       const results = await buscarContatosDoBanco(buscaContato);
       setContatosBuscados(results);
     } catch (err) {
-      console.error("Erro na busca:", err);
+      console.error(err);
+      alert("Erro ao buscar contatos.");
+    } finally {
+      setIsSearching(false);
     }
-    setIsSearching(false);
+  };
+
+  const handleFiltrarBaseAvancado = async () => {
+    setIsFiltering(true);
+    try {
+      const res = await buscarContatosPorFiltro({
+        cicloId: filterCiclo,
+        status: filterStatus,
+        estado: filterEstado,
+      });
+      setAdvancedResults(res);
+      // Auto-select all by default
+      setAdvancedSelected(new Set(res.map(c => c.cnpj)));
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao filtrar contatos.");
+    } finally {
+      setIsFiltering(false);
+    }
+  };
+
+  const handleAdicionarSelecionadosAvancado = () => {
+    const toAdd = advancedResults.filter(c => advancedSelected.has(c.cnpj));
+    if (toAdd.length === 0) return;
+
+    setContatosSelecionados((prev) => {
+      const novafila = [...prev];
+      toAdd.forEach((c) => {
+        const jaExiste = novafila.some((ex) => ex.cnpj.replace(/\D/g, "") === c.cnpj.replace(/\D/g, ""));
+        if (!jaExiste) {
+          novafila.push({
+            cnpj: c.cnpj,
+            telefone: c.telefone,
+            email: c.email
+          });
+        }
+      });
+      return novafila;
+    });
+
+    setShowAdvancedFilters(false);
+    setAdvancedResults([]);
+    setAdvancedSelected(new Set());
+    setFilterCiclo("");
+    setFilterEstado("");
+    setFilterStatus("todos");
   };
 
   const handleAdicionarContato = (contato: ContatoInput) => {
@@ -580,6 +641,100 @@ export default function CentralDisparosPage() {
                   </div>
                 )}
               </label>
+            </div>
+
+            {/* Filtros Avançados */}
+            <div className="disparo-field">
+              <label className="disparo-label cursor-pointer flex justify-between items-center" onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}>
+                <span className="flex items-center gap-2">
+                  <Filter size={14} />
+                  Filtro Avançado da Base
+                </span>
+                <ChevronDown size={14} className={`transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
+              </label>
+              
+              {showAdvancedFilters && (
+                <div className="bg-[var(--bg-card)] border border-[var(--border-color)] p-4 rounded-lg flex flex-col gap-3 mt-2">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-xs text-[var(--fg-dim)] mb-1 block">Ciclo</label>
+                      <select className="input w-full text-sm py-1 px-2 h-8" value={filterCiclo} onChange={e => setFilterCiclo(e.target.value)}>
+                        <option value="">Todos</option>
+                        {ciclosList.map(c => (
+                          <option key={c.id} value={c.id}>{c.nome}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-[var(--fg-dim)] mb-1 block">Status</label>
+                      <select className="input w-full text-sm py-1 px-2 h-8" value={filterStatus} onChange={e => setFilterStatus(e.target.value as any)}>
+                        <option value="todos">Todos</option>
+                        <option value="ativo">Ativos</option>
+                        <option value="inativo">Inativos</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-[var(--fg-dim)] mb-1 block">Estado</label>
+                      <select className="input w-full text-sm py-1 px-2 h-8" value={filterEstado} onChange={e => setFilterEstado(e.target.value)}>
+                        <option value="">Todos</option>
+                        {estadosList.map(est => (
+                          <option key={est} value={est}>{est}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <button 
+                    className="btn btn-primary w-full h-8 flex justify-center items-center text-sm mt-1" 
+                    onClick={handleFiltrarBaseAvancado}
+                    disabled={isFiltering}
+                  >
+                    {isFiltering ? <RefreshCw size={14} className="animate-spin mr-2" /> : <Search size={14} className="mr-2" />}
+                    Pesquisar Base
+                  </button>
+
+                  {advancedResults.length > 0 && (
+                    <div className="mt-3 border-t border-[var(--border-color)] pt-3">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs font-semibold text-[var(--fg-muted)]">Resultados: {advancedResults.length}</span>
+                        <button className="text-xs text-blue-400 hover:text-blue-300" onClick={() => {
+                          if (advancedSelected.size === advancedResults.length) setAdvancedSelected(new Set());
+                          else setAdvancedSelected(new Set(advancedResults.map(c => c.cnpj)));
+                        }}>
+                          {advancedSelected.size === advancedResults.length ? "Desmarcar Todos" : "Marcar Todos"}
+                        </button>
+                      </div>
+                      <div className="max-h-48 overflow-y-auto space-y-1">
+                        {advancedResults.map((c) => (
+                          <label key={c.cnpj} className="flex items-center gap-2 p-1.5 hover:bg-[var(--bg-body)] rounded cursor-pointer transition-colors">
+                            <input 
+                              type="checkbox" 
+                              checked={advancedSelected.has(c.cnpj)}
+                              onChange={(e) => {
+                                const newSet = new Set(advancedSelected);
+                                if (e.target.checked) newSet.add(c.cnpj);
+                                else newSet.delete(c.cnpj);
+                                setAdvancedSelected(newSet);
+                              }}
+                            />
+                            <div className="flex flex-col flex-1 overflow-hidden">
+                              <span className="text-xs font-medium text-white truncate">{c.nome}</span>
+                              <span className="text-[10px] text-[var(--fg-dim)]">{fmtCNPJ(c.cnpj)} • {c.email || c.telefone || 'Sem contato'}</span>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                      <button 
+                        className="btn bg-[var(--success-alpha)] text-[var(--success)] w-full h-8 flex justify-center items-center text-sm mt-2 hover:bg-[var(--success)] hover:text-white transition-colors" 
+                        onClick={handleAdicionarSelecionadosAvancado}
+                        disabled={advancedSelected.size === 0}
+                      >
+                        <Plus size={14} className="mr-2" />
+                        Adicionar {advancedSelected.size} à Fila
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Busca na Base */}

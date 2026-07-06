@@ -235,3 +235,69 @@ function formatCNPJ(raw: string): string {
   if (raw.length !== 14) return raw;
   return `${raw.slice(0, 2)}.${raw.slice(2, 5)}.${raw.slice(5, 8)}/${raw.slice(8, 12)}-${raw.slice(12)}`;
 }
+
+/* ================================================================
+   SERVER ACTION: Filtros Avançados
+   ================================================================ */
+
+export async function buscarCiclosParaFiltro() {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("ciclos_faturamento")
+    .select("id, nome")
+    .order("nome");
+  if (error) throw new Error(`Erro ao buscar ciclos: ${error.message}`);
+  return data || [];
+}
+
+export async function buscarEstadosUnicos() {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("clientes")
+    .select("estado")
+    .not("estado", "is", null);
+
+  if (error) throw new Error(`Erro ao buscar estados: ${error.message}`);
+  
+  const uniqueStates = Array.from(new Set(data.map(d => d.estado?.trim()).filter(Boolean))).sort();
+  return uniqueStates as string[];
+}
+
+export interface FiltrosBase {
+  cicloId?: string;
+  status?: "ativo" | "inativo" | "todos";
+  estado?: string;
+}
+
+export async function buscarContatosPorFiltro(filtros: FiltrosBase): Promise<{ cnpj: string; telefone: string; email: string; nome: string }[]> {
+  const supabase = await createClient();
+  
+  let query = supabase
+    .from("clientes")
+    .select("cnpj, telefone_principal, email_principal, razao_social, nome_fantasia");
+
+  if (filtros.cicloId) {
+    query = query.eq("ciclo_faturamento_id", filtros.cicloId);
+  }
+  if (filtros.estado) {
+    query = query.eq("estado", filtros.estado);
+  }
+  if (filtros.status === "ativo") {
+    query = query.eq("status", true);
+  } else if (filtros.status === "inativo") {
+    query = query.eq("status", false);
+  }
+
+  const { data, error } = await query;
+  
+  if (error) throw new Error(`Erro ao filtrar contatos: ${error.message}`);
+
+  return (data || [])
+    .filter((c) => c.telefone_principal || c.email_principal)
+    .map((c) => ({
+      cnpj: c.cnpj,
+      telefone: c.telefone_principal || "",
+      email: c.email_principal || "",
+      nome: c.nome_fantasia || c.razao_social || "",
+    }));
+}
