@@ -335,6 +335,7 @@ export default function CentralLancamentos() {
     const [zipProcessing, setZipProcessing] = useState(false);
     const [uploadLogs, setUploadLogs] = useState<{ nomeArquivo: string, status: 'pendente' | 'sucesso' | 'erro', mensagem: string }[]>([]);
     const [exportando, setExportando] = useState(false);
+    const [salvandoHistorico, setSalvandoHistorico] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [preFilterEmpresa, setPreFilterEmpresa] = useState("");
     const [nomePastaGCP, setNomePastaGCP] = useState("Notas_Credito");
@@ -957,6 +958,51 @@ export default function CentralLancamentos() {
             alert(`Erro ao exportar: ${err instanceof Error ? err.message : "desconhecido"}`);
         } finally {
             setExportando(false);
+        }
+    };
+
+    /* --- Salvar Histórico no Banco --- */
+    const handleSalvarHistorico = async () => {
+        setSalvandoHistorico(true);
+        try {
+            const { data: loteData, error: loteError } = await supabase
+                .from('lotes_parciais')
+                .insert({
+                    nome_arquivo: fileName || `Lote ${new Date().toLocaleDateString('pt-BR')}`,
+                    total_nfs: totalNF,
+                    total_ncs: totalNC,
+                    qtd_itens: lancamentos.length
+                })
+                .select('id')
+                .single();
+            
+            if (loteError) throw loteError;
+            const loteId = loteData.id;
+
+            const itensParaSalvar = lancamentos.map(l => ({
+                lote_id: loteId,
+                pedido: l.pedido || null,
+                tipo: l.tipo,
+                descricao: l.descricao || null,
+                valor: l.valor,
+                cliente_id: l.lojaIdentificadaId || null,
+                loja_nome_sugerido: l.lojaNomeSugerido || l.nomeContaAzulMatch || l.razaoSocialMatch || "Indefinido",
+                cnpj: l.cnpj || null,
+                periodo_servico: l.periodo_servico || null,
+                numero_nf_gerada: l.numeroNFGerada || null,
+                irrf: l.irrf || 0
+            }));
+
+            const { error: itensError } = await supabase
+                .from('lancamentos_parciais_itens')
+                .insert(itensParaSalvar);
+
+            if (itensError) throw itensError;
+            alert("Lote e lançamentos salvos no histórico com sucesso!");
+        } catch (err: any) {
+            alert(`Erro ao salvar no histórico: ${err.message}`);
+        } finally {
+            setSalvandoHistorico(false);
         }
     };
 
@@ -1982,6 +2028,11 @@ export default function CentralLancamentos() {
                                     style={{ padding: "12px 20px", fontSize: 13 }}>
                                     <SendHorizonal size={16} />
                                     Emitir NC (GCP)
+                                </button>
+                                <button className="btn btn-outline" onClick={handleSalvarHistorico} disabled={salvandoHistorico}
+                                    style={{ padding: "12px 20px", fontSize: 13, borderColor: "var(--border-color)", color: "var(--fg-muted)" }}>
+                                    {salvandoHistorico ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Database size={16} />}
+                                    Salvar Lote no Histórico
                                 </button>
                             </div>
                         </div>
