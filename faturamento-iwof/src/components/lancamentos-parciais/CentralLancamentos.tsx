@@ -43,6 +43,7 @@ import {
     Unlink,
     FileCode,
     Copy,
+    Database,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
