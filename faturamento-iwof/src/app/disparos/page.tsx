@@ -27,8 +27,8 @@ import {
   Phone,
   Building,
   Hash,
-  ArrowRight,
   SkipForward,
+  Mail,
 } from "lucide-react";
 import * as xlsx from "xlsx";
 import {
@@ -110,11 +110,13 @@ export default function CentralDisparosPage() {
   const [contatosBuscados, setContatosBuscados] = useState<ContatoInput[]>([]);
   const [contatosSelecionados, setContatosSelecionados] = useState<ContatoInput[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [canalDisparo, setCanalDisparo] = useState<"whatsapp" | "email">("whatsapp");
 
   // ── SEÇÃO 2: Estúdio de Mensagem ──
   const [mensagem, setMensagem] = useState("");
   const [templates, setTemplates] = useState<Template[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [assuntoEmail, setAssuntoEmail] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // ── SEÇÃO 3: Review de Envio ──
@@ -248,9 +250,11 @@ export default function CentralDisparosPage() {
               k.toLowerCase().includes("celular")
           );
 
-          return {
             cnpj: cnpjKey ? String(row[cnpjKey]).trim() : "",
             telefone: telKey ? String(row[telKey]).trim() : "",
+            email: Object.keys(row).find((k) => k.toLowerCase().includes("email") || k.toLowerCase().includes("e-mail")) 
+                ? String(row[Object.keys(row).find((k) => k.toLowerCase().includes("email") || k.toLowerCase().includes("e-mail"))!]).trim() 
+                : "",
           };
         })
         .filter((c) => c.cnpj);
@@ -296,7 +300,7 @@ export default function CentralDisparosPage() {
 
     setIsProcessing(true);
     try {
-      const result = await processarContatos(contatosSelecionados, selectedLoteId);
+      const result = await processarContatos(contatosSelecionados, selectedLoteId, canalDisparo);
       setDestinatarios(result.destinatarios);
       setIgnorados(result.ignorados);
       setNomeLote(result.nomeLote);
@@ -343,9 +347,13 @@ export default function CentralDisparosPage() {
       alert("Nenhum destinatário para enviar.");
       return;
     }
+    if (canalDisparo === "email" && !assuntoEmail.trim()) {
+      alert("Para envios por e-mail, informe o assunto da mensagem.");
+      return;
+    }
     if (
       !confirm(
-        `Confirmar envio de ${destinatarios.length} mensagens via WhatsApp?`
+        `Confirmar envio de ${destinatarios.length} mensagens via ${canalDisparo.toUpperCase()}?`
       )
     )
       return;
@@ -362,15 +370,15 @@ export default function CentralDisparosPage() {
     abortControllerRef.current = controller;
 
     try {
-      const res = await fetch("/api/whatsapp/disparar", {
+      const apiUrl = canalDisparo === "email" ? "/api/email/disparar" : "/api/whatsapp/disparar";
+      const bodyPayload = canalDisparo === "email" 
+          ? { destinatarios, mensagem, assunto: assuntoEmail, loteId: selectedLoteId, nomeLote }
+          : { destinatarios, mensagem, loteId: selectedLoteId, nomeLote };
+
+      const res = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          destinatarios,
-          mensagem,
-          loteId: selectedLoteId,
-          nomeLote,
-        }),
+        body: JSON.stringify(bodyPayload),
         signal: controller.signal,
       });
 
@@ -466,18 +474,34 @@ export default function CentralDisparosPage() {
       {/* ========= HEADER ========= */}
       <div className="page-header">
         <div className="flex items-center gap-3">
-          <div className="disparo-header-icon">
-            <MessageSquare size={24} />
+          <div className="disparo-header-icon" style={{ background: canalDisparo === 'email' ? 'var(--accent-nf-alpha)' : '' }}>
+            {canalDisparo === 'whatsapp' ? <MessageSquare size={24} /> : <Mail size={24} />}
           </div>
           <div>
             <h1 className="page-title flex items-center gap-2">
               Central de Disparos
-              <span className="disparo-badge-whatsapp">WhatsApp</span>
+              <span className={`disparo-badge-whatsapp ${canalDisparo === 'email' ? 'bg-blue-900 text-blue-300 border-blue-800' : ''}`}>
+                {canalDisparo === 'whatsapp' ? 'WhatsApp' : 'E-mail'}
+              </span>
             </h1>
             <p className="page-description">
-              Envio em massa de notificações de faturamento via Evolution API
+              Envio em massa de notificações {canalDisparo === 'whatsapp' ? 'via Evolution API' : 'via E-mail (Nodemailer)'}
             </p>
           </div>
+        </div>
+        <div className="flex bg-[var(--bg-card)] p-1 rounded-lg border border-[var(--border-color)]">
+           <button 
+             className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${canalDisparo === 'whatsapp' ? 'bg-[var(--success-alpha)] text-[var(--success)]' : 'text-[var(--fg-muted)] hover:text-white'}`}
+             onClick={() => setCanalDisparo('whatsapp')}
+           >
+             WhatsApp
+           </button>
+           <button 
+             className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${canalDisparo === 'email' ? 'bg-[var(--accent-nf-alpha)] text-blue-400' : 'text-[var(--fg-muted)] hover:text-white'}`}
+             onClick={() => setCanalDisparo('email')}
+           >
+             E-mail
+           </button>
         </div>
       </div>
 
@@ -681,8 +705,8 @@ export default function CentralDisparosPage() {
           {/* ── SEÇÃO 2: Estúdio de Mensagem ── */}
           <section className="card disparo-section">
             <div className="disparo-section-header">
-              <div className="disparo-section-icon disparo-section-icon-green">
-                <MessageSquare size={18} />
+              <div className={`disparo-section-icon ${canalDisparo === 'whatsapp' ? 'disparo-section-icon-green' : 'disparo-section-icon-blue'}`}>
+                {canalDisparo === 'whatsapp' ? <MessageSquare size={18} /> : <Mail size={18} />}
               </div>
               <h2 className="disparo-section-title">Estúdio de Mensagem</h2>
             </div>
@@ -730,9 +754,23 @@ export default function CentralDisparosPage() {
               </div>
             </div>
 
+            {/* Assunto Email (Só aparece se canal for email) */}
+            {canalDisparo === "email" && (
+              <div className="disparo-field">
+                <label className="disparo-label">Assunto do E-mail</label>
+                <input
+                  type="text"
+                  className="input w-full"
+                  placeholder="Ex: Fatura disponível para {{nome_fantasia}}"
+                  value={assuntoEmail}
+                  onChange={(e) => setAssuntoEmail(e.target.value)}
+                />
+              </div>
+            )}
+
             {/* TextArea */}
             <div className="disparo-field">
-              <label className="disparo-label">Mensagem</label>
+              <label className="disparo-label">{canalDisparo === "whatsapp" ? "Mensagem" : "Corpo do E-mail (Código HTML)"}</label>
               <textarea
                 ref={textareaRef}
                 className="disparo-textarea"
@@ -752,27 +790,39 @@ export default function CentralDisparosPage() {
             <div className="disparo-field">
               <label className="disparo-label">
                 <Eye size={14} />
-                Preview WhatsApp
+                Preview {canalDisparo === "whatsapp" ? "WhatsApp" : "E-mail"}
               </label>
-              <div className="disparo-preview-container">
-                <div className="disparo-preview-header">
-                  <div className="disparo-preview-avatar">iW</div>
-                  <div>
-                    <span className="text-sm font-semibold text-white">iWof Financeiro</span>
-                    <span className="text-[10px] text-green-400 block">online</span>
-                  </div>
-                </div>
-                <div className="disparo-preview-body">
-                  <div className="disparo-preview-bubble">
-                    <p className="disparo-preview-text whitespace-pre-wrap">
-                      {previewMessage}
-                    </p>
-                    <div className="disparo-preview-meta">
-                      <span>{new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
-                      <span className="disparo-preview-checks">✓✓</span>
+              <div className="disparo-preview-container" style={{ padding: canalDisparo === 'email' ? 0 : undefined, overflow: 'hidden' }}>
+                {canalDisparo === "whatsapp" ? (
+                  <>
+                    <div className="disparo-preview-header">
+                      <div className="disparo-preview-avatar">iW</div>
+                      <div>
+                        <span className="text-sm font-semibold text-white">iWof Financeiro</span>
+                        <span className="text-[10px] text-green-400 block">online</span>
+                      </div>
                     </div>
+                    <div className="disparo-preview-body">
+                      <div className="disparo-preview-bubble">
+                        <p className="disparo-preview-text whitespace-pre-wrap">
+                          {previewMessage}
+                        </p>
+                        <div className="disparo-preview-meta">
+                          <span>{new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
+                          <span className="disparo-preview-checks">✓✓</span>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="w-full h-64 bg-white">
+                     <iframe 
+                       srcDoc={previewMessage} 
+                       style={{ width: '100%', height: '100%', border: 'none' }}
+                       sandbox="allow-same-origin"
+                     />
                   </div>
-                </div>
+                )}
               </div>
             </div>
           </section>

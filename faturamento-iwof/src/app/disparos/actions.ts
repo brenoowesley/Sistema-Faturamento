@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 export interface ContatoInput {
   cnpj: string;
   telefone: string;
+  email?: string;
 }
 
 export interface ContatoProcessado {
@@ -41,7 +42,8 @@ export interface ProcessarContatosResult {
 
 export async function processarContatos(
   contatos: ContatoInput[],
-  loteId: string | null
+  loteId: string | null,
+  canal: "whatsapp" | "email" = "whatsapp"
 ): Promise<ProcessarContatosResult> {
   const supabase = await createClient();
 
@@ -139,6 +141,9 @@ export async function processarContatos(
     const consolData = consolidadoMap.get(rawCnpj);
     const possuiFaturaNoLote = loteId ? !!consolData : true;
 
+    // Email final: prioriza XLSX, senão usa o do banco
+    const emailFinal = contato.email || cliente?.email_principal || "";
+
     const processado: ContatoProcessado = {
       cnpj: rawCnpj,
       telefone: telefoneFinal,
@@ -146,7 +151,7 @@ export async function processarContatos(
       nomeFantasia: cliente?.nome_fantasia || "",
       razaoSocial: cliente?.razao_social || "",
       primeiroNome,
-      emailPrincipal: cliente?.email_principal || "",
+      emailPrincipal: emailFinal,
       telefoneBanco: telefoneBancoRaw,
       divergentPhone,
       encontradoNoBanco: !!cliente,
@@ -158,8 +163,11 @@ export async function processarContatos(
     // Se loteId foi selecionado, só inclui quem tem fatura no lote
     if (loteId && !possuiFaturaNoLote) {
       ignorados.push(processado);
-    } else if (!telefoneFinal) {
-      // Sem telefone = ignorado
+    } else if (canal === "whatsapp" && !telefoneFinal) {
+      // Sem telefone = ignorado no zap
+      ignorados.push(processado);
+    } else if (canal === "email" && !emailFinal) {
+      // Sem e-mail = ignorado no e-mail
       ignorados.push(processado);
     } else {
       destinatarios.push(processado);
@@ -186,7 +194,7 @@ export async function buscarContatosDoBanco(
 
   const { data, error } = await supabase
     .from("clientes")
-    .select("cnpj, telefone_principal, razao_social, nome_fantasia")
+    .select("cnpj, telefone_principal, email_principal, razao_social, nome_fantasia")
     .or(`razao_social.ilike.%${busca}%,nome_fantasia.ilike.%${busca}%,cnpj.ilike.%${busca}%`)
     .eq("status", true)
     .limit(50);
@@ -194,10 +202,11 @@ export async function buscarContatosDoBanco(
   if (error) throw new Error(`Erro ao buscar contatos: ${error.message}`);
 
   return (data || [])
-    .filter((c) => c.telefone_principal)
+    .filter((c) => c.telefone_principal || c.email_principal)
     .map((c) => ({
       cnpj: c.cnpj,
-      telefone: c.telefone_principal!,
+      telefone: c.telefone_principal || "",
+      email: c.email_principal || "",
     }));
 }
 
