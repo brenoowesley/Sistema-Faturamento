@@ -247,8 +247,9 @@ export async function POST(req: NextRequest) {
             const fatorNC = 1 - fatorNF;
 
             const valorIRRF = Number(cons.valor_ir_xml || 0);
-            const valorNC = valorBaseFatura * fatorNC - valorIRRF;
-            const valorNF = valorBaseFatura * fatorNF;
+            const valorNC = valorBaseFatura * fatorNC;
+            const valorNfBruto = valorBaseFatura * fatorNF;
+            const valorNfLiquido = valorNfBruto - valorIRRF;
             const valorLiquido = valorBaseNormal - valorIRRF;
 
             const boletoUnificado = cliente.boleto_unificado ?? true;
@@ -259,7 +260,7 @@ export async function POST(req: NextRequest) {
             // a parcela do boleto sobre valorBaseNormal (com desconto).
             const valorNFParaBoleto = isNordestao
                 ? (valorBaseNormal * fatorNF)
-                : valorNF;
+                : valorNfBruto;
             const finalLiquidoBoletoGCP = valorLiquido;
 
             // ==========================================
@@ -293,7 +294,8 @@ export async function POST(req: NextRequest) {
                 valor_bruto: formatarParaGCP(numBruto),
                 acrescimos: formatarParaGCP(numAcrescimos),
                 descontos: formatarParaGCP(numDescontos),
-                valor_nf_emitida: formatarParaGCP(valorNF),
+                valor_nf_emitida: formatarParaGCP(valorNfBruto),
+                valor_nf_liquida: formatarParaGCP(valorNfLiquido),
                 irrf_presumido: formatarParaGCP(valorIRRF),
                 valor_liquido_boleto: formatarParaGCP(finalLiquidoBoletoGCP),
                 // NORDESTÃO: No PDF, o total exibe bruto + acréscimos (descontos NÃO subtraídos).
@@ -410,6 +412,7 @@ export async function POST(req: NextRequest) {
                                 "IRRF": financeiroPayload.irrf_presumido,
                                 "VALOR_LIQUIDO": financeiroPayload.valor_liquido_boleto,
                                 "NF": financeiroPayload.valor_nf_emitida,
+                                "NF_LIQUIDA": financeiroPayload.valor_nf_liquida,
                                 "NC": financeiroPayload.valor_nc_final,
                                 "PERIODO": financeiroPayload.periodo_custom,
                                 "boleto_unificado": financeiroPayload.boleto_unificado,
@@ -466,6 +469,7 @@ export async function POST(req: NextRequest) {
                                     "IRRF": formatarParaGCP(0),
                                     "VALOR_LIQUIDO": formatarParaGCP(baseFilialVirtual),
                                     "NF": formatarParaGCP(baseFilialVirtual * fatorNF),
+                                    "NF_LIQUIDA": formatarParaGCP(baseFilialVirtual * fatorNF),
                                     "NC": formatarParaGCP(baseFilialVirtual * fatorNC),
                                     "PERIODO": `${formatDataSegura(lote.data_inicio_ciclo)} à ${formatDataSegura(lote.data_fim_ciclo)}`,
                                     "boleto_unificado": financeiroPayload.boleto_unificado
@@ -494,6 +498,7 @@ export async function POST(req: NextRequest) {
                             "IRRF": financeiroPayload.irrf_presumido,
                             "VALOR_LIQUIDO": financeiroPayload.valor_liquido_boleto,
                             "NF": financeiroPayload.valor_nf_emitida,
+                            "NF_LIQUIDA": financeiroPayload.valor_nf_liquida,
                             "NC": financeiroPayload.valor_nc_final,
                             "PERIODO": financeiroPayload.periodo_custom,
                             "boleto_unificado": financeiroPayload.boleto_unificado,

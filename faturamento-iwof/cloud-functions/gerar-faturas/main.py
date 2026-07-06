@@ -246,8 +246,9 @@ def processar_fatura_individual(event, context):
         acrescimo    = parse_brazilian_float(info_loja.get('ACRESCIMO'))
         desconto     = parse_brazilian_float(info_loja.get('DESCONTO'))
         irrf         = parse_brazilian_float(info_loja.get('IRRF'))
-        valor_nf     = parse_brazilian_float(info_loja.get('NF'))
-        valor_nc     = parse_brazilian_float(info_loja.get('NC'))
+        valor_nf         = parse_brazilian_float(info_loja.get('NF'))
+        valor_nf_liquida = parse_brazilian_float(info_loja.get('NF_LIQUIDA'))
+        valor_nc         = parse_brazilian_float(info_loja.get('NC'))
         valor_liquido = parse_brazilian_float(
             info_loja.get('VALOR_LIQUIDO') or info_loja.get('BOLETO')
         )
@@ -256,8 +257,8 @@ def processar_fatura_individual(event, context):
         )
         periodo = info_loja.get('PERIODO', ciclo_mensal)
 
-        # Subtotal = bruto + acréscimos (compatível com template legado)
-        subtotal_val = (valor_bruto + acrescimo) if valor_bruto else (valor_liquido + desconto)
+        # Subtotal apenas bruto para evitar confusão no frontend PDF
+        subtotal_val = valor_bruto
 
         # ─── Helper seguro de acesso a colunas ───────────────────────
         def safe_col(row, idx, fallback="-"):
@@ -294,6 +295,7 @@ def processar_fatura_individual(event, context):
             "subtotal":    fmt(subtotal_val),
             "descontos":   fmt(desconto),
             "NF":          fmt(valor_nf),
+            "NF_LIQUIDA":  fmt(valor_nf_liquida),
             "NC":          fmt(valor_nc),
             "total_geral": fmt(valor_total_pdf),
 
