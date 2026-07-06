@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { ChevronDown, ChevronUp, FileText, Calendar, Box, Database, Receipt, ShieldAlert } from "lucide-react";
+import { ChevronDown, ChevronUp, FileText, Calendar, Box, Database, Receipt, ShieldAlert, Edit2, Check, X as CloseIcon } from "lucide-react";
 import "./historico.css";
 
 interface LoteParcial {
@@ -35,6 +35,10 @@ export default function PainelHistorico() {
     const [expandedLoteId, setExpandedLoteId] = useState<string | null>(null);
     const [itensLote, setItensLote] = useState<ItemParcial[]>([]);
     const [loadingItens, setLoadingItens] = useState(false);
+
+    // Edit states
+    const [editingLoteId, setEditingLoteId] = useState<string | null>(null);
+    const [tempNome, setTempNome] = useState("");
 
     useEffect(() => {
         carregarLotes();
@@ -72,6 +76,32 @@ export default function PainelHistorico() {
         setLoadingItens(false);
     };
 
+    const iniciarEdicao = (e: React.MouseEvent, loteId: string, atual: string) => {
+        e.stopPropagation();
+        setEditingLoteId(loteId);
+        setTempNome(atual || "");
+    };
+
+    const salvarEdicao = async (e: React.MouseEvent | React.KeyboardEvent, loteId: string) => {
+        e.stopPropagation();
+        if (!tempNome.trim()) return;
+        
+        // Optimistic
+        setLotes(prev => prev.map(l => l.id === loteId ? { ...l, nome_arquivo: tempNome } : l));
+        setEditingLoteId(null);
+
+        const { error } = await supabase.from('lotes_parciais').update({ nome_arquivo: tempNome }).eq('id', loteId);
+        if (error) {
+            console.error("Erro ao renomear lote", error);
+            carregarLotes();
+        }
+    };
+
+    const cancelarEdicao = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setEditingLoteId(null);
+    };
+
     const fmtMoeda = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     const fmtData = (isoStr: string) => new Date(isoStr).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -105,7 +135,26 @@ export default function PainelHistorico() {
                                     <div className="gd-card-left">
                                         <h3 className="gd-lote-title">
                                             <FileText size={18} />
-                                            {lote.nome_arquivo || "Lote Sem Nome"}
+                                            {editingLoteId === lote.id ? (
+                                                <div className="gd-edit-wrapper" onClick={e => e.stopPropagation()}>
+                                                    <input 
+                                                        autoFocus
+                                                        value={tempNome}
+                                                        onChange={e => setTempNome(e.target.value)}
+                                                        onKeyDown={e => e.key === 'Enter' && salvarEdicao(e, lote.id)}
+                                                        className="gd-edit-input"
+                                                    />
+                                                    <button onClick={(e) => salvarEdicao(e, lote.id)} className="gd-edit-action gd-action-save"><Check size={14}/></button>
+                                                    <button onClick={cancelarEdicao} className="gd-edit-action gd-action-cancel"><CloseIcon size={14}/></button>
+                                                </div>
+                                            ) : (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                    {lote.nome_arquivo || "Lote Sem Nome"}
+                                                    <button onClick={(e) => iniciarEdicao(e, lote.id, lote.nome_arquivo)} className="gd-edit-btn">
+                                                        <Edit2 size={14} />
+                                                    </button>
+                                                </div>
+                                            )}
                                         </h3>
                                         <div className="gd-lote-meta">
                                             <span><Calendar size={14}/> {fmtData(lote.created_at)}</span>

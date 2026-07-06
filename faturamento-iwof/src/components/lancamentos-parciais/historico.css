@@ -50,10 +50,9 @@
 
 .gd-title {
     font-family: var(--gd-font-title);
-    font-size: 2.2rem;
-    font-weight: 800;
+    font-size: 1.6rem;
+    font-weight: 600;
     margin: 0;
-    letter-spacing: -0.5px;
     background: linear-gradient(to right, #fff, #94a3b8);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -274,3 +273,63 @@
     font-family: var(--gd-font-title);
     font-weight: 500;
 }
+
+/* RENAME LOTE */
+.gd-edit-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(0,0,0,0.2);
+    padding: 4px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.1);
+}
+
+.gd-edit-input {
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-family: var(--gd-font-title);
+    font-size: 1.1rem;
+    font-weight: 700;
+    outline: none;
+    width: 200px;
+}
+
+.gd-edit-btn {
+    background: transparent;
+    border: none;
+    color: var(--gd-text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s;
+    padding: 4px;
+}
+
+h3.gd-lote-title:hover .gd-edit-btn {
+    opacity: 1;
+}
+
+.gd-edit-btn:hover {
+    color: #fff;
+}
+
+.gd-edit-action {
+    background: rgba(255,255,255,0.1);
+    border: none;
+    color: #fff;
+    border-radius: 4px;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.gd-action-save:hover { background: var(--gd-accent-nf); }
+.gd-action-cancel:hover { background: rgba(239, 68, 68, 0.8); }

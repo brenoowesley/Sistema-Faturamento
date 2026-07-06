@@ -337,6 +337,7 @@ export default function CentralLancamentos() {
     const [uploadLogs, setUploadLogs] = useState<{ nomeArquivo: string, status: 'pendente' | 'sucesso' | 'erro', mensagem: string }[]>([]);
     const [exportando, setExportando] = useState(false);
     const [salvandoHistorico, setSalvandoHistorico] = useState(false);
+    const [nomeLote, setNomeLote] = useState("");
     const [searchTerm, setSearchTerm] = useState("");
     const [preFilterEmpresa, setPreFilterEmpresa] = useState("");
     const [nomePastaGCP, setNomePastaGCP] = useState("Notas_Credito");
@@ -969,7 +970,7 @@ export default function CentralLancamentos() {
             const { data: loteData, error: loteError } = await supabase
                 .from('lotes_parciais')
                 .insert({
-                    nome_arquivo: fileName || `Lote ${new Date().toLocaleDateString('pt-BR')}`,
+                    nome_arquivo: nomeLote || fileName || `Lote ${new Date().toLocaleDateString('pt-BR')}`,
                     total_nfs: totalNF,
                     total_ncs: totalNC,
                     qtd_itens: lancamentos.length
@@ -2030,11 +2031,20 @@ export default function CentralLancamentos() {
                                     <SendHorizonal size={16} />
                                     Emitir NC (GCP)
                                 </button>
-                                <button className="btn btn-outline" onClick={handleSalvarHistorico} disabled={salvandoHistorico}
-                                    style={{ padding: "12px 20px", fontSize: 13, borderColor: "var(--border-color)", color: "var(--fg-muted)" }}>
-                                    {salvandoHistorico ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Database size={16} />}
-                                    Salvar Lote no Histórico
-                                </button>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.05)', padding: '4px 8px', borderRadius: 8, border: '1px solid var(--border-color)' }}>
+                                    <input 
+                                        type="text" 
+                                        placeholder="Nome deste Lote (opcional)" 
+                                        value={nomeLote} 
+                                        onChange={(e) => setNomeLote(e.target.value)}
+                                        style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: 13, outline: 'none', width: 180 }}
+                                    />
+                                    <button className="btn btn-outline" onClick={handleSalvarHistorico} disabled={salvandoHistorico}
+                                        style={{ padding: "8px 16px", fontSize: 13, borderColor: "var(--border-color)", color: "var(--fg-muted)" }}>
+                                        {salvandoHistorico ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Database size={16} />}
+                                        Salvar no Histórico
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         {/* Log de importação NFS-e */}
