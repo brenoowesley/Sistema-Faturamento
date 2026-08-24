@@ -27,7 +27,7 @@ export default function RootLayout({
 function LayoutShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const supabase = createClient();
+  const [supabase] = useState(() => createClient());
   const [isVerifyingRoute, setIsVerifyingRoute] = useState(true);
   const isLoginPage = pathname === "/login";
   const isFormularioOnus = pathname.startsWith("/formulario-onus");
@@ -57,6 +57,14 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
           
           if (!isAllowed) {
             router.push("/saques/acompanhamento");
+            return;
+          }
+        }
+
+        if (cargo === "USER") {
+          // Bloquear acesso à gestão de usuários
+          if (pathname.startsWith("/usuarios")) {
+            router.push("/");
             return;
           }
         }

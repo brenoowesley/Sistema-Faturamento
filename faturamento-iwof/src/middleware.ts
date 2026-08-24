@@ -1,8 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// Rota permitida exclusivamente pelo CX que não deve ser bloqueada
-const CX_ALLOWED_PREFIX = "/saques/acompanhamento";
+
 
 export async function middleware(request: NextRequest) {
     const { pathname } = request.nextUrl;
@@ -45,44 +44,7 @@ export async function middleware(request: NextRequest) {
         return NextResponse.redirect(new URL("/login", request.url));
     }
 
-    if (user) {
-        // Buscar o cargo do utilizador
-        const { data: perfil } = await supabase
-            .from("usuarios_perfis")
-            .select("cargo")
-            .eq("id", user.id)
-            .single();
 
-        const cargo = perfil?.cargo || "USER";
-        const role = cargo.toUpperCase();
-
-        // Admin e Aprovador têm acesso total (Bypass)
-        if (role === "ADMIN" || role === "APROVADOR") {
-            return response;
-        }
-
-        // ── Aplicar regras do CX ──────────────────────────────────────────────
-        if (role === "CX") {
-            // CX só pode acessar /saques/acompanhamento e /perfil
-            const isCxAllowed =
-                pathname.startsWith(CX_ALLOWED_PREFIX) ||
-                pathname.startsWith("/perfil");
-
-            if (!isCxAllowed) {
-                return NextResponse.redirect(new URL(CX_ALLOWED_PREFIX, request.url));
-            }
-        }
-
-        // ── Aplicar regras do USER ────────────────────────────────────────────
-        if (role === "USER") {
-            // USER não pode acessar gestão de usuários
-            const isUserBlocked = pathname.startsWith("/usuarios");
-
-            if (isUserBlocked) {
-                return NextResponse.redirect(new URL("/", request.url));
-            }
-        }
-    }
 
     return response;
 }
