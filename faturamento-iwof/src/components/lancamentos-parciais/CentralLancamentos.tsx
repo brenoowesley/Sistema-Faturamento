@@ -849,6 +849,7 @@ export default function CentralLancamentos() {
                     let numeroPDF = "";
                     const nfseMatch =
                         fullText.match(/N[uú]mero\s+da\s+NFS-e[\s:]*(\d+)/i) ||
+                        fullText.match(/N[uú]mero\s+da\s+Nota[\s\S]{0,50}?(\d+)/i) ||
                         fullText.match(/NFS-e\s*[Nn][º°oa]?\s*[:\-]?\s*(\d+)/i) ||
                         fullText.match(/Nota\s+Fiscal\s+de\s+Servi[cç]o.*?n[º°]?\s*(\d+)/i) ||
                         fullText.match(/\bN[º°]\s+(\d{3,})/i);
@@ -1380,7 +1381,7 @@ export default function CentralLancamentos() {
                     }
 
                     // 2. Extrair Número NF
-                    const nfRegex = /Número da NFS-e[\s\S]*?(\d+)/i;
+                    const nfRegex = /N[uú]mero\s+da\s+(?:NFS-e|Nota)[\s\S]{0,50}?(\d+)/i;
                     const nfMatch = fullText.match(nfRegex);
                     if (nfMatch) pdfNf = nfMatch[1];
                 } catch (err) {

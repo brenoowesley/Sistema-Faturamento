@@ -184,7 +184,7 @@ export default function Step2Validacao({ arquivos, setArquivos, onBack, onNext }
                 const pdfData = await pdf.async("uint8array");
                 const texto = await extrairTextoPdf(pdfData);
 
-                const matchNota = texto.match(/Nº da Nota:[\s\|]*0*(\d+)/i) || texto.match(/Número da Nota:\s*(\d+)/i) || texto.match(/Número da NFS-e\s*(\d+)/i);
+                const matchNota = texto.match(/Nº da Nota:[\s\|]*0*(\d+)/i) || texto.match(/N[uú]mero\s+da\s+Nota[\s\S]{0,50}?(\d+)/i) || texto.match(/Número da NFS-e\s*(\d+)/i);
                 const matchCnpj = texto.match(/CPF\/CNPJ\/NIF:[\s\S]*?(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})/i) || texto.match(/CPF\/CNPJ.*?\s(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})/i);
 
                 if (!matchCnpj) {
