@@ -253,6 +253,104 @@ function SearchableSelect({ options, value, onChange, placeholder }: SearchableS
     );
 }
 
+interface MultiSearchableSelectProps {
+    options: ClienteDB[];
+    values: string[];
+    onChange: (values: string[]) => void;
+    placeholder: string;
+}
+
+function MultiSearchableSelect({ options, values, onChange, placeholder }: MultiSearchableSelectProps) {
+    const [searchTerm, setSearchTerm] = useState("");
+    const [isOpen, setIsOpen] = useState(false);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    const filteredOptions = options.filter(o =>
+        (o.nome_conta_azul || o.nome_fantasia || o.razao_social || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (o.cnpj || "").includes(searchTerm)
+    );
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    const toggleOption = (id: string) => {
+        const isSelected = values.includes(id);
+        if (isSelected) {
+            onChange(values.filter(val => val !== id));
+        } else {
+            onChange([...values, id]);
+        }
+    };
+
+    const removeOption = (id: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        onChange(values.filter(val => val !== id));
+    };
+
+    return (
+        <div className="relative" ref={containerRef}>
+            <div
+                className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white p-1 rounded-xl text-sm outline-none cursor-pointer flex flex-wrap gap-1 items-center min-h-[42px]"
+                onClick={() => setIsOpen(true)}
+            >
+                {values.length === 0 && !searchTerm && (
+                    <span className="text-[var(--fg-dim)] px-2 absolute top-[50%] -translate-y-1/2 left-1 pointer-events-none">{placeholder}</span>
+                )}
+                {values.map(val => {
+                    const opt = options.find(o => o.id === val);
+                    if (!opt) return null;
+                    return (
+                        <span key={val} className="bg-[var(--primary)]/20 text-[var(--primary)] text-xs px-2 py-1 rounded flex items-center gap-1 z-10">
+                            {opt.nome_fantasia || opt.razao_social}
+                            <X size={12} className="hover:text-white cursor-pointer" onClick={(e) => removeOption(val, e)} />
+                        </span>
+                    );
+                })}
+                <input
+                    type="text"
+                    className="flex-1 bg-transparent outline-none text-white min-w-[50px] px-2 py-1 z-10"
+                    value={searchTerm}
+                    onChange={(e) => { setSearchTerm(e.target.value); setIsOpen(true); }}
+                />
+            </div>
+
+            {isOpen && (
+                <div className="absolute z-50 w-full mt-1 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-2xl max-h-60 overflow-y-auto overflow-x-hidden animate-in fade-in slide-in-from-top-1">
+                    <div className="p-1">
+                        {filteredOptions.length > 0 ? (
+                            filteredOptions.map(option => {
+                                const isSelected = values.includes(option.id);
+                                return (
+                                    <div
+                                        key={option.id}
+                                        className={`p-2 hover:bg-[var(--primary)]/20 rounded cursor-pointer transition-colors flex items-center justify-between ${isSelected ? 'bg-[var(--primary)]/10 text-[var(--primary)]' : 'text-white'}`}
+                                        onClick={() => toggleOption(option.id)}
+                                    >
+                                        <div>
+                                            <div className="font-medium">{option.nome_conta_azul || option.nome_fantasia || option.razao_social}</div>
+                                            <div className="text-[10px] text-[var(--fg-dim)] font-mono">{option.cnpj}</div>
+                                        </div>
+                                        {isSelected && <CheckCircle2 size={16} className="text-[var(--primary)]" />}
+                                    </div>
+                                )
+                            })
+                        ) : (
+                            <div className="p-4 text-center text-xs text-[var(--fg-dim)]">Nenhuma empresa encontrada</div>
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 interface BatchUploadActionProps {
     onUpload: (files: File[]) => void;
     isLoading: boolean;
@@ -310,6 +408,7 @@ export default function AjustesPage() {
     const [filtroCiclo, setFiltroCiclo] = useState("");
     const [filtroRazaoSocial, setFiltroRazaoSocial] = useState("");
     const [filtroMesAno, setFiltroMesAno] = useState(new Date().toISOString().substring(0, 7));
+    const [filtroLojasId, setFiltroLojasId] = useState<string[]>([]);
     const [relatoriosData, setRelatoriosData] = useState<any[]>([]);
     const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
     const [isGeneratingZip, setIsGeneratingZip] = useState(false);
@@ -1072,7 +1171,9 @@ export default function AjustesPage() {
                 acrescimos: Number(d.acrescimos || 0),
                 descontos: Number(d.descontos || 0),
                 valor_liquido_boleto: Number(d.valor_liquido_boleto || 0)
-            })).sort((a,b) => (a.clientes?.nome_fantasia || "").localeCompare(b.clientes?.nome_fantasia || ""));
+            }))
+            .filter((d: any) => filtroLojasId.length === 0 || filtroLojasId.includes(d.cliente_id))
+            .sort((a: any, b: any) => (a.clientes?.nome_fantasia || "").localeCompare(b.clientes?.nome_fantasia || ""));
 
             setRelatoriosData(validData);
             if (validData.length === 0) alert("Nenhuma loja processada encontrada neste Agrupador para a competência informada.");
@@ -2015,17 +2116,29 @@ export default function AjustesPage() {
 
                         {/* Filtros da Central de Relatórios */}
                         <div className="bg-[var(--bg-card)] p-5 rounded-2xl border border-[var(--border)] shadow-xl flex flex-col gap-6">
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
                                 <div>
                                     <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Agrupador (Razão Social)</label>
                                     <select
                                         className="w-full bg-[var(--bg-main)] border border-[var(--border)] text-white p-2.5 rounded-xl text-sm outline-none focus:border-indigo-500"
                                         value={filtroRazaoSocial}
-                                        onChange={e => setFiltroRazaoSocial(e.target.value)}
+                                        onChange={e => {
+                                            setFiltroRazaoSocial(e.target.value);
+                                            setFiltroLojasId([]); // Reset lojas filter when agrupador changes
+                                        }}
                                     >
                                         <option value="">Selecione uma Empresa-Mãe...</option>
                                         {razoesSociais.map(r => <option key={r} value={r}>{r}</option>)}
                                     </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Lojas (Opcional)</label>
+                                    <MultiSearchableSelect
+                                        options={clientes.filter(c => !filtroRazaoSocial || c.razao_social === filtroRazaoSocial)}
+                                        values={filtroLojasId}
+                                        onChange={setFiltroLojasId}
+                                        placeholder="Todas as lojas..."
+                                    />
                                 </div>
                                 <div>
                                     <label className="text-[10px] uppercase font-bold text-[var(--fg-dim)] tracking-widest mb-2 block">Competência</label>
