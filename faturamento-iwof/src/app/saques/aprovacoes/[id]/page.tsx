@@ -107,6 +107,7 @@ export default function LoteDetalhePage() {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editForm, setEditForm] = useState<Partial<ItemSaque>>({});
     const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
+    const [removedIds, setRemovedIds] = useState<string[]>([]);
     // Ref-based guard para evitar duplo envio antes do re-render do state
     const isApprovingRef = useRef(false);
 
@@ -215,8 +216,9 @@ export default function LoteDetalhePage() {
     }
 
     async function deleteItem(itemId: string) {
-        if (!confirm("Deseja remover este item do envio? Ele não será apagado, mas ficará registrado como BLOQUEADO no histórico do lote.")) return;
-        const motivo = "Removido manualmente na etapa de aprovação.";
+        if (!confirm("Deseja remover este item do envio? Ele ficará salvo como BLOQUEADO no histórico do lote.")) return;
+        const currentItem = items.find((i) => i.id === itemId);
+        const motivo = currentItem?.motivo_bloqueio || "Removido manualmente na etapa de aprovação.";
         const { error } = await supabase
             .from("itens_saque")
             .update({
@@ -234,6 +236,7 @@ export default function LoteDetalhePage() {
                         : i
                 )
             );
+            setRemovedIds((prev) => [...prev, itemId]);
         }
     }
 
@@ -501,7 +504,7 @@ export default function LoteDetalhePage() {
                             </tr>
                         </thead>
                         <tbody>
-                            {items.map((item) => {
+                            {items.filter((item) => !removedIds.includes(item.id)).map((item) => {
                                 const isEditing = editingId === item.id;
                                 const isFailed = item.status_item === "REVISAO" || (!item.transfeera_transfer_id && item.motivo_bloqueio);
                                 return (
@@ -570,10 +573,9 @@ export default function LoteDetalhePage() {
                                                         <button className="btn btn-ghost" style={{ padding: "4px 8px", color: "var(--accent)" }} onClick={() => startEdit(item)} title="Editar"><Edit size={14} /></button>
                                                         <button
                                                             className="btn btn-ghost"
-                                                            style={{ padding: "4px 8px", color: "var(--danger)", opacity: item.status_item === "BLOQUEADO" ? 0.35 : 1 }}
+                                                            style={{ padding: "4px 8px", color: "var(--danger)" }}
                                                             onClick={() => deleteItem(item.id)}
-                                                            disabled={item.status_item === "BLOQUEADO"}
-                                                            title={item.status_item === "BLOQUEADO" ? "Item já bloqueado" : "Remover do envio (Bloquear)"}
+                                                            title="Remover do envio (Manter em Bloqueados)"
                                                         >
                                                             <Trash2 size={14} />
                                                         </button>
