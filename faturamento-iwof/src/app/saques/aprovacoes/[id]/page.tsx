@@ -215,12 +215,25 @@ export default function LoteDetalhePage() {
     }
 
     async function deleteItem(itemId: string) {
-        if (!confirm("Deseja excluir este item? A ação não pode ser desfeita.")) return;
-        const { error } = await supabase.from("itens_saque").delete().eq("id", itemId);
+        if (!confirm("Deseja remover este item do envio? Ele não será apagado, mas ficará registrado como BLOQUEADO no histórico do lote.")) return;
+        const motivo = "Removido manualmente na etapa de aprovação.";
+        const { error } = await supabase
+            .from("itens_saque")
+            .update({
+                status_item: "BLOQUEADO",
+                motivo_bloqueio: motivo,
+            })
+            .eq("id", itemId);
         if (error) {
-            alert("Erro ao excluir: " + error.message);
+            alert("Erro ao bloquear item: " + error.message);
         } else {
-            setItems((prev) => prev.filter((i) => i.id !== itemId));
+            setItems((prev) =>
+                prev.map((i) =>
+                    i.id === itemId
+                        ? { ...i, status_item: "BLOQUEADO", motivo_bloqueio: motivo }
+                        : i
+                )
+            );
         }
     }
 
@@ -319,9 +332,12 @@ export default function LoteDetalhePage() {
     const revisao = items.filter((i) => i.status_item === "REVISAO");
     const bloqueados = items.filter((i) => i.status_item === "BLOQUEADO");
     const totalReal = aprovados.reduce((s, i) => s + Number(i.valor), 0);
+    const totalSolicitadoAprovados = aprovados.reduce((s, i) => s + Number(i.valor_solicitado ?? i.valor ?? 0), 0);
     const totalSolicitado = lote.valor_solicitado_total ?? lote.total_solicitado ?? 0;
-    const receitaFinanceira = lote.receita_financeira ?? (totalSolicitado - totalReal);
-    const valorDevolvido = lote.valor_devolvido ?? 0;
+    const receitaFinanceira = items.length > 0 ? (totalSolicitadoAprovados - totalReal) : (lote.receita_financeira ?? (totalSolicitado - totalReal));
+    const valorDevolvido = items.length > 0
+        ? bloqueados.reduce((s, i) => s + Number(i.valor_solicitado ?? i.valor ?? 0), 0)
+        : (lote.valor_devolvido ?? 0);
 
     const inputStyle: React.CSSProperties = {
         background: "rgba(255,255,255,0.04)",
@@ -552,7 +568,15 @@ export default function LoteDetalhePage() {
                                                 ) : (
                                                     <>
                                                         <button className="btn btn-ghost" style={{ padding: "4px 8px", color: "var(--accent)" }} onClick={() => startEdit(item)} title="Editar"><Edit size={14} /></button>
-                                                        <button className="btn btn-ghost" style={{ padding: "4px 8px", color: "var(--danger)" }} onClick={() => deleteItem(item.id)} title="Excluir"><Trash2 size={14} /></button>
+                                                        <button
+                                                            className="btn btn-ghost"
+                                                            style={{ padding: "4px 8px", color: "var(--danger)", opacity: item.status_item === "BLOQUEADO" ? 0.35 : 1 }}
+                                                            onClick={() => deleteItem(item.id)}
+                                                            disabled={item.status_item === "BLOQUEADO"}
+                                                            title={item.status_item === "BLOQUEADO" ? "Item já bloqueado" : "Remover do envio (Bloquear)"}
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </button>
                                                     </>
                                                 )}
                                             </div>
